@@ -33,6 +33,7 @@ interface Reservation {
   reservation_date?: string; event_id?: string; status: string; token?: string
   reservation_type?: string; flyer_url?: string; invite_message?: string
   payment_status?: string; deposit_cents?: number; observations?: string
+  list_link_sent_at?: string
   list_type?: string; list_custom_value_cents?: number; list_male_value_cents?: number; list_female_value_cents?: number
   events?: { name: string; event_date?: string }
   reservation_items?: ResItem[]
@@ -207,15 +208,20 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     })
   }
 
-  function onFormDateChange(date: string) {
-    setForm(p => ({ ...p, reservation_date: date, location: '' }))
-    loadOccupied(date)
+  // Pulls events for a date and auto-selects the first one (if any)
+  function pullEventsForDate(date: string) {
     supabase.from('events').select('id,name,event_date').eq('house_id', house.id).eq('event_date', date)
       .then(r => {
         const evs = r.data ?? []
         setEventsForDate(evs)
-        if (evs.length === 1) setForm(p => ({ ...p, event_id: evs[0].id }))
+        setForm(p => ({ ...p, event_id: evs.length >= 1 ? evs[0].id : '' }))
       })
+  }
+
+  function onFormDateChange(date: string) {
+    setForm(p => ({ ...p, reservation_date: date, location: '' }))
+    loadOccupied(date)
+    pullEventsForDate(date)
   }
 
   useEffect(() => { loadTypes() }, [house.id])
@@ -281,7 +287,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   }
 
   async function saveRes() {
-    if (!form.name.trim()) return
+    if (!form.name.trim()) { sT(setToast, 'Nome do responsável obrigatório', 'error'); return }
+    if ((form.phone || '').replace(/\D/g, '').length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
     const totalCents = Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
     const depositCents = form.payment_status === 'partial'
       ? Math.round((parseFloat(String(form.deposit_cents)) || 0) * 100)
@@ -353,6 +360,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   function openNew() {
     setEditing(null); setForm(RDEF(selDate)); setFormItems([])
     loadOccupied(selDate)
+    pullEventsForDate(selDate)
     setFormOpen(true)
   }
 
@@ -402,7 +410,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     setGuestList(p => p.filter(g => g.id !== id))
   }
 
-  function sendListLink(r: Reservation) {
+  async function sendListLink(r: Reservation) {
     const url = `https://nightpass-app.vercel.app/lista.html?t=${r.token}`
     const resType = resTypes.find(t => t.id === r.reservation_type)
     const typeLabel = resType ? `${resType.icon} ${resType.name}` : ''
@@ -431,6 +439,15 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
     const ph = (r.phone ?? '').replace(/\D/g, '')
     window.open(`https://wa.me/${ph ? '55' + ph : ''}?text=${encodeURIComponent(lines)}`, '_blank')
+
+    // Marca que o link foi enviado (confirmação de envio)
+    const ts = new Date().toISOString()
+    const { error } = await supabase.from('reservations').update({ list_link_sent_at: ts }).eq('id', r.id)
+    if (!error) {
+      setResList(p => p.map(x => x.id === r.id ? { ...x, list_link_sent_at: ts } : x))
+      setEditing(e => (e && e.id === r.id ? { ...e, list_link_sent_at: ts } : e))
+      sT(setToast, '✅ Link marcado como enviado', 'success')
+    }
   }
 
   const TAB = (active: boolean): React.CSSProperties => ({
@@ -540,7 +557,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             <input style={SL} value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Ex: João Silva" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Celular</label>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Celular *</label>
             <input style={SL} value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="Ex: (11) 99999-9999" />
           </div>
 
@@ -855,7 +872,10 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           <div style={{ gridColumn: 'span 3', display: 'flex', gap: 10 }}>
             <Btn onClick={saveRes} style={{ flex: 1 }}>💾 Salvar</Btn>
             {editing?.token && (
-              <Btn onClick={() => sendListLink(editing)} variant="secondary">📲 Enviar Link</Btn>
+              <Btn onClick={() => sendListLink(editing)} variant="secondary"
+                style={editing.list_link_sent_at ? { background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` } : undefined}>
+                {editing.list_link_sent_at ? '✅ Link enviado · Reenviar' : '📲 Enviar Link'}
+              </Btn>
             )}
             <Btn onClick={() => { setFormOpen(false); setEditing(null); setFormItems([]) }} variant="ghost">Cancelar</Btn>
           </div>
@@ -999,6 +1019,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       {r.events && <span style={{ color: C.acc }}>🎉 {(r.events as { name: string }).name}</span>}
                       {total > 0 && <span style={{ color: C.gold, fontWeight: 700 }}>💰 {fmtCurrency(total)}</span>}
                       {items.length > 0 && <span style={{ color: C.sub }}>📦 {items.length} item{items.length > 1 ? 's' : ''}</span>}
+                      {r.list_link_sent_at && <span style={{ color: C.grn, fontWeight: 600 }}>✓ link enviado</span>}
                     </div>
                     {r.observations && (
                       <div style={{ marginTop: 4, fontSize: 12, color: C.mut, display: 'flex', alignItems: 'flex-start', gap: 5 }}>
@@ -1019,7 +1040,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       </Btn>
                     )}
                     {r.token && r.phone && (
-                      <Btn onClick={() => sendListLink(r)} small variant="secondary">📲</Btn>
+                      <Btn onClick={() => sendListLink(r)} small variant="secondary"
+                        title={r.list_link_sent_at ? `Link enviado em ${new Date(r.list_link_sent_at).toLocaleString('pt-BR')}` : 'Enviar link da lista'}
+                        style={r.list_link_sent_at ? { background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` } : undefined}>
+                        {r.list_link_sent_at ? '📲✓' : '📲'}
+                      </Btn>
                     )}
                     <Btn onClick={() => openGuestPanel(r)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44' }}>👥 Lista</Btn>
                     <Btn onClick={() => editRes(r)} small variant="ghost">✏️</Btn>

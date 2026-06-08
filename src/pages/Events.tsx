@@ -54,6 +54,7 @@ interface ProdReservation {
 }
 
 const GENRES = ['Sertanejo', 'Samba', 'Pagode', 'Forró', 'Funk', 'Eletrônico', 'Axé', 'MPB', 'Pop', 'Rock', 'Outros']
+const AREA_ICONS = ['📋', '🔊', '🎤', '🎚️', '💡', '🍺', '🍸', '🍽️', '👨‍🍳', '🛡️', '🧹', '🎨', '📣', '📸', '🎥', '📄', '⚡', '🚪', '🚻', '🅿️', '🎁', '🪑']
 const REPT = [
   { v: 'none', l: 'Sem repetição' },
   { v: 'weekly', l: 'Semanal' },
@@ -86,6 +87,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [toast, setToast] = useState<ToastState | null>(null)
   const [ldg, setLdg] = useState(true)
   const [selDate, setSelDate] = useState<string | null>(null)
+  const [showArchive, setShowArchive] = useState(false)
   const [calY, setCalY] = useState(new Date().getFullYear())
   const [calM, setCalM] = useState(new Date().getMonth())
 
@@ -208,6 +210,76 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     if (!confirm('Remover tarefa?')) return
     await supabase.from('event_tasks').delete().eq('id', id)
     setProdTasks(p => p.filter(t => t.id !== id))
+  }
+
+  function exportProdCostsCsv() {
+    if (!prodEv) return
+    const rows: string[][] = [['Área', 'Tarefa', 'Responsável', 'Prazo', 'Status', 'Custo Estimado', 'Custo Real']]
+    prodTasks.forEach(t => rows.push([
+      t.area, t.title, t.assignee_name ?? '',
+      t.deadline ? new Date(t.deadline).toLocaleString('pt-BR') : '',
+      t.status === 'done' ? 'Concluída' : 'Pendente',
+      ((t.estimated_cost_cents ?? 0) / 100).toFixed(2).replace('.', ','),
+      ((t.actual_cost_cents ?? 0) / 100).toFixed(2).replace('.', ','),
+    ]))
+    const totEst = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+    const totReal = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
+    rows.push([''])
+    rows.push(['', '', '', '', 'TOTAL', (totEst / 100).toFixed(2).replace('.', ','), (totReal / 100).toFixed(2).replace('.', ',')])
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `producao-${prodEv.name}.csv`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function printProdCosts() {
+    if (!prodEv) return
+    const grouped: Record<string, { icon: string; tasks: EventTask[] }> = {}
+    prodTasks.forEach(t => { if (!grouped[t.area]) grouped[t.area] = { icon: t.area_icon, tasks: [] }; grouped[t.area].tasks.push(t) })
+    const totEst = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+    const totReal = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
+    const fmt = (c: number) => 'R$ ' + (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Produção — ${prodEv.name}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 32px; max-width: 900px; margin: 0 auto; color: #111; }
+      h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: #666; font-size: 13px; margin-bottom: 24px; }
+      h2 { font-size: 14px; color: #444; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin: 22px 0 6px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th { text-align: left; color: #888; font-size: 11px; text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid #eee; }
+      td { padding: 7px 8px; border-bottom: 1px solid #f2f2f2; }
+      td.num, th.num { text-align: right; white-space: nowrap; }
+      .done { color: #999; text-decoration: line-through; }
+      .areatot { font-weight: 700; color: #555; }
+      .grand { margin-top: 26px; border-top: 2px solid #333; padding-top: 12px; display: flex; justify-content: flex-end; gap: 40px; font-size: 15px; }
+      .grand b { font-size: 18px; }
+      .footer { margin-top: 32px; font-size: 12px; color: #999; text-align: center; }
+      @media print { body { padding: 16px; } }
+    </style></head><body>
+    <h1>🏭 Produção — ${prodEv.name}</h1>
+    <div class="sub">📅 ${new Date(prodEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</div>
+    ${Object.entries(grouped).map(([area, { icon, tasks }]) => {
+      const aEst = tasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+      const aReal = tasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
+      return `<h2>${icon} ${area}</h2>
+      <table><thead><tr><th>Tarefa</th><th>Responsável</th><th>Prazo</th><th class="num">Estimado</th><th class="num">Real</th></tr></thead><tbody>
+      ${tasks.map(t => `<tr>
+        <td class="${t.status === 'done' ? 'done' : ''}">${t.title}</td>
+        <td>${t.assignee_name ?? '—'}</td>
+        <td>${t.deadline ? new Date(t.deadline).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+        <td class="num">${fmt(t.estimated_cost_cents ?? 0)}</td>
+        <td class="num">${(t.actual_cost_cents ?? 0) > 0 ? fmt(t.actual_cost_cents ?? 0) : '—'}</td>
+      </tr>`).join('')}
+      <tr class="areatot"><td colspan="3">Subtotal ${area}</td><td class="num">${fmt(aEst)}</td><td class="num">${aReal > 0 ? fmt(aReal) : '—'}</td></tr>
+      </tbody></table>`
+    }).join('')}
+    <div class="grand"><span>Custo estimado: <b>${fmt(totEst)}</b></span>${totReal > 0 ? `<span>Custo real: <b>${fmt(totReal)}</b></span>` : ''}</div>
+    <div class="footer">Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+    <script>window.onload = () => window.print()</script>
+    </body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
   }
 
   function sendTaskWA(task: EventTask) {
@@ -490,6 +562,23 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   function setF(k: string, v: unknown) { setForm(p => ({ ...p, [k]: v })) }
 
+  // Generate future occurrence dates for a repeat rule (excludes the base date)
+  function repeatDates(start: string, rule: string): string[] {
+    if (rule === 'none' || !start) return []
+    const out: string[] = []
+    const horizon = new Date(); horizon.setMonth(horizon.getMonth() + 6)
+    const base = new Date(start + 'T12:00')
+    const stepDays = rule === 'weekly' ? 7 : rule === 'biweekly' ? 14 : 0
+    for (let i = 1; out.length < 26 && i <= 60; i++) {
+      const d = new Date(base)
+      if (rule === 'monthly') d.setMonth(base.getMonth() + i)
+      else d.setDate(base.getDate() + stepDays * i)
+      if (d > horizon) break
+      out.push(d.toISOString().slice(0, 10))
+    }
+    return out
+  }
+
   function save() {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { checkinCount, resCount, id, created_at, artist_fee_cents, artist_fee_type, artist_fee_percent, consumption_cents: _cc, ...formRest } = form as Record<string, unknown>
@@ -506,10 +595,20 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       status: editing ? (form.status ?? 'ativo') : 'ativo',
       updated_at: new Date().toISOString(),
     }
-    const q = editing ? supabase.from('events').update(d).eq('id', editing) : supabase.from('events').insert(d)
-    q.then(r => {
+    if (editing) {
+      supabase.from('events').update(d).eq('id', editing).then(r => {
+        if (r.error) st2('Erro: ' + r.error.message, 'error')
+        else { st2('Atualizado!'); setModal(false); load() }
+      })
+      return
+    }
+    // Create: generate future occurrences if a repeat rule is set
+    const rule = String(form.repeat_rule ?? 'none')
+    const extras = repeatDates(String(form.event_date ?? ''), rule).filter(dt => !eventDates.has(dt))
+    const rows = [d, ...extras.map(dt => ({ ...d, event_date: dt, repeat_rule: 'none' }))]
+    supabase.from('events').insert(rows).then(r => {
       if (r.error) st2('Erro: ' + r.error.message, 'error')
-      else { st2(editing ? 'Atualizado!' : 'Criado!'); setModal(false); load() }
+      else { st2(extras.length > 0 ? `Criado! +${extras.length} eventos repetidos` : 'Criado!'); setModal(false); load() }
     })
   }
 
@@ -566,7 +665,13 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const eventDates = new Set(events.map(e => e.event_date))
   const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
 
-  const filteredEvents = selDate ? events.filter(e => e.event_date === selDate) : events
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const sortedAsc = [...events].sort((a, b) => a.event_date.localeCompare(b.event_date))
+  const upcomingEvents = sortedAsc.filter(e => e.event_date >= todayStr)
+  const pastEvents = [...sortedAsc.filter(e => e.event_date < todayStr)].reverse()
+  const filteredEvents = selDate
+    ? sortedAsc.filter(e => e.event_date === selDate)
+    : showArchive ? pastEvents : upcomingEvents
   const inp = { style: { width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 13, minHeight: 40, fontFamily: 'inherit', boxSizing: 'border-box' as const } }
 
   if (ldg) return <div style={{ padding: 60, textAlign: 'center', color: C.mut }}>Carregando...</div>
@@ -807,27 +912,129 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             {prodTab === 'tasks' && (() => {
               const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
               prodTasks.forEach(t => { if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }; areas[t.area].tasks.push(t) })
+              const [formArea, formIcon] = (taskFormArea ?? '').split('|||')
+              const totEst = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+              const totReal = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
+              const sInp = { ...inp.style, minHeight: 34, padding: '6px 10px' }
+              const resetTaskForm = () => { setTaskFormArea(null); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }
+
+              const taskFormBlock = (area: string, icon: string) => (
+                <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: 10, marginTop: 6, marginBottom: 8, display: 'grid', gap: 6 }}>
+                  <input style={sInp} value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Tarefa (ex: Locar PA + técnico)" autoFocus />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    <input style={sInp} value={taskForm.assignee_name} onChange={e => setTaskForm(p => ({ ...p, assignee_name: e.target.value }))} placeholder="Responsável" />
+                    <input style={sInp} value={taskForm.assignee_phone} onChange={e => setTaskForm(p => ({ ...p, assignee_phone: e.target.value }))} placeholder="WhatsApp" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    <input type="datetime-local" style={sInp} value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} />
+                    <input type="number" step="0.01" min="0" style={sInp} value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Custo est. R$" />
+                  </div>
+                  <textarea style={{ ...sInp, height: 40, resize: 'vertical' as const }} value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Observação (opcional)" />
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => addProdTask(area, icon)} style={{ flex: 1, background: '#f59e0b', border: 'none', borderRadius: 6, padding: '7px 0', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Adicionar tarefa</button>
+                    <button onClick={resetTaskForm} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
+                  </div>
+                </div>
+              )
+
               return (
                 <div style={{ flex: 1 }}>
-                  {Object.entries(areas).map(([area, { icon, tasks }]) => (
-                    <div key={area} style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-                        <span>{icon} {area}</span>
-                        <span style={{ color: C.brd }}>{tasks.filter(t => t.status === 'done').length}/{tasks.length}</span>
+                  {/* Add area */}
+                  {!addingArea ? (
+                    <button onClick={() => { setAddingArea(true); setNewAreaName(''); setNewAreaIcon('📋') }} style={{ width: '100%', background: '#f59e0b15', border: '1px dashed #f59e0b55', borderRadius: 8, padding: '8px 0', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginBottom: 12 }}>+ Adicionar área</button>
+                  ) : (
+                    <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: 10, marginBottom: 12 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                        {AREA_ICONS.map(ic => (
+                          <button key={ic} onClick={() => setNewAreaIcon(ic)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${newAreaIcon === ic ? '#f59e0b' : C.brd}`, background: newAreaIcon === ic ? '#f59e0b22' : 'transparent', fontSize: 15, cursor: 'pointer' }}>{ic}</button>
+                        ))}
                       </div>
-                      {tasks.map(t => (
-                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                          <button onClick={() => toggleProdTask(t)} style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${t.status === 'done' ? '#10b981' : C.brd}`, background: t.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 10, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {t.status === 'done' ? '✓' : ''}
-                          </button>
-                          <span style={{ flex: 1, fontSize: 12, color: t.status === 'done' ? C.mut : C.txt, textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>{t.title}</span>
-                          {t.deadline && <span style={{ fontSize: 10, color: C.mut }}>{new Date(t.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
-                          {t.assignee_phone && <button onClick={() => sendTaskWA(t)} style={{ background: 'none', border: 'none', fontSize: 14, cursor: 'pointer', padding: 0 }}>📲</button>}
-                        </div>
-                      ))}
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input style={sInp} value={newAreaName} onChange={e => setNewAreaName(e.target.value)} placeholder="Nome da área (ex: Som & Luz)" autoFocus onKeyDown={e => { if (e.key === 'Enter') addProdArea() }} />
+                        <button onClick={addProdArea} style={{ background: '#f59e0b', border: 'none', borderRadius: 6, padding: '0 14px', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
+                        <button onClick={() => setAddingArea(false)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '0 10px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
+                      </div>
                     </div>
-                  ))}
-                  {prodTasks.length === 0 && <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Nenhuma tarefa. Abra o painel 🏭 Produção para criar áreas e tarefas.</div>}
+                  )}
+
+                  {/* New area (created but no tasks yet) → show its task form */}
+                  {taskFormArea && formArea && !areas[formArea] && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{formIcon} {formArea}</div>
+                      {taskFormBlock(formArea, formIcon)}
+                    </div>
+                  )}
+
+                  {Object.entries(areas).map(([area, { icon, tasks }]) => {
+                    const aEst = tasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+                    return (
+                      <div key={area} style={{ marginBottom: 14 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>{icon} {area}</span>
+                          <span style={{ color: C.mut, fontSize: 10, fontWeight: 600 }}>{tasks.filter(t => t.status === 'done').length}/{tasks.length}{aEst > 0 ? ` · R$ ${(aEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}</span>
+                        </div>
+                        {tasks.map(t => (
+                          <div key={t.id} style={{ borderBottom: `1px solid ${C.brd}22` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
+                              <button onClick={() => toggleProdTask(t)} style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${t.status === 'done' ? '#10b981' : C.brd}`, background: t.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 10, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {t.status === 'done' ? '✓' : ''}
+                              </button>
+                              <span onClick={() => setExpandedTask(expandedTask === t.id ? null : t.id)} style={{ flex: 1, fontSize: 12, color: t.status === 'done' ? C.mut : C.txt, textDecoration: t.status === 'done' ? 'line-through' : 'none', cursor: 'pointer' }}>{t.title}</span>
+                              {(t.estimated_cost_cents ?? 0) > 0 && <span style={{ fontSize: 10, color: C.mut }}>R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(0)}</span>}
+                              {t.deadline && <span style={{ fontSize: 10, color: C.mut }}>{new Date(t.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
+                              {t.assignee_phone && <button onClick={() => sendTaskWA(t)} style={{ background: 'none', border: 'none', fontSize: 14, cursor: 'pointer', padding: 0 }}>📲</button>}
+                            </div>
+                            {expandedTask === t.id && (
+                              <div style={{ padding: '2px 0 8px 26px', display: 'grid', gap: 5, fontSize: 11, color: C.mut }}>
+                                {t.assignee_name && <div>👤 {t.assignee_name}{t.assignee_phone ? ` · ${t.assignee_phone}` : ''}</div>}
+                                {t.description && <div>📝 {t.description}</div>}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span>💰 Est: R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(2)}</span>
+                                  {actualCostEdit?.id === t.id ? (
+                                    <>
+                                      <input type="number" step="0.01" autoFocus value={actualCostEdit.val} onChange={e => setActualCostEdit({ id: t.id, val: e.target.value })} style={{ width: 80, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 6px', color: C.txt, fontSize: 11, fontFamily: 'inherit' }} placeholder="Real R$" />
+                                      <button onClick={() => saveProdActualCost(t.id, actualCostEdit.val)} style={{ background: '#10b981', border: 'none', borderRadius: 5, padding: '3px 8px', color: '#052e1a', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓</button>
+                                      <button onClick={() => setActualCostEdit(null)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 6px', color: C.mut, fontSize: 11, cursor: 'pointer' }}>✕</button>
+                                    </>
+                                  ) : (
+                                    <button onClick={() => setActualCostEdit({ id: t.id, val: t.actual_cost_cents ? String(t.actual_cost_cents / 100) : '' })} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 8px', color: (t.actual_cost_cents ?? 0) > 0 ? '#10b981' : C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                      {(t.actual_cost_cents ?? 0) > 0 ? `Real: R$ ${((t.actual_cost_cents ?? 0) / 100).toFixed(2)}` : '+ custo real'}
+                                    </button>
+                                  )}
+                                  <button onClick={() => deleteProdTask(t.id)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer' }}>🗑</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {taskFormArea && formArea === area ? taskFormBlock(area, icon) : (
+                          <button onClick={() => { setTaskFormArea(area + '|||' + icon); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }} style={{ marginTop: 4, background: 'transparent', border: 'none', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Tarefa</button>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {prodTasks.length === 0 && !addingArea && !taskFormArea && <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Nenhuma área criada ainda. Clique em "+ Adicionar área" para montar a produção do evento.</div>}
+
+                  {/* Cost summary + export */}
+                  {prodTasks.length > 0 && (
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.brd}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ color: C.mut }}>Custo estimado</span>
+                        <span style={{ color: '#f59e0b', fontWeight: 700 }}>R$ {(totEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      {totReal > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                          <span style={{ color: C.mut }}>Custo real</span>
+                          <span style={{ color: '#10b981', fontWeight: 700 }}>R$ {(totReal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                        <button onClick={printProdCosts} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 0', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Planilha</button>
+                        <button onClick={exportProdCostsCsv} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 0', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>📥 CSV</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })()}
@@ -1302,9 +1509,19 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         })()}
       </Modal>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <h1 style={{ color: C.txt, fontSize: 28, fontWeight: 900, margin: 0, letterSpacing: '-0.02em' }}>🎉 Eventos</h1>
         <Btn onClick={openNew} icon="➕">Novo Evento</Btn>
+      </div>
+
+      {/* Próximos / Arquivo */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        {([[false, `📅 Próximos (${upcomingEvents.length})`], [true, `📦 Arquivo (${pastEvents.length})`]] as const).map(([arch, label]) => (
+          <button key={String(arch)} onClick={() => { setShowArchive(arch); setSelDate(null) }}
+            style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${showArchive === arch ? C.acc : C.brd}`, background: showArchive === arch ? C.acc + '22' : 'transparent', color: showArchive === arch ? C.acc : C.mut, fontSize: 13, fontWeight: showArchive === arch ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Calendar strip */}
@@ -1340,7 +1557,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
       {/* Event cards — full width */}
       {filteredEvents.length === 0
-        ? <Card><div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>{selDate ? 'Nenhum evento nesta data' : 'Nenhum evento cadastrado'}</div></Card>
+        ? <Card><div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>{selDate ? 'Nenhum evento nesta data' : showArchive ? 'Nenhum evento no arquivo' : 'Nenhum evento futuro cadastrado'}</div></Card>
         : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
           {filteredEvents.map(ev => (
             <Card key={ev.id}>
