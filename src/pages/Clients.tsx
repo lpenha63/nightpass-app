@@ -8,7 +8,7 @@ import type { House, Client } from '../types'
 
 interface Props { house: House; user: { id: string; email: string }; role: string }
 
-const EMPTY_FORM = { full_name: '', cpf: '', phone: '', birth_date: '', email: '', photo_url: '' }
+const EMPTY_FORM = { full_name: '', cpf: '', phone: '', birth_date: '', email: '', photo_url: '', fingerprint_id: '' }
 
 // ── Birthday types ─────────────────────────────────────────────────────────
 interface ClientWithDays extends Client { daysUntil: number }
@@ -36,6 +36,15 @@ export function ClientsPage({ house, user }: Props) {
   const [bdLoading, setBdLoading] = useState(false)
   const [sendingAll, setSendingAll] = useState(false)
 
+  // Mass WhatsApp state
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkModal, setBulkModal] = useState(false)
+  const [bulkMsg, setBulkMsg] = useState('')
+  const [bulkEventId, setBulkEventId] = useState('')
+  const [events, setEvents] = useState<Array<{ id: string; name: string; event_date: string; flyer_url?: string }>>([])
+  const [sendingBulk, setSendingBulk] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+
   const load = useCallback(() => {
     if (!house) return
     let q = supabase.from('clients').select('*', { count: 'exact' }).eq('house_id', house.id).order('full_name')
@@ -53,6 +62,14 @@ export function ClientsPage({ house, user }: Props) {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { setPage(0) }, [search])
+
+  // Load upcoming events for the bulk invite picker
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    supabase.from('events').select('id,name,event_date,flyer_url').eq('house_id', house.id)
+      .gte('event_date', today).order('event_date')
+      .then(r => setEvents((r.data ?? []) as typeof events))
+  }, [house.id])
 
   // Load birthdays when tab changes or days filter changes
   useEffect(() => {
@@ -82,17 +99,31 @@ export function ClientsPage({ house, user }: Props) {
   }
 
   function openNew() { setEditing(null); setForm(EMPTY_FORM); setModal(true) }
-  function openEdit(c: Client) { setEditing(c); setForm({ full_name: c.full_name, cpf: c.cpf ?? '', phone: c.phone ?? '', birth_date: c.birth_date ?? '', email: (c as any).email ?? '', photo_url: (c as any).photo_url ?? '' }); setModal(true) }
+  function openEdit(c: Client) { setEditing(c); setForm({ full_name: c.full_name, cpf: c.cpf ?? '', phone: c.phone ?? '', birth_date: c.birth_date ?? '', email: c.email ?? '', photo_url: c.photo_url ?? '', fingerprint_id: c.fingerprint_id ?? '' }); setModal(true) }
 
   function save() {
     if (!form.full_name.trim()) { sT(setToast, 'Nome obrigatório', 'error'); return }
-    const data = { full_name: form.full_name, cpf: cn(form.cpf) || null, phone: cn(form.phone) || null, birth_date: form.birth_date || null, email: (form as any).email || null, photo_url: (form as any).photo_url || null, house_id: house.id, status: 'ativo', created_by: user.id }
+    if (cn(form.phone).length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
+    if (!form.birth_date) { sT(setToast, 'Data de nascimento obrigatória', 'error'); return }
+    const data = { full_name: form.full_name, cpf: cn(form.cpf) || null, phone: cn(form.phone), birth_date: form.birth_date, email: form.email || null, photo_url: form.photo_url || null, fingerprint_id: form.fingerprint_id || null, house_id: house.id, status: 'ativo', created_by: user.id }
     const q = editing ? supabase.from('clients').update(data).eq('id', editing.id) : supabase.from('clients').insert(data)
     q.then(r => {
       if (r.error) { sT(setToast, 'Erro: ' + r.error.message, 'error'); return }
       sT(setToast, editing ? '✅ Cliente atualizado!' : '✅ Cliente cadastrado!', 'success')
       setModal(false); load()
     })
+  }
+
+  async function uploadPhoto(file: File) {
+    setUploadingPhoto(true)
+    const ext = file.name.split('.').pop() || 'jpg'
+    const path = `${house.id}/${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('client-photos').upload(path, file, { upsert: true })
+    if (error) { sT(setToast, 'Erro no upload: ' + error.message, 'error'); setUploadingPhoto(false); return }
+    const { data } = supabase.storage.from('client-photos').getPublicUrl(path)
+    setForm(p => ({ ...p, photo_url: data.publicUrl }))
+    setUploadingPhoto(false)
+    sT(setToast, '📸 Foto enviada!', 'success')
   }
 
   function del(c: Client) {
@@ -109,6 +140,50 @@ export function ClientsPage({ house, user }: Props) {
     const nome = c.full_name.split(' ')[0]
     const msg = `🎂 Feliz Aniversário, ${nome}! 🎉\n\nQue seu dia seja repleto de alegria e celebração! 🥳\n\nCom carinho, ${house.name || 'NightPass'}`
     window.open(`https://wa.me/55${ph}?text=${encodeURIComponent(msg)}`, '_blank')
+  }
+
+  function toggleSel(id: string) {
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  function toggleSelAll() {
+    setSelected(prev => {
+      const pageIds = clients.map(c => c.id)
+      const allSel = pageIds.every(id => prev.has(id))
+      const n = new Set(prev)
+      pageIds.forEach(id => allSel ? n.delete(id) : n.add(id))
+      return n
+    })
+  }
+
+  function openBulk() {
+    if (selected.size === 0) { sT(setToast, 'Selecione ao menos 1 cliente', 'warn'); return }
+    setBulkMsg(''); setBulkEventId(''); setBulkModal(true)
+  }
+
+  function applyEventTemplate(eventId: string) {
+    setBulkEventId(eventId)
+    const ev = events.find(e => e.id === eventId)
+    if (!ev) return
+    const dataFmt = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    const link = `${window.location.origin}/e/${ev.id}`
+    setBulkMsg(`Olá {nome}! 🎉\n\nVocê está convidado(a) para *${ev.name}* 🎶\n📅 ${dataFmt}\n\n🎟️ Garanta sua presença: ${link}\n\nTe esperamos! — ${house.name || 'NightPass'}`)
+  }
+
+  async function sendBulkWA() {
+    const recipients = clients.filter(c => selected.has(c.id) && c.phone)
+    // Selection can span pages; warn if some selected aren't on this page
+    if (recipients.length === 0) { sT(setToast, 'Nenhum selecionado com telefone nesta página', 'warn'); return }
+    if (!bulkMsg.trim()) { sT(setToast, 'Escreva uma mensagem', 'warn'); return }
+    if (!confirm(`Disparar para ${recipients.length} cliente(s)? Abrirá uma aba do WhatsApp por contato.`)) return
+    setSendingBulk(true)
+    for (const c of recipients) {
+      const nome = c.full_name.split(' ')[0]
+      const msg = bulkMsg.replace(/\{nome\}/g, nome)
+      window.open(`https://wa.me/55${cn(c.phone ?? '')}?text=${encodeURIComponent(msg)}`, '_blank')
+      await new Promise(r => setTimeout(r, 800))
+    }
+    setSendingBulk(false); setBulkModal(false); setSelected(new Set())
+    sT(setToast, `✅ ${recipients.length} conversas abertas!`, 'success')
   }
 
   async function sendAllBdWA() {
@@ -170,13 +245,22 @@ export function ClientsPage({ house, user }: Props) {
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
             <div style={{ width: 64, height: 64, borderRadius: '50%', background: C.brd, flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
-              {(form as any).photo_url
-                ? <img src={(form as any).photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+              {form.photo_url
+                ? <img src={form.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
                 : '👤'}
             </div>
             <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Foto (URL — opcional)</label>
-              <input {...inp()} value={(form as any).photo_url} onChange={e => setForm(p => ({ ...p, photo_url: e.target.value }))} placeholder="https://..." />
+              <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Foto (opcional)</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <label style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', cursor: 'pointer', fontSize: 13, color: C.mut, minHeight: 44, boxSizing: 'border-box' }}>
+                  {uploadingPhoto ? '⏳ Enviando...' : (form.photo_url ? '🔄 Trocar foto' : '📷 Tirar / enviar foto')}
+                  <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} disabled={uploadingPhoto}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadPhoto(f) }} />
+                </label>
+                {form.photo_url && (
+                  <button onClick={() => setForm(p => ({ ...p, photo_url: '' }))} style={{ background: C.red + '18', border: `1px solid ${C.red}44`, borderRadius: 8, color: C.red, cursor: 'pointer', padding: '0 12px', fontSize: 13 }}>✕</button>
+                )}
+              </div>
             </div>
           </div>
           <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Nome Completo *</label>
@@ -184,16 +268,54 @@ export function ClientsPage({ house, user }: Props) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>CPF</label>
               <input {...inp()} value={fcpf(form.cpf)} onChange={e => setForm(p => ({ ...p, cpf: cn(e.target.value).slice(0, 11) }))} placeholder="000.000.000-00" /></div>
-            <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Celular</label>
+            <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Celular *</label>
               <input {...inp()} value={ftel(form.phone)} onChange={e => setForm(p => ({ ...p, phone: cn(e.target.value).slice(0, 11) }))} placeholder="(00) 00000-0000" /></div>
           </div>
-          <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>E-mail (opcional)</label>
-            <input {...inp()} type="email" value={(form as any).email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@exemplo.com" /></div>
-          <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Nascimento</label>
-            <input type="date" {...inp()} value={form.birth_date} onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Nascimento *</label>
+              <input type="date" {...inp()} value={form.birth_date} onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} /></div>
+            <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>E-mail (opcional)</label>
+              <input {...inp()} type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@exemplo.com" /></div>
+          </div>
+          <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>🔒 ID Biométrico / Digital (opcional)</label>
+            <input {...inp()} value={form.fingerprint_id} onChange={e => setForm(p => ({ ...p, fingerprint_id: e.target.value }))} placeholder="Código do leitor de digital (preenchido pela portaria)" />
+            <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>O leitor físico grava o código aqui. A captura direta pelo leitor depende de integração com o aparelho.</div></div>
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <Btn onClick={save} style={{ flex: 1 }}>💾 Salvar</Btn>
             <Btn onClick={() => setModal(false)} variant="ghost">Cancelar</Btn>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk WhatsApp Modal */}
+      <Modal open={bulkModal} title={`📲 Disparo em massa — ${selected.size} cliente(s)`} onClose={() => setBulkModal(false)}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Convidar para um evento (opcional)</label>
+            <select {...inp()} value={bulkEventId} onChange={e => applyEventTemplate(e.target.value)}>
+              <option value="">— Mensagem livre —</option>
+              {events.map(ev => <option key={ev.id} value={ev.id}>{ev.name} · {fd(ev.event_date)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Mensagem</label>
+            <textarea {...inp({ minHeight: 150, height: 150, resize: 'vertical' as const })} value={bulkMsg} onChange={e => setBulkMsg(e.target.value)} placeholder="Escreva a mensagem... Use {nome} para inserir o primeiro nome de cada cliente." />
+            <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>💡 <code>{'{nome}'}</code> é substituído pelo primeiro nome de cada destinatário. Abre uma aba do WhatsApp por contato.</div>
+          </div>
+          {(() => {
+            const recip = clients.filter(c => selected.has(c.id) && c.phone).length
+            const noPhone = selected.size - clients.filter(c => selected.has(c.id) && c.phone).length
+            return (
+              <div style={{ fontSize: 12, color: C.mut }}>
+                {recip} com telefone nesta página{noPhone > 0 ? ` · ${noPhone} sem telefone (serão ignorados)` : ''}
+              </div>
+            )
+          })()}
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <Btn onClick={sendBulkWA} disabled={sendingBulk} style={{ flex: 1, background: '#25D36622', color: '#25D366', border: '1px solid #25D36644' }}>
+              {sendingBulk ? '⏳ Enviando...' : '📲 Disparar agora'}
+            </Btn>
+            <Btn onClick={() => setBulkModal(false)} variant="ghost">Cancelar</Btn>
           </div>
         </div>
       </Modal>
@@ -227,6 +349,21 @@ export function ClientsPage({ house, user }: Props) {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome, CPF ou celular..."
               style={{ flex: 1, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', color: C.txt, fontSize: 14, minHeight: 44, fontFamily: 'inherit' }} />
           </div>
+
+          {/* Bulk selection bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.mut, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={clients.length > 0 && clients.every(c => selected.has(c.id))} onChange={toggleSelAll} style={{ width: 16, height: 16, accentColor: C.acc, cursor: 'pointer' }} />
+              Selecionar página
+            </label>
+            {selected.size > 0 && <span style={{ color: C.acc, fontSize: 13, fontWeight: 700 }}>{selected.size} selecionado(s)</span>}
+            {selected.size > 0 && <button onClick={() => setSelected(new Set())} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>limpar</button>}
+            <div style={{ flex: 1 }} />
+            <Btn onClick={openBulk} disabled={selected.size === 0} style={{ background: '#25D36622', color: '#25D366', border: '1px solid #25D36644' }}>
+              📲 Disparar WhatsApp ({selected.size})
+            </Btn>
+          </div>
+
           <Card>
             {ldg
               ? <div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>Carregando...</div>
@@ -237,9 +374,10 @@ export function ClientsPage({ house, user }: Props) {
                   const tier = loyalTier(count)
                   return (
                     <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < clients.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+                      <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} style={{ width: 16, height: 16, accentColor: C.acc, cursor: 'pointer', flexShrink: 0 }} />
                       <div style={{ width: 40, height: 40, borderRadius: '50%', background: C.acc + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, overflow: 'hidden', border: `2px solid ${tier.color}44` }}>
-                        {(c as any).photo_url
-                          ? <img src={(c as any).photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        {c.photo_url
+                          ? <img src={c.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
                           : tier.icon}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -247,7 +385,7 @@ export function ClientsPage({ house, user }: Props) {
                         <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
                           {c.cpf ? fcpf(c.cpf) : ''}{c.cpf && c.phone ? ' · ' : ''}{c.phone ? ftel(c.phone) : ''}
                           {c.birth_date ? ` · 🎂 ${fd(c.birth_date)}` : ''}
-                          {(c as any).email ? ` · ${(c as any).email}` : ''}
+                          {c.email ? ` · ${c.email}` : ''}
                         </div>
                       </div>
                       <span style={{ color: tier.color, fontSize: 12, fontWeight: 600, background: tier.color + '18', padding: '3px 8px', borderRadius: 8, flexShrink: 0 }}>
