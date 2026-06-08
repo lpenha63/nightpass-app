@@ -12,6 +12,7 @@ interface BtnProps {
   style?: CSSProperties
   children?: ReactNode
   type?: 'button' | 'submit' | 'reset'
+  title?: string
   'aria-label'?: string
 }
 
@@ -24,6 +25,7 @@ export function Btn({
   style,
   children,
   type = 'button',
+  title,
   'aria-label': ariaLabel,
 }: BtnProps) {
   const isPri = !variant || variant === 'primary'
@@ -48,6 +50,7 @@ export function Btn({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
       aria-label={ariaLabel}
       style={{
         background: bg,
