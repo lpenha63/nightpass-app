@@ -131,6 +131,7 @@ export function CheckinPage({ house, user }: Props) {
   const [showForm, setShowForm] = useState(false)
   const [nc, setNc] = useState({ full_name: '', cpf: '', phone: '', birth_date: '', gender: '' })
   const [recent, setRecent] = useState<RecentCI[]>([])
+  const [ciToday, setCiToday] = useState(0)
   const [payMethod, setPayMethod] = useState('dinheiro')
   const [payAmt, setPayAmt] = useState('')
   const [comanda, setComanda] = useState('')
@@ -239,6 +240,13 @@ export function CheckinPage({ house, user }: Props) {
     const { data } = await supabase.from('checkins').select('*,clients(full_name),events(name)')
       .eq('house_id', house.id).order('created_at', { ascending: false }).limit(10)
     setRecent(data ?? [])
+    // Total de check-ins do dia operacional (antes das 8h conta como ontem)
+    const now = new Date()
+    const opDate = now.getHours() < 8 ? new Date(now.getTime() - 86400000) : now
+    const today = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, '0')}-${String(opDate.getDate()).padStart(2, '0')}`
+    const { count } = await supabase.from('checkins').select('id', { count: 'exact', head: true })
+      .eq('house_id', house.id).gte('created_at', today + 'T00:00:00')
+    setCiToday(count ?? 0)
   }
 
   function prefilledAmount(res: Reservation, g: ReservationGuest): string {
@@ -702,6 +710,27 @@ export function CheckinPage({ house, user }: Props) {
             style={{ padding: '8px 12px', borderRadius: 10, border: `1px solid ${C.brd}`, background: 'transparent', color: C.mut, fontSize: 16, cursor: 'pointer' }}
             title="Configurar tipos de check-in">⚙️</button>
         </div>
+      </div>
+
+      {/* Resumo do dia */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+        {(() => {
+          const pend = reservations.filter(r => r.status !== 'arrived' && r.status !== 'confirmado' && r.status !== 'cancelled')
+          const expectedPeople = pend.reduce((s, r) => s + (r.people_count ?? 0), 0)
+          const cards = [
+            { icon: '✅', label: 'Check-ins hoje', val: String(ciToday), sub: '', color: C.grn },
+            { icon: '🪑', label: 'Reservas aguardando', val: `${expectedPeople} pessoas`, sub: `${pend.length} reservas`, color: C.gold },
+          ]
+          return cards.map((c, i) => (
+            <div key={i} style={{ flex: '1 1 200px', background: C.bg, border: `1px solid ${c.color}33`, borderTop: `3px solid ${c.color}`, borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 26 }}>{c.icon}</span>
+              <div>
+                <div style={{ color: c.color, fontSize: 22, fontWeight: 900, lineHeight: 1 }}>{c.val}</div>
+                <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, marginTop: 3 }}>{c.label}{c.sub ? ` · ${c.sub}` : ''}</div>
+              </div>
+            </div>
+          ))
+        })()}
       </div>
 
       {/* ── PORTARIA ── */}
