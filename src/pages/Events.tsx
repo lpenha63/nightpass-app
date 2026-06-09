@@ -19,6 +19,8 @@ interface EventWithCounts extends Event {
   resCount?: number
   resPeople?: number
   listGuests?: number
+  tasksTotal?: number
+  tasksDone?: number
 }
 
 interface Guest {
@@ -425,6 +427,17 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             ;(gr.data ?? []).forEach(g => { if (g.event_id) gc[g.event_id] = (gc[g.event_id] ?? 0) + 1 })
             setEvents(prev => prev.map(e => ({ ...e, listGuests: gc[e.id] ?? 0 })))
           })
+        supabase.from('event_tasks').select('event_id,status').in('event_id', ids)
+          .then(tr => {
+            const tt: Record<string, number> = {}
+            const td: Record<string, number> = {}
+            ;(tr.data ?? []).forEach(t => {
+              if (!t.event_id) return
+              tt[t.event_id] = (tt[t.event_id] ?? 0) + 1
+              if (t.status === 'done') td[t.event_id] = (td[t.event_id] ?? 0) + 1
+            })
+            setEvents(prev => prev.map(e => ({ ...e, tasksTotal: tt[e.id] ?? 0, tasksDone: td[e.id] ?? 0 })))
+          })
       })
   }
 
@@ -708,6 +721,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const inp = { style: { width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 13, minHeight: 40, fontFamily: 'inherit', boxSizing: 'border-box' as const } }
 
   if (ldg) return <div style={{ padding: 60, textAlign: 'center', color: C.mut }}>Carregando...</div>
+
+  const cbtn = (c: string) => ({ background: c + '1f', color: c, border: `1px solid ${c}40`, justifyContent: 'center' as const, fontWeight: 700 })
 
   const renderExpenses = (list: EventExpense[], ev: EventWithCounts) => {
     const tot = list.reduce((s, e) => s + e.amount_cents, 0)
@@ -1815,17 +1830,36 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                     ? <span style={{ color: C.gold }}>🎤 A combinar</span>
                     : ev.artist_fee_cents ? <span style={{ color: C.gold }}>🎤 {fmtCurrency(ev.artist_fee_cents)}</span> : null}
               </div>
-              {/* Botões — 2 linhas organizadas */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-                <Btn onClick={() => openEdit(ev)} small variant="ghost" style={{ justifyContent: 'center' }}>✏️ Editar</Btn>
-                <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>👥 Lista</Btn>
-                <Btn onClick={() => onGoToReservas ? onGoToReservas(ev.event_date, ev.id) : openRes(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>🪑 Reservas</Btn>
-                <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>👷 Equipe</Btn>
-                <Btn onClick={() => openTickets(ev)} small style={{ background: C.acc + '22', color: C.acc, border: `1px solid ${C.acc}44`, justifyContent: 'center' }}>🎟️ Ingressos</Btn>
-                <Btn onClick={() => openBudget(ev)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44`, justifyContent: 'center' }}>💰 Budget</Btn>
-                <Btn onClick={() => openProd(ev)} small style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', justifyContent: 'center' }}>🏭 Produção</Btn>
-                <Btn onClick={() => openCheck(ev)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44', justifyContent: 'center' }}>📋 Checklist</Btn>
-                <Btn onClick={() => cancelEv(ev)} small variant={ev.status === 'cancelado' ? 'secondary' : 'danger'} style={{ justifyContent: 'center' }}>
+              {/* Checklist — barra de conclusão (abaixo das reservas) */}
+              {(() => {
+                const total = ev.tasksTotal ?? 0
+                const done = ev.tasksDone ?? 0
+                const pct = total > 0 ? Math.round(done / total * 100) : 0
+                const complete = total > 0 && done === total
+                return (
+                  <button onClick={() => openCheck(ev)} title="Abrir checklist de produção" style={{ width: '100%', textAlign: 'left', background: complete ? '#10b98112' : '#7c3aed12', border: `1px solid ${complete ? '#10b98140' : '#7c3aed33'}`, borderRadius: 10, padding: '8px 12px', marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: total > 0 ? 6 : 0 }}>
+                      <span style={{ color: complete ? C.grn : '#a78bfa', fontSize: 12, fontWeight: 700 }}>📋 Checklist</span>
+                      <span style={{ color: complete ? C.grn : C.mut, fontSize: 11, fontWeight: 700 }}>{total > 0 ? `${done}/${total} · ${pct}%` : 'sem tarefas'}</span>
+                    </div>
+                    {total > 0 && (
+                      <div style={{ height: 6, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: complete ? '#10b981' : 'linear-gradient(90deg,#7c3aed,#a78bfa)', borderRadius: 4, transition: 'width .3s' }} />
+                      </div>
+                    )}
+                  </button>
+                )
+              })()}
+              {/* Botões */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <Btn onClick={() => openEdit(ev)} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Editar</Btn>
+                <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={cbtn('#3b82f6')}>👥 Lista</Btn>
+                <Btn onClick={() => onGoToReservas ? onGoToReservas(ev.event_date, ev.id) : openRes(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
+                <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={cbtn('#22d3ee')}>👷 Equipe</Btn>
+                <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎟️ Ingressos</Btn>
+                <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>
+                <Btn onClick={() => openProd(ev)} small variant="secondary" style={cbtn('#f59e0b')}>🏭 Produção</Btn>
+                <Btn onClick={() => cancelEv(ev)} small variant="secondary" style={cbtn(ev.status === 'cancelado' ? '#10b981' : '#ef4444')}>
                   {ev.status === 'cancelado' ? '✅ Reativar' : '❌ Cancelar'}
                 </Btn>
               </div>
