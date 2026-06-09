@@ -848,6 +848,35 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       )
                     })}
 
+                    {/* Nova área recém-criada (ainda sem tarefas) → formulário da 1ª tarefa */}
+                    {(() => {
+                      const [formArea, formIcon] = (taskFormArea ?? '').split('|||')
+                      if (!formArea || areas[formArea]) return null
+                      return (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${C.brd}` }}>
+                            <span style={{ fontSize: 16 }}>{formIcon}</span>
+                            <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{formArea}</span>
+                            <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 700 }}>nova área</span>
+                          </div>
+                          <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '10px 12px' }}>
+                            <input value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Título da 1ª tarefa *" autoFocus onKeyDown={e => e.key === 'Enter' && addProdTask(formArea, formIcon)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 6 }} />
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+                              <input type="datetime-local" value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                              <input value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Valor estimado (R$)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                              <input value={taskForm.assignee_name} onChange={e => setTaskForm(p => ({ ...p, assignee_name: e.target.value }))} placeholder="Responsável (nome)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                              <input value={taskForm.assignee_phone} onChange={e => setTaskForm(p => ({ ...p, assignee_phone: e.target.value }))} placeholder="Celular" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                            </div>
+                            <input value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição / obs (opcional)" style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }} />
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button onClick={() => addProdTask(formArea, formIcon)} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Salvar tarefa</button>
+                              <button onClick={() => setTaskFormArea(null)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
                     {/* Add new area */}
                     {addingArea
                       ? (
