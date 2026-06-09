@@ -622,7 +622,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   function save() {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { checkinCount, resCount, id, created_at, artist_fee_cents, artist_fee_type, artist_fee_percent, consumption_cents: _cc, ...formRest } = form as Record<string, unknown>
+    const { checkinCount, resCount, resPeople, listGuests, tasksTotal, tasksDone, id, created_at, artist_fee_cents, artist_fee_type, artist_fee_percent, consumption_cents: _cc, ...formRest } = form as Record<string, unknown>
     const d = {
       ...formRest,
       house_id: house.id,
@@ -1219,10 +1219,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   {REPT.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
                 </select>
               </div>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🔧 Produção (R$)</label>
-              <input type="number" step="0.01" min="0" {...inp} value={String(form.production_cost_cents ?? 0)} onChange={e => setF('production_cost_cents', e.target.value)} placeholder="0,00" />
             </div>
             {editing && (
               <div>
