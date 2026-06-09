@@ -22,7 +22,7 @@ const NAV: NavItem[] = [
   { id: 'events',     icon: 'calendar-event',   label: 'Eventos' },
   { id: 'reservas',   icon: 'bookmark-check',   label: 'Reservas' },
   { id: 'promoters',  icon: 'person-badge',     label: 'Promoters' },
-  { id: 'freelancers', icon: 'hammer',          label: 'Freelancers' },
+  { id: 'freelancers', icon: 'people-fill',      label: 'Equipe' },
   { id: 'reports',    icon: 'bar-chart-line',   label: 'Relatórios' },
   { id: 'whatsapp',   icon: 'whatsapp',         label: 'WhatsApp' },
   { id: 'users',      icon: 'person-gear',      label: 'Usuários',      adminOnly: true },
