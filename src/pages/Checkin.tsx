@@ -124,7 +124,7 @@ export function CheckinPage({ house, user }: Props) {
   const [search, setSearch] = useState('')
   const [result, setResult] = useState<Client | null>(null)
   const [ciCount, setCiCount] = useState(0)
-  const [events, setEvents] = useState<Array<{ id: string; name: string; event_date: string }>>([])
+  const [events, setEvents] = useState<Array<{ id: string; name: string; event_date: string; price_male_cents?: number; price_female_cents?: number }>>([])
   const [selEv, setSelEv] = useState('bar')
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -471,6 +471,15 @@ export function CheckinPage({ house, user }: Props) {
     pr.then(r => {
       if (r.data) {
         setResult(r.data)
+        // Cliente fora de lista com desconto → preenche o valor padrão do evento (por gênero) para não precisar digitar
+        if (!selTypeId) {
+          const ev = events.find(e => e.id === selEv)
+          if (ev) {
+            const price = (r.data.gender === 'feminino' ? ev.price_female_cents : ev.price_male_cents)
+              ?? ev.price_male_cents ?? ev.price_female_cents ?? 0
+            setPayAmt(price > 0 ? (price / 100).toFixed(2) : '')
+          }
+        }
         supabase.from('checkins').select('id', { count: 'exact', head: true })
           .eq('house_id', house.id).eq('client_id', r.data.id)
           .then(rc => setCiCount(rc.count ?? 0))
@@ -478,6 +487,14 @@ export function CheckinPage({ house, user }: Props) {
         setShowForm(true)
         sT(setToast, 'Cliente não encontrado. Preencha o cadastro abaixo.', 'warn')
         setNc(prev => ({ ...prev, cpf: isCPF ? q : '', phone: isPhone ? q : '' }))
+        // Novo cliente (fora de lista) → valor padrão do evento
+        if (!selTypeId) {
+          const ev = events.find(e => e.id === selEv)
+          if (ev) {
+            const price = ev.price_male_cents ?? ev.price_female_cents ?? 0
+            setPayAmt(price > 0 ? (price / 100).toFixed(2) : '')
+          }
+        }
       }
       setLoading(false)
     })
