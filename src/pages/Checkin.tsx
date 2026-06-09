@@ -173,14 +173,12 @@ export function CheckinPage({ house, user }: Props) {
     const opDate = now.getHours() < 8 ? new Date(now.getTime() - 86400000) : now
     const today = `${opDate.getFullYear()}-${String(opDate.getMonth()+1).padStart(2,'0')}-${String(opDate.getDate()).padStart(2,'0')}`
 
-    supabase.from('events').select('*').eq('house_id', house.id).neq('status', 'cancelado').order('event_date')
+    // Apenas o(s) evento(s) do dia operacional — não é possível fazer check-in em data anterior/posterior
+    supabase.from('events').select('*').eq('house_id', house.id).neq('status', 'cancelado').eq('event_date', today).order('start_time')
       .then(r => {
         const evs = r.data ?? []
         setEvents(evs)
-        if (evs.length === 0) { setSelEv('bar'); return }
-        const todayEv = evs.find(ev => ev.event_date?.slice(0, 10) === today)
-        if (todayEv) setSelEv(todayEv.id)
-        // se não há evento hoje, fica em 'bar' (entrada livre)
+        setSelEv(evs.length > 0 ? evs[0].id : 'bar')
       })
 
     // Carrega tipos de check-in da casa
