@@ -121,8 +121,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [prodEv, setProdEv] = useState<EventWithCounts | null>(null)
   const [prodTasks, setProdTasks] = useState<EventTask[]>([])
   const [prodRes, setProdRes] = useState<ProdReservation[]>([])
-  const [prodTab, setProdTab] = useState<'tasks' | 'freelancers' | 'budget' | 'layout'>('tasks')
+  const [prodTab, setProdTab] = useState<'tasks' | 'checklist' | 'freelancers' | 'budget' | 'layout'>('tasks')
   const [prodFr, setProdFr] = useState<EventFreelancer[]>([])
+  const [addingTeam, setAddingTeam] = useState(false)
   const [addingArea, setAddingArea] = useState(false)
   const [newAreaIcon, setNewAreaIcon] = useState('📋')
   const [newAreaName, setNewAreaName] = useState('')
@@ -138,9 +139,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function removeArtist(i: number) { setArtists(a => a.filter((_, idx) => idx !== i)) }
   function setArtist(i: number, patch: Partial<ArtistEntry>) { setArtists(a => a.map((ar, idx) => idx === i ? { ...ar, ...patch } : ar)) }
 
-  // Checklist modal
+  // Checklist (dentro do painel Produção)
   interface ChecklistItem { id: string; category: string; title: string; done: boolean; sort_order: number }
-  const [checklistEv, setChecklistEv] = useState<EventWithCounts | null>(null)
   const [checklist, setChecklist] = useState<ChecklistItem[]>([])
   const [clForm, setClForm] = useState({ category: 'Equipe', title: '' })
   const CHECKLIST_CATS = ['Equipe','Som & Iluminação','Bebidas & Bar','Alimentação','Decoração','Artistas','Marketing','Documentos','Infraestrutura','Outros']
@@ -155,16 +155,41 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   async function openProd(ev: EventWithCounts) {
-    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([])
-    const [tasksR, resR, frR] = await Promise.all([
+    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setChecklist([]); setAddingTeam(false)
+    const [tasksR, resR, frR, clR] = await Promise.all([
       supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
       supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
         .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled'),
       supabase.from('event_freelancers').select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', ev.id),
+      supabase.from('event_checklist_items').select('*').eq('event_id', ev.id).order('category').order('sort_order'),
     ])
     setProdTasks((tasksR.data ?? []) as EventTask[])
     setProdRes((resR.data ?? []) as ProdReservation[])
     setProdFr((frR.data ?? []) as EventFreelancer[])
+    setChecklist((clR.data ?? []) as ChecklistItem[])
+  }
+
+  async function reloadProdFr() {
+    if (!prodEv) return
+    const { data } = await supabase.from('event_freelancers')
+      .select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', prodEv.id)
+    setProdFr((data ?? []) as EventFreelancer[])
+  }
+
+  async function addProdFreelancer(freelancerId: string) {
+    if (!prodEv) return
+    await supabase.from('event_freelancers').insert({ event_id: prodEv.id, freelancer_id: freelancerId, confirmed: false })
+    await reloadProdFr()
+  }
+
+  async function removeProdFreelancer(id: string) {
+    await supabase.from('event_freelancers').delete().eq('id', id)
+    setProdFr(p => p.filter(f => f.id !== id))
+  }
+
+  async function toggleProdFrConfirmed(fr: EventFreelancer) {
+    await supabase.from('event_freelancers').update({ confirmed: !fr.confirmed }).eq('id', fr.id)
+    setProdFr(p => p.map(f => f.id === fr.id ? { ...f, confirmed: !f.confirmed } : f))
   }
 
   async function addProdArea() {
@@ -317,17 +342,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     window.open(`https://wa.me/55${ph}?text=${encodeURIComponent(lines)}`, '_blank')
   }
 
-  function openChecklist(ev: EventWithCounts) {
-    setChecklistEv(ev); setChecklist([])
-    supabase.from('event_checklist_items').select('*').eq('event_id', ev.id).order('category').order('sort_order')
-      .then(r => setChecklist((r.data ?? []) as ChecklistItem[]))
-  }
-
   async function addClItem() {
-    if (!clForm.title.trim() || !checklistEv) return
+    if (!clForm.title.trim() || !prodEv) return
     const maxOrder = checklist.filter(i => i.category === clForm.category).length
     const { data } = await supabase.from('event_checklist_items').insert({
-      event_id: checklistEv.id, house_id: house.id,
+      event_id: prodEv.id, house_id: house.id,
       category: clForm.category, title: clForm.title.trim(), sort_order: maxOrder,
     }).select().single()
     if (data) { setChecklist(p => [...p, data as ChecklistItem]); setClForm(p => ({ ...p, title: '' })) }
@@ -1601,7 +1620,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <Btn onClick={() => openTickets(ev)} small style={{ background: C.acc + '22', color: C.acc, border: `1px solid ${C.acc}44`, justifyContent: 'center' }}>🎟️ Ingressos</Btn>
                 <Btn onClick={() => openBudget(ev)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44`, justifyContent: 'center' }}>💰 Budget</Btn>
                 <Btn onClick={() => openProd(ev)} small style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', justifyContent: 'center' }}>🏭 Produção</Btn>
-                <Btn onClick={() => openChecklist(ev)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44', justifyContent: 'center' }}>📋 Checklist</Btn>
                 <Btn onClick={() => cancelEv(ev)} small variant={ev.status === 'cancelado' ? 'secondary' : 'danger'} style={{ justifyContent: 'center' }}>
                   {ev.status === 'cancelado' ? '✅ Reativar' : '❌ Cancelar'}
                 </Btn>
@@ -1647,9 +1665,10 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 )
               })()}
               {/* Tabs */}
-              <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
-                {(['tasks', 'freelancers', 'budget'] as const).map(tab => {
-                  const labels = { tasks: '📋 Tarefas', freelancers: `👷 Freelancers (${prodFr.length})`, budget: '💰 Budget' }
+              <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+                {(['tasks', 'checklist', 'freelancers', 'budget'] as const).map(tab => {
+                  const clDone = checklist.filter(i => i.done).length
+                  const labels = { tasks: '📋 Tarefas', checklist: `✅ Checklist${checklist.length ? ` (${clDone}/${checklist.length})` : ''}`, freelancers: `👥 Equipe (${prodFr.length})`, budget: '💰 Budget' }
                   return (
                     <button key={tab} onClick={() => setProdTab(tab)} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${prodTab === tab ? '#f59e0b' : C.brd}`, background: prodTab === tab ? '#f59e0b22' : 'transparent', color: prodTab === tab ? '#f59e0b' : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       {labels[tab]}
@@ -1811,7 +1830,66 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 )
               })()}
 
-              {/* ── TAB: FREELANCERS ── */}
+              {/* ── TAB: CHECKLIST ── */}
+              {prodTab === 'checklist' && (() => {
+                const grouped: Record<string, ChecklistItem[]> = {}
+                checklist.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i) })
+                const done = checklist.filter(i => i.done).length
+                const pct = checklist.length ? Math.round(done / checklist.length * 100) : 0
+                return (
+                  <div>
+                    {/* Add item */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                      <select value={clForm.category} onChange={e => setClForm(p => ({ ...p, category: e.target.value }))}
+                        style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', flexShrink: 0 }}>
+                        {CHECKLIST_CATS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <input value={clForm.title} onChange={e => setClForm(p => ({ ...p, title: e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && addClItem()}
+                        placeholder="Adicionar item... (Enter)"
+                        style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }} />
+                      <button onClick={addClItem}
+                        style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: '#f59e0b', color: '#1a1205', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>➕</button>
+                    </div>
+
+                    {/* Progress + print */}
+                    {checklist.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                        <div style={{ flex: 1, height: 6, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : '#f59e0b', borderRadius: 4 }} />
+                        </div>
+                        <span style={{ fontSize: 11, color: C.mut, fontWeight: 600 }}>{done}/{checklist.length}</span>
+                        <button onClick={() => prodEv && printChecklist(prodEv)} style={{ padding: '5px 12px', borderRadius: 8, border: `1px solid ${C.brd}`, background: 'transparent', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Imprimir</button>
+                      </div>
+                    )}
+
+                    {/* Items grouped by category */}
+                    {checklist.length === 0
+                      ? <div style={{ color: C.mut, textAlign: 'center', padding: '40px 0', fontSize: 13 }}>Nenhum item ainda. Use o campo acima para montar a checklist do evento.</div>
+                      : Object.entries(grouped).map(([cat, items]) => (
+                        <div key={cat} style={{ marginBottom: 16 }}>
+                          <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
+                            {cat} <span style={{ color: C.brd, fontWeight: 400 }}>({items.filter(i => i.done).length}/{items.length})</span>
+                          </div>
+                          {items.map(item => (
+                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                              <button onClick={() => toggleClItem(item.id, !item.done)}
+                                style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${item.done ? '#10b981' : C.brd}`, background: item.done ? '#10b981' : 'transparent', color: '#fff', fontSize: 13, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {item.done ? '✓' : ''}
+                              </button>
+                              <span style={{ flex: 1, color: item.done ? C.mut : C.txt, fontSize: 14, textDecoration: item.done ? 'line-through' : 'none' }}>{item.title}</span>
+                              <button onClick={() => deleteClItem(item.id)}
+                                style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer', padding: '2px 6px', opacity: 0.5 }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                    }
+                  </div>
+                )
+              })()}
+
+              {/* ── TAB: EQUIPE (FREELANCERS) ── */}
               {prodTab === 'freelancers' && (
                 <div>
                   {prodFr.length === 0
@@ -1842,15 +1920,60 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                                   </div>
                               }
                             </div>
+                            <button onClick={() => toggleProdFrConfirmed(fr)} title={fr.confirmed ? 'Confirmado' : 'Pendente'} style={{ background: fr.confirmed ? '#10b98122' : '#ffffff08', border: `1px solid ${fr.confirmed ? '#10b98144' : C.brd}`, borderRadius: 8, padding: '5px 8px', color: fr.confirmed ? '#10b981' : C.mut, fontSize: 13, cursor: 'pointer' }}>{fr.confirmed ? '✅' : '⏳'}</button>
                             <button onClick={() => convocateFrWA(fr)} style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 8, padding: '5px 10px', color: '#25d366', fontSize: 13, cursor: 'pointer' }} title="Convocar via WhatsApp">📲</button>
+                            <button onClick={() => removeProdFreelancer(fr.id)} title="Remover da equipe" style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 8, padding: '5px 8px', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
                           </div>
                         </div>
                       )
                     })
                   }
-                  <div style={{ marginTop: 12, padding: '10px 0', borderTop: `1px solid ${C.brd}`, fontSize: 12, color: C.mut }}>
-                    Gerencie a escala completa no botão <strong style={{ color: C.txt }}>👷 Freelancers</strong> do evento.
-                  </div>
+
+                  {/* Team total */}
+                  {prodFr.length > 0 && (() => {
+                    const frTotal = prodFr.reduce((s, f) => s + ((f as any).custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
+                    return (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, padding: '10px 12px', background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10 }}>
+                        <span style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>💰 Custo da equipe ({prodFr.length})</span>
+                        <span style={{ fontSize: 15, fontWeight: 900, color: '#f59e0b' }}>R$ {(frTotal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Add to team */}
+                  {(() => {
+                    const available = allFreelancers.filter(fr => !prodFr.find(pf => pf.freelancer_id === fr.id))
+                    if (!addingTeam) {
+                      return (
+                        <button onClick={() => setAddingTeam(true)} style={{ width: '100%', background: '#ffffff06', border: `1px dashed ${C.brd}`, borderRadius: 10, padding: '10px', color: C.mut, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 12 }}>
+                          ➕ Adicionar à equipe
+                        </button>
+                      )
+                    }
+                    return (
+                      <div style={{ marginTop: 12, padding: '12px 14px', background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700 }}>Adicionar freelancer</span>
+                          <button onClick={() => setAddingTeam(false)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
+                        </div>
+                        {available.length === 0
+                          ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Freelancers.' : 'Todos os freelancers já estão na equipe.'}</div>
+                          : available.map(fr => (
+                            <div key={fr.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{fr.full_name}</div>
+                                <div style={{ fontSize: 11, color: C.mut }}>
+                                  {(fr.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
+                                  {fr.daily_rate_cents ? ` · ${fmtCurrency(fr.daily_rate_cents)}/dia` : ''}
+                                </div>
+                              </div>
+                              <button onClick={() => addProdFreelancer(fr.id)} style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: 8, padding: '5px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
+                            </div>
+                          ))
+                        }
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
 
@@ -1954,85 +2077,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             </div>
           </div>
         </>
-      )}
-
-      {/* ── Checklist modal ── */}
-      {checklistEv && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 20, width: '100%', maxWidth: 620, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 16px', borderBottom: `1px solid ${C.brd}` }}>
-              <div>
-                <h2 style={{ color: C.txt, fontWeight: 900, fontSize: 18, margin: 0 }}>📋 Checklist — {checklistEv.name}</h2>
-                <div style={{ color: C.mut, fontSize: 12, marginTop: 4 }}>
-                  {checklist.filter(i => i.done).length}/{checklist.length} itens concluídos
-                  {checklist.length > 0 && (
-                    <span style={{ marginLeft: 10 }}>
-                      <span style={{ display: 'inline-block', width: 80, height: 6, background: C.brd, borderRadius: 4, verticalAlign: 'middle', overflow: 'hidden' }}>
-                        <span style={{ display: 'block', height: '100%', background: '#10b981', borderRadius: 4, width: `${Math.round(checklist.filter(i => i.done).length / checklist.length * 100)}%` }} />
-                      </span>
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => printChecklist(checklistEv)}
-                  style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid #7c3aed44`, background: '#7c3aed22', color: '#a78bfa', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  🖨️ Imprimir
-                </button>
-                <button onClick={() => { setChecklistEv(null); setChecklist([]) }}
-                  style={{ background: 'none', border: 'none', color: C.mut, fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>✕</button>
-              </div>
-            </div>
-
-            {/* Add item form */}
-            <div style={{ padding: '14px 24px', borderBottom: `1px solid ${C.brd}`, display: 'flex', gap: 8 }}>
-              <select value={clForm.category} onChange={e => setClForm(p => ({ ...p, category: e.target.value }))}
-                style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', flexShrink: 0 }}>
-                {CHECKLIST_CATS.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <input value={clForm.title} onChange={e => setClForm(p => ({ ...p, title: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && addClItem()}
-                placeholder="Adicionar item... (Enter para confirmar)"
-                style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }} />
-              <button onClick={addClItem}
-                style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: C.acc, color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                ➕
-              </button>
-            </div>
-
-            {/* Items list */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px 24px 20px' }}>
-              {checklist.length === 0
-                ? <div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>Nenhum item. Adicione itens acima.</div>
-                : (() => {
-                  const grouped: Record<string, typeof checklist> = {}
-                  checklist.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i) })
-                  return Object.entries(grouped).map(([cat, items]) => (
-                    <div key={cat} style={{ marginBottom: 18 }}>
-                      <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
-                        {cat} <span style={{ color: C.brd, fontWeight: 400 }}>({items.filter(i => i.done).length}/{items.length})</span>
-                      </div>
-                      {items.map(item => (
-                        <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                          <button onClick={() => toggleClItem(item.id, !item.done)}
-                            style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${item.done ? '#10b981' : C.brd}`, background: item.done ? '#10b981' : 'transparent', color: '#fff', fontSize: 13, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {item.done ? '✓' : ''}
-                          </button>
-                          <span style={{ flex: 1, color: item.done ? C.mut : C.txt, fontSize: 14, textDecoration: item.done ? 'line-through' : 'none' }}>
-                            {item.title}
-                          </span>
-                          <button onClick={() => deleteClItem(item.id)}
-                            style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer', padding: '2px 6px', opacity: 0.5 }}>✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  ))
-                })()
-              }
-            </div>
-          </div>
-        </div>
       )}
 
       <FAB onClick={openNew} icon="➕" title="Novo evento" />
