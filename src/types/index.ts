@@ -24,6 +24,7 @@ export interface Client {
   cpf?: string
   phone?: string
   birth_date?: string
+  gender?: string
   email?: string
   photo_url?: string
   fingerprint_id?: string

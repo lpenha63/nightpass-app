@@ -129,7 +129,7 @@ export function CheckinPage({ house, user }: Props) {
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [nc, setNc] = useState({ full_name: '', cpf: '', phone: '', birth_date: '' })
+  const [nc, setNc] = useState({ full_name: '', cpf: '', phone: '', birth_date: '', gender: '' })
   const [recent, setRecent] = useState<RecentCI[]>([])
   const [payMethod, setPayMethod] = useState('dinheiro')
   const [payAmt, setPayAmt] = useState('')
@@ -472,29 +472,16 @@ export function CheckinPage({ house, user }: Props) {
       if (r.data) {
         setResult(r.data)
         // Cliente fora de lista com desconto → preenche o valor padrão do evento (por gênero) para não precisar digitar
-        if (!selTypeId) {
-          const ev = events.find(e => e.id === selEv)
-          if (ev) {
-            const price = (r.data.gender === 'feminino' ? ev.price_female_cents : ev.price_male_cents)
-              ?? ev.price_male_cents ?? ev.price_female_cents ?? 0
-            setPayAmt(price > 0 ? (price / 100).toFixed(2) : '')
-          }
-        }
+        if (!selTypeId) setPayAmt(eventPriceFor(r.data.gender ?? ''))
         supabase.from('checkins').select('id', { count: 'exact', head: true })
           .eq('house_id', house.id).eq('client_id', r.data.id)
           .then(rc => setCiCount(rc.count ?? 0))
       } else {
         setShowForm(true)
         sT(setToast, 'Cliente não encontrado. Preencha o cadastro abaixo.', 'warn')
-        setNc(prev => ({ ...prev, cpf: isCPF ? q : '', phone: isPhone ? q : '' }))
-        // Novo cliente (fora de lista) → valor padrão do evento
-        if (!selTypeId) {
-          const ev = events.find(e => e.id === selEv)
-          if (ev) {
-            const price = ev.price_male_cents ?? ev.price_female_cents ?? 0
-            setPayAmt(price > 0 ? (price / 100).toFixed(2) : '')
-          }
-        }
+        setNc(prev => ({ ...prev, cpf: isCPF ? q : '', phone: isPhone ? q : '', gender: '' }))
+        // Novo cliente (fora de lista) → valor padrão do evento (masculino como base)
+        if (!selTypeId) setPayAmt(eventPriceFor(''))
       }
       setLoading(false)
     })
@@ -533,13 +520,25 @@ export function CheckinPage({ house, user }: Props) {
       })
   }
 
+  function eventPriceFor(gender: string): string {
+    const ev = events.find(e => e.id === selEv)
+    if (!ev) return ''
+    const price = (gender === 'feminino' ? ev.price_female_cents : ev.price_male_cents) ?? ev.price_male_cents ?? ev.price_female_cents ?? 0
+    return price > 0 ? (price / 100).toFixed(2) : ''
+  }
+
+  function pickNcGender(gender: string) {
+    setNc(p => ({ ...p, gender }))
+    if (!selTypeId) setPayAmt(eventPriceFor(gender))
+  }
+
   function saveNew() {
     if (!nc.full_name || (!nc.cpf && !nc.phone)) {
       sT(setToast, 'Nome e CPF ou celular obrigatórios', 'warn'); return
     }
     supabase.from('clients').insert({
       full_name: nc.full_name, cpf: cn(nc.cpf) || null, phone: cn(nc.phone) || null,
-      birth_date: nc.birth_date || null, house_id: house.id, status: 'ativo', created_by: user.id,
+      birth_date: nc.birth_date || null, gender: nc.gender || null, house_id: house.id, status: 'ativo', created_by: user.id,
     }).select().single().then(r => {
       if (r.error) { sT(setToast, 'Erro: ' + r.error.message, 'error'); return }
       doCheckin(r.data)
@@ -817,6 +816,18 @@ export function CheckinPage({ house, user }: Props) {
                   </div>
                   <input type="date" value={nc.birth_date} onChange={e => setNc(p => ({ ...p, birth_date: e.target.value }))}
                     style={{ background: C.bg2, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, minHeight: 44, fontFamily: 'inherit', width: '100%' }} />
+                  {/* Gênero — define o valor automático do evento */}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {([['masculino', '♂ Masculino', C.acc], ['feminino', '♀ Feminino', '#f472b6']] as const).map(([g, label, col]) => {
+                      const on = nc.gender === g
+                      return (
+                        <button key={g} type="button" onClick={() => pickNcGender(g)}
+                          style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `2px solid ${on ? col : C.brd}`, background: on ? col + '22' : 'transparent', color: on ? col : C.mut, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 44 }}>
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <Btn onClick={saveNew} style={{ flex: 1 }}>💾 Cadastrar e Dar Check-in</Btn>
                     <Btn onClick={() => setShowForm(false)} variant="ghost">Cancelar</Btn>

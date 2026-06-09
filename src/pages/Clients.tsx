@@ -8,7 +8,7 @@ import type { House, Client } from '../types'
 
 interface Props { house: House; user: { id: string; email: string }; role: string }
 
-const EMPTY_FORM = { full_name: '', cpf: '', phone: '', birth_date: '', email: '', photo_url: '', fingerprint_id: '' }
+const EMPTY_FORM = { full_name: '', cpf: '', phone: '', birth_date: '', email: '', photo_url: '', fingerprint_id: '', gender: '' }
 
 // ── Birthday types ─────────────────────────────────────────────────────────
 interface ClientWithDays extends Client { daysUntil: number }
@@ -99,13 +99,13 @@ export function ClientsPage({ house, user }: Props) {
   }
 
   function openNew() { setEditing(null); setForm(EMPTY_FORM); setModal(true) }
-  function openEdit(c: Client) { setEditing(c); setForm({ full_name: c.full_name, cpf: c.cpf ?? '', phone: c.phone ?? '', birth_date: c.birth_date ?? '', email: c.email ?? '', photo_url: c.photo_url ?? '', fingerprint_id: c.fingerprint_id ?? '' }); setModal(true) }
+  function openEdit(c: Client) { setEditing(c); setForm({ full_name: c.full_name, cpf: c.cpf ?? '', phone: c.phone ?? '', birth_date: c.birth_date ?? '', email: c.email ?? '', photo_url: c.photo_url ?? '', fingerprint_id: c.fingerprint_id ?? '', gender: c.gender ?? '' }); setModal(true) }
 
   function save() {
     if (!form.full_name.trim()) { sT(setToast, 'Nome obrigatório', 'error'); return }
     if (cn(form.phone).length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
     if (!form.birth_date) { sT(setToast, 'Data de nascimento obrigatória', 'error'); return }
-    const data = { full_name: form.full_name, cpf: cn(form.cpf) || null, phone: cn(form.phone), birth_date: form.birth_date, email: form.email || null, photo_url: form.photo_url || null, fingerprint_id: form.fingerprint_id || null, house_id: house.id, status: 'ativo', created_by: user.id }
+    const data = { full_name: form.full_name, cpf: cn(form.cpf) || null, phone: cn(form.phone), birth_date: form.birth_date, gender: form.gender || null, email: form.email || null, photo_url: form.photo_url || null, fingerprint_id: form.fingerprint_id || null, house_id: house.id, status: 'ativo', created_by: user.id }
     const q = editing ? supabase.from('clients').update(data).eq('id', editing.id) : supabase.from('clients').insert(data)
     q.then(r => {
       if (r.error) { sT(setToast, 'Erro: ' + r.error.message, 'error'); return }
@@ -276,6 +276,19 @@ export function ClientsPage({ house, user }: Props) {
               <input type="date" {...inp()} value={form.birth_date} onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} /></div>
             <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>E-mail (opcional)</label>
               <input {...inp()} type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@exemplo.com" /></div>
+          </div>
+          <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 6 }}>Gênero</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {([['masculino', '♂ Masculino', C.acc], ['feminino', '♀ Feminino', '#f472b6']] as const).map(([g, label, col]) => {
+                const on = form.gender === g
+                return (
+                  <button key={g} type="button" onClick={() => setForm(p => ({ ...p, gender: on ? '' : g }))}
+                    style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `2px solid ${on ? col : C.brd}`, background: on ? col + '22' : 'transparent', color: on ? col : C.mut, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
           <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>🔒 ID Biométrico / Digital (opcional)</label>
             <input {...inp()} value={form.fingerprint_id} onChange={e => setForm(p => ({ ...p, fingerprint_id: e.target.value }))} placeholder="Código do leitor de digital (preenchido pela portaria)" />
