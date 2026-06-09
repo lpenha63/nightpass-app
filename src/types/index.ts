@@ -119,6 +119,7 @@ export interface Freelancer {
   pix_key?: string
   daily_rate_cents?: number
   work_types: WorkType[]
+  staff_type?: string
   notes?: string
   status: string
   created_at: string

@@ -5,12 +5,7 @@ import { Card, Toast, Btn, Modal, FAB, Pill } from '../components/ui'
 import { fd, fmtCurrency } from '../utils/format'
 import { sT, _err, type ToastState } from '../utils/toast'
 import type { House, Event, ArtistEntry, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
-
-const WORK_LABELS: Record<string, string> = {
-  limpeza: '🧹 Limpeza', cozinha: '👨‍🍳 Cozinha', servicos_gerais: '🔧 Serv. Gerais',
-  garcom: '🍽️ Garçom', cumim: '🥄 Cumim', recepcao: '💁 Recepção', atendente: '🎟️ Atendente',
-  seguranca: '🛡️ Segurança',
-}
+import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 
 interface Props { house: House; onGoToReservas?: (date: string, eventId: string) => void }
 
@@ -101,6 +96,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   // Freelancers
   const [allFreelancers, setAllFreelancers] = useState<Freelancer[]>([])
+  const [workAreas, setWorkAreas] = useState<WorkArea[]>(DEFAULT_AREAS)
+  const wlabel = (key: string) => { const m = areaMeta(workAreas, key); return `${m.icon} ${m.label}` }
   const [evFreelancers, setEvFreelancers] = useState<EventFreelancer[]>([])
   const [frModal, setFrModal] = useState<EventWithCounts | null>(null)
 
@@ -451,6 +448,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   useEffect(() => {
     supabase.from('freelancers').select('*').eq('house_id', house.id).eq('status', 'ativo').order('full_name')
       .then(r => setAllFreelancers((r.data ?? []) as Freelancer[]))
+    supabase.from('work_areas').select('*').eq('house_id', house.id).order('sort_order').order('label')
+      .then(r => { if (r.data && r.data.length) setWorkAreas(r.data as WorkArea[]) })
   }, [house.id])
 
   function loadEvFreelancers(ev: EventWithCounts) {
@@ -1000,7 +999,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               {/* ── TAB: EQUIPE (por área → freelancer) ── */}
               {prodTab === 'freelancers' && (() => {
                 const roleOf = (fr: EventFreelancer) => (fr.role || (fr as any).freelancers?.work_types?.[0] || 'outros')
-                const roleLabel = (r: string) => WORK_LABELS[r] ?? r
+                const roleLabel = (r: string) => wlabel(r)
                 const groups: Record<string, EventFreelancer[]> = {}
                 prodFr.forEach(fr => { const r = roleOf(fr); (groups[r] ||= []).push(fr) })
                 const frTotal = prodFr.reduce((s, f) => s + (f.custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
@@ -1014,7 +1013,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 700, fontSize: 13, color: C.txt }}>{frData?.full_name ?? '—'}</div>
-                          <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>{(frData?.work_types ?? []).map((wt: string) => WORK_LABELS[wt] ?? wt).join(' · ')}</div>
+                          <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>{(frData?.work_types ?? []).map((wt: string) => wlabel(wt)).join(' · ')}</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           {frFeeEdit?.id === fr.id
@@ -1064,8 +1063,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       <div>
                         <div style={{ fontSize: 11, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>➕ ADICIONAR POR ÁREA</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {Object.entries(WORK_LABELS).map(([k, label]) => (
-                            <button key={k} onClick={() => setTeamArea(k)} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 12px', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{label}</button>
+                          {workAreas.map(a => (
+                            <button key={a.key} onClick={() => setTeamArea(a.key)} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 12px', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{a.icon} {a.label}</button>
                           ))}
                         </div>
                       </div>
@@ -1087,7 +1086,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name} {(f.work_types ?? []).includes(teamArea as never) && <span style={{ fontSize: 10, color: '#10b981' }}>• da função</span>}</div>
                                   <div style={{ fontSize: 11, color: C.mut }}>
-                                    {(f.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
+                                    {(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}
                                     {f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}
                                   </div>
                                 </div>
@@ -1427,13 +1426,13 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   {Object.entries(groups).map(([role, members]) => (
                     <div key={role} style={{ marginBottom: 14 }}>
                       <div style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
-                        {WORK_LABELS[role] ?? role} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length})</span>
+                        {wlabel(role)} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length})</span>
                       </div>
                       {members.map(ef => (
                         <div key={ef.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{ef.freelancers?.full_name ?? '—'}</div>
-                            <div style={{ color: C.mut, fontSize: 11 }}>{(ef.freelancers?.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}</div>
+                            <div style={{ color: C.mut, fontSize: 11 }}>{(ef.freelancers?.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}</div>
                           </div>
                           <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 8, background: ef.confirmed ? C.grn + '22' : C.gold + '22', color: ef.confirmed ? C.grn : C.gold, fontWeight: 700 }}>
                             {ef.confirmed ? '✅ Confirmado' : '⏳ Pendente'}
@@ -1721,7 +1720,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <div key={ef.id} style={{ display: 'flex', alignItems: 'center', padding: '3px 0 3px 34px' }}>
                     <div style={{ flex: 1, color: C.mut, fontSize: 12 }}>
                       {ef.freelancers?.full_name}
-                      {ef.freelancers?.work_types?.length ? ` · ${(ef.freelancers.work_types).map(w => WORK_LABELS[w] ?? w).join(', ')}` : ''}
+                      {ef.freelancers?.work_types?.length ? ` · ${(ef.freelancers.work_types).map(w => wlabel(w)).join(', ')}` : ''}
                     </div>
                     <div style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>{fmtCurrency(ef.freelancers?.daily_rate_cents ?? 0)}</div>
                   </div>
