@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, FAB, Pill } from '../components/ui'
 import { fd, fmtCurrency } from '../utils/format'
+import { fmtWAPhone } from '../utils/whatsapp'
 import { sT, _err, type ToastState } from '../utils/toast'
 import type { House, Event, ArtistEntry, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
@@ -162,6 +163,18 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   interface ResView { id: string; name: string; location?: string; people_count?: number; observations?: string; status: string; expected_arrival?: string }
   const [resViewEv, setResViewEv] = useState<EventWithCounts | null>(null)
   const [resViewList, setResViewList] = useState<ResView[]>([])
+
+  // Enviar flyer (broadcast WhatsApp)
+  interface FlyerClient { id: string; full_name: string; phone?: string; gender?: string }
+  const [flyerEv, setFlyerEv] = useState<EventWithCounts | null>(null)
+  const [flyerClients, setFlyerClients] = useState<FlyerClient[]>([])
+  const [flyerSel, setFlyerSel] = useState<Set<string>>(new Set())
+  const [flyerMsg, setFlyerMsg] = useState('')
+  const [flyerLink, setFlyerLink] = useState('')
+  const [flyerSearch, setFlyerSearch] = useState('')
+  const [flyerGender, setFlyerGender] = useState<'all' | 'masculino' | 'feminino'>('all')
+  const [flyerSending, setFlyerSending] = useState(false)
+  const [flyerProgress, setFlyerProgress] = useState({ sent: 0, total: 0 })
 
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
@@ -617,6 +630,73 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       out.push(d.toISOString().slice(0, 10))
     }
     return out
+  }
+
+  async function ensureHouseListToken(ev: EventWithCounts): Promise<string | null> {
+    let promoterId: string | undefined
+    const { data: pr } = await supabase.from('promoters').select('id').eq('house_id', house.id).eq('full_name', 'Lista da Casa').limit(1).maybeSingle()
+    promoterId = pr?.id
+    if (!promoterId) {
+      const { data: np } = await supabase.from('promoters').insert({ house_id: house.id, full_name: 'Lista da Casa', commission_pct: 0, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 }).select('id').single()
+      promoterId = np?.id
+    }
+    if (!promoterId) return null
+    const { data: list } = await supabase.from('promoter_lists').select('id,token').eq('house_id', house.id).eq('event_id', ev.id).eq('promoter_id', promoterId).limit(1).maybeSingle()
+    if (list) {
+      if (list.token) return list.token
+      const token = crypto.randomUUID()
+      await supabase.from('promoter_lists').update({ token }).eq('id', list.id)
+      return token
+    }
+    const token = crypto.randomUUID()
+    await supabase.from('promoter_lists').insert({ house_id: house.id, event_id: ev.id, promoter_id: promoterId, name: 'Lista da Casa', token, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 })
+    return token
+  }
+
+  async function openFlyer(ev: EventWithCounts) {
+    setFlyerEv(ev); setFlyerSel(new Set()); setFlyerSearch(''); setFlyerGender('all'); setFlyerProgress({ sent: 0, total: 0 }); setFlyerClients([])
+    const { data } = await supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).not('phone', 'is', null).order('full_name')
+    setFlyerClients((data ?? []) as FlyerClient[])
+    const token = await ensureHouseListToken(ev)
+    const link = token ? `${window.location.origin}/lista/${token}` : ''
+    setFlyerLink(link)
+    const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!` + (link ? `\n\n✅ Confirme sua presença na lista da casa: ${link}` : '') + `\n\nTe esperamos! 🔥`)
+  }
+
+  async function sendFlyer() {
+    if (!flyerEv) return
+    const { data: cfg } = await supabase.from('whatsapp_config').select('*').eq('house_id', house.id).limit(1).single()
+    if (!cfg?.active) { st2('Ative a integração WhatsApp em Configurações para enviar.', 'error'); return }
+    const sel = flyerClients.filter(c => flyerSel.has(c.id) && c.phone)
+    if (sel.length === 0) { st2('Selecione ao menos um contato.', 'warn'); return }
+    setFlyerSending(true); setFlyerProgress({ sent: 0, total: sel.length })
+    let ok = 0
+    for (const c of sel) {
+      const fph = fmtWAPhone(c.phone ?? '')
+      if (fph) {
+        const msg = flyerMsg.replace(/\{\{nome\}\}/g, (c.full_name || '').split(' ')[0])
+        const useMedia = !!flyerEv.flyer_url
+        const body = useMedia
+          ? { number: fph, mediatype: 'image', media: flyerEv.flyer_url, caption: msg }
+          : { number: fph, text: msg }
+        try {
+          const resp = await fetch(`${cfg.api_url}/message/${useMedia ? 'sendMedia' : 'sendText'}/${cfg.instance_name}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.api_key }, body: JSON.stringify(body),
+          })
+          const res = await resp.json()
+          const sent = !!(res?.key || res?.status === 'success' || res?.status === 'PENDING')
+          if (sent) ok++
+          await supabase.from('whatsapp_logs').insert({ house_id: house.id, recipient_phone: fph, recipient_name: c.full_name, message_type: 'event_flyer', message_body: msg, status: sent ? 'sent' : 'failed', error_msg: sent ? null : JSON.stringify(res), related_client_id: c.id, related_event_id: flyerEv.id, sent_at: new Date().toISOString() })
+        } catch (e: any) {
+          await supabase.from('whatsapp_logs').insert({ house_id: house.id, recipient_phone: fph, recipient_name: c.full_name, message_type: 'event_flyer', message_body: msg, status: 'failed', error_msg: e?.message ?? 'erro', related_client_id: c.id, related_event_id: flyerEv.id })
+        }
+      }
+      setFlyerProgress(pr => ({ ...pr, sent: pr.sent + 1 }))
+      await new Promise(r => setTimeout(r, 500))
+    }
+    setFlyerSending(false)
+    st2(`Flyer enviado para ${ok}/${sel.length} contato(s).`, ok > 0 ? 'success' : 'error')
   }
 
   function save() {
@@ -1647,6 +1727,61 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         })()}
       </Modal>
 
+      {/* Enviar flyer */}
+      <Modal open={!!flyerEv} title={`📤 Enviar flyer — ${flyerEv?.name ?? ''}`} onClose={() => { if (!flyerSending) { setFlyerEv(null); setFlyerClients([]) } }} wide>
+        {flyerEv && (() => {
+          const filtered = flyerClients.filter(c => {
+            const mg = flyerGender === 'all' || (c.gender ?? '') === flyerGender
+            const ms = !flyerSearch || c.full_name.toLowerCase().includes(flyerSearch.toLowerCase()) || (c.phone ?? '').includes(flyerSearch)
+            return mg && ms
+          })
+          const allSel = filtered.length > 0 && filtered.every(c => flyerSel.has(c.id))
+          const toggle = (id: string) => setFlyerSel(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+          const toggleAll = () => setFlyerSel(prev => { const n = new Set(prev); if (allSel) filtered.forEach(c => n.delete(c.id)); else filtered.forEach(c => n.add(c.id)); return n })
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                {flyerEv.flyer_url
+                  ? <img src={flyerEv.flyer_url} alt="flyer" style={{ width: '100%', borderRadius: 10, marginBottom: 10, maxHeight: 280, objectFit: 'cover' }} />
+                  : <div style={{ background: C.bg, border: `1px dashed ${C.brd}`, borderRadius: 10, padding: 20, textAlign: 'center', color: C.mut, fontSize: 13, marginBottom: 10 }}>Sem flyer cadastrado — será enviado só o texto.</div>}
+                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Mensagem (use {'{{nome}}'} para o primeiro nome)</label>
+                <textarea value={flyerMsg} onChange={e => setFlyerMsg(e.target.value)} style={{ width: '100%', minHeight: 150, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginTop: 4, boxSizing: 'border-box' }} />
+                {flyerLink && <div style={{ fontSize: 11, color: C.mut, marginTop: 6, wordBreak: 'break-all' }}>🔗 Confirmação de presença: <span style={{ color: '#a78bfa' }}>{flyerLink}</span></div>}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <input value={flyerSearch} onChange={e => setFlyerSearch(e.target.value)} placeholder="🔍 Buscar contato" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 8 }} />
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+                  {([['all', 'Todos'], ['masculino', '♂'], ['feminino', '♀']] as const).map(([v, l]) => (
+                    <button key={v} onClick={() => setFlyerGender(v)} style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${flyerGender === v ? C.acc : C.brd}`, background: flyerGender === v ? C.acc + '22' : 'transparent', color: flyerGender === v ? C.acc : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>{l}</button>
+                  ))}
+                  <button onClick={toggleAll} style={{ marginLeft: 'auto', padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.brd}`, background: 'transparent', color: C.sub, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{allSel ? 'Limpar' : 'Todos'}</button>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', maxHeight: 320, border: `1px solid ${C.brd}`, borderRadius: 8 }}>
+                  {filtered.length === 0
+                    ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: 20 }}>Nenhum contato com telefone.</div>
+                    : filtered.map(c => {
+                      const on = flyerSel.has(c.id)
+                      return (
+                        <div key={c.id} onClick={() => toggle(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderBottom: `1px solid ${C.brd}22`, cursor: 'pointer', background: on ? C.acc + '11' : 'transparent' }}>
+                          <span style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${on ? C.acc : C.brd}`, background: on ? C.acc : 'transparent', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{on ? '✓' : ''}</span>
+                          <span style={{ flex: 1, color: C.txt, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.full_name}{c.gender ? <span style={{ color: c.gender === 'feminino' ? '#f472b6' : C.acc, marginLeft: 5 }}>{c.gender === 'feminino' ? '♀' : '♂'}</span> : ''}</span>
+                          <span style={{ color: C.mut, fontSize: 11, flexShrink: 0 }}>{c.phone}</span>
+                        </div>
+                      )
+                    })}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  {flyerSending
+                    ? <div style={{ textAlign: 'center', color: C.sub, fontSize: 13, fontWeight: 700 }}>Enviando… {flyerProgress.sent}/{flyerProgress.total}</div>
+                    : <Btn onClick={sendFlyer} style={{ width: '100%' }} disabled={flyerSel.size === 0}>📤 Enviar para {flyerSel.size} contato(s)</Btn>}
+                  <div style={{ fontSize: 11, color: C.mut, textAlign: 'center', marginTop: 6 }}>Envio automático pelo WhatsApp da casa (Evolution API).</div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+      </Modal>
+
       {/* Budget modal */}
       <Modal open={!!budgetEv} title={`💰 Budget — ${budgetEv?.name ?? ''}`} onClose={() => { setBudgetEv(null); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]); setBudgetRes([]); setBudgetTasks([]) }} wide>
         {budgetEv && (() => {
@@ -1876,7 +2011,10 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               {/* Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: C.txt, fontWeight: 700, fontSize: 15, marginBottom: 2 }}>{ev.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <div style={{ color: C.txt, fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
+                    <button onClick={() => openFlyer(ev)} title="Enviar flyer para contatos" style={{ flexShrink: 0, background: '#25d36622', border: '1px solid #25d36644', borderRadius: 7, padding: '3px 9px', color: '#25d366', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>📤 Flyer</button>
+                  </div>
                   <div style={{ color: C.mut, fontSize: 12 }}>{fd(ev.event_date)} · {(ev.start_time ?? '').slice(0, 5)}</div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0, marginLeft: 8 }}>
