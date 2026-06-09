@@ -669,9 +669,14 @@ export function CheckinPage({ house, user }: Props) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, marginBottom: 2 }}>🚪 Check-in</h1>
-          <p style={{ color: C.mut, fontSize: 13 }}>
-            {evLabel ? `📅 ${evLabel.name}` : 'Entrada Livre'}
-          </p>
+          <div style={{ color: C.mut, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {evLabel ? (
+              <>
+                <span style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44`, borderRadius: 6, padding: '1px 7px', fontSize: 11, fontWeight: 800 }}>HOJE</span>
+                <span>{new Date(evLabel.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })} · <strong style={{ color: C.sub }}>{evLabel.name}</strong></span>
+              </>
+            ) : '🍺 Entrada Livre · sem evento hoje'}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button style={TAB_BTN(mode === 'checkin')} onClick={() => { setMode('checkin'); setScanMsg(null); setScanned(null) }}>🚪 Portaria</button>
