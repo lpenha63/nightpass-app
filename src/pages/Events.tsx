@@ -17,6 +17,8 @@ interface Props { house: House; onGoToReservas?: (date: string, eventId: string)
 interface EventWithCounts extends Event {
   checkinCount?: number
   resCount?: number
+  resPeople?: number
+  listGuests?: number
 }
 
 interface Guest {
@@ -410,11 +412,22 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             ;(cr.data ?? []).forEach(c => { if (c.event_id) ct[c.event_id] = (ct[c.event_id] ?? 0) + 1 })
             setEvents(prev => prev.map(e => ({ ...e, checkinCount: ct[e.id] ?? 0 })))
           })
-        supabase.from('reservations').select('event_id').in('event_id', ids)
+        supabase.from('reservations').select('event_id,people_count').in('event_id', ids)
           .then(rr => {
             const rc: Record<string, number> = {}
-            ;(rr.data ?? []).forEach(r => { if (r.event_id) rc[r.event_id] = (rc[r.event_id] ?? 0) + 1 })
-            setEvents(prev => prev.map(e => ({ ...e, resCount: rc[e.id] ?? 0 })))
+            const rp: Record<string, number> = {}
+            ;(rr.data ?? []).forEach(r => {
+              if (!r.event_id) return
+              rc[r.event_id] = (rc[r.event_id] ?? 0) + 1
+              rp[r.event_id] = (rp[r.event_id] ?? 0) + (r.people_count ?? 0)
+            })
+            setEvents(prev => prev.map(e => ({ ...e, resCount: rc[e.id] ?? 0, resPeople: rp[e.id] ?? 0 })))
+          })
+        supabase.from('promoter_list_guests').select('event_id').in('event_id', ids)
+          .then(gr => {
+            const gc: Record<string, number> = {}
+            ;(gr.data ?? []).forEach(g => { if (g.event_id) gc[g.event_id] = (gc[g.event_id] ?? 0) + 1 })
+            setEvents(prev => prev.map(e => ({ ...e, listGuests: gc[e.id] ?? 0 })))
           })
       })
   }
@@ -1597,6 +1610,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <div style={{ display: 'flex', gap: 4 }}>
                     {!!ev.checkinCount && <span style={{ background: C.grn + '22', color: C.grn, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.checkinCount} ✓</span>}
                     {!!ev.resCount && <span style={{ background: '#a78bfa22', color: '#a78bfa', borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.resCount} 🪑</span>}
+                    {!!((ev.resPeople ?? 0) + (ev.listGuests ?? 0)) && (
+                      <span title={`Previstas: ${ev.resPeople ?? 0} em reservas + ${ev.listGuests ?? 0} em listas`} style={{ background: C.acc + '22', color: C.acc, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>👥 {(ev.resPeople ?? 0) + (ev.listGuests ?? 0)}</span>
+                    )}
                   </div>
                 </div>
               </div>

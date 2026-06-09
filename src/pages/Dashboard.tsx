@@ -54,6 +54,9 @@ interface TodayEvent {
 interface EventMetrics {
   checkins: number
   capacity: number
+  expectedPeople: number
+  resPeople: number
+  listGuests: number
   ticketsSold: number
   ticketsPending: number
   ticketsPendingValue: number
@@ -149,7 +152,7 @@ export function DashboardPage({ house, user }: Props) {
 
     // Tonight event metrics (occupancy + P&L + pendings)
     if (ev) {
-      const [evCi, evTkPaid, evTkPend, evFr, evPl, evRi, evCl] = await Promise.all([
+      const [evCi, evTkPaid, evTkPend, evFr, evPl, evRi, evCl, evGuests] = await Promise.all([
         supabase.from('checkins').select('amount_cents', { count: 'exact' }).eq('event_id', ev.id),
         supabase.from('ticket_orders').select('amount_cents,quantity').eq('event_id', ev.id).eq('payment_status', 'paid'),
         supabase.from('ticket_orders').select('amount_cents,quantity').eq('event_id', ev.id).eq('payment_status', 'pending'),
@@ -157,6 +160,7 @@ export function DashboardPage({ house, user }: Props) {
         supabase.from('promoter_lists').select('id,fixed_fee_cents,min_entries,entry_fee_cents,consumacao_cents').eq('event_id', ev.id),
         supabase.from('reservation_items').select('quantity,unit_cost_cents,reservations!inner(event_id)').eq('reservations.event_id', ev.id),
         supabase.from('event_checklist_items').select('done').eq('event_id', ev.id),
+        supabase.from('promoter_list_guests').select('id', { count: 'exact', head: true }).eq('event_id', ev.id),
       ])
 
       const revCheckins = (evCi.data ?? []).reduce((s, r) => s + (r.amount_cents ?? 0), 0)
@@ -185,9 +189,14 @@ export function DashboardPage({ house, user }: Props) {
       const revenue = revCheckins + revTickets
       const cost = (ev.artist_fee_cents ?? 0) + costFreelancers + costPromoters + costResItems + (ev.production_cost_cents ?? 0) + (ev.consumption_cents ?? 0)
 
+      const resPeople = rd.reduce((s, r) => s + (r.people_count ?? 0), 0)
+      const listGuests = evGuests.count ?? 0
+
       setEvMetrics({
         checkins: evCi.count ?? 0,
         capacity: ev.capacity ?? 0,
+        expectedPeople: resPeople + listGuests,
+        resPeople, listGuests,
         ticketsSold, ticketsPending, ticketsPendingValue,
         freelancersPending, checklistPending,
         revenue, cost, result: revenue - cost,
@@ -355,6 +364,10 @@ export function DashboardPage({ house, user }: Props) {
               </div>
               {/* Mini metrics */}
               <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
+                <div style={{ textAlign: 'center' }} title={evMetrics ? `${evMetrics.resPeople} em reservas + ${evMetrics.listGuests} em listas` : ''}>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: '#f59e0b', lineHeight: 1 }}>{evMetrics?.expectedPeople ?? 0}</div>
+                  <div style={{ fontSize: 10, color: C.mut, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>Previstas</div>
+                </div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 26, fontWeight: 900, color: C.grn, lineHeight: 1 }}>{evMetrics?.checkins ?? 0}</div>
                   <div style={{ fontSize: 10, color: C.mut, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>Check-ins</div>
