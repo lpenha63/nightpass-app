@@ -146,10 +146,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   // Outras despesas do evento (budget)
   interface EventExpense { id: string; event_id: string; description: string; amount_cents: number }
-  const [prodExpenses, setProdExpenses] = useState<EventExpense[]>([])
   const [budgetExpenses, setBudgetExpenses] = useState<EventExpense[]>([])
+  const [budgetRes, setBudgetRes] = useState<ProdReservation[]>([])
+  const [budgetTasks, setBudgetTasks] = useState<EventTask[]>([])
   const [expForm, setExpForm] = useState({ description: '', amount: '' })
-  const [expAdding, setExpAdding] = useState<false | 'prod' | 'budget'>(false)
+  const [expAdding, setExpAdding] = useState(false)
 
   // Reservations modal
   const [resEv, setResEv] = useState<EventWithCounts | null>(null)
@@ -161,18 +162,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   async function openProd(ev: EventWithCounts) {
-    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setTeamArea(null); setProdExpenses([]); setExpAdding(false)
-    const [tasksR, resR, frR, exR] = await Promise.all([
+    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setTeamArea(null)
+    const [tasksR, resR, frR] = await Promise.all([
       supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
       supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
         .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled'),
       supabase.from('event_freelancers').select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', ev.id),
-      supabase.from('event_expenses').select('*').eq('event_id', ev.id).order('created_at'),
     ])
     setProdTasks((tasksR.data ?? []) as EventTask[])
     setProdRes((resR.data ?? []) as ProdReservation[])
     setProdFr((frR.data ?? []) as EventFreelancer[])
-    setProdExpenses((exR.data ?? []) as EventExpense[])
   }
 
   async function reloadProdFr() {
@@ -452,24 +451,23 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     return { fee: ev.artist_fee_cents ?? 0, cons: ev.consumption_cents ?? 0, list: [] as typeof arr }
   }
 
-  async function addExpense(ev: EventWithCounts, ctx: 'prod' | 'budget') {
+  async function addExpense(ev: EventWithCounts) {
     const amount = Math.round((parseFloat(expForm.amount.replace(',', '.')) || 0) * 100)
     if (!expForm.description.trim() || amount <= 0) return
     const { data } = await supabase.from('event_expenses').insert({ event_id: ev.id, house_id: house.id, description: expForm.description.trim(), amount_cents: amount }).select().single()
-    if (data) {
-      if (ctx === 'prod') setProdExpenses(pp => [...pp, data as EventExpense]); else setBudgetExpenses(pp => [...pp, data as EventExpense])
-      setExpForm({ description: '', amount: '' }); setExpAdding(false)
-    }
+    if (data) { setBudgetExpenses(pp => [...pp, data as EventExpense]); setExpForm({ description: '', amount: '' }); setExpAdding(false) }
   }
 
-  async function deleteExpense(id: string, ctx: 'prod' | 'budget') {
+  async function deleteExpense(id: string) {
     await supabase.from('event_expenses').delete().eq('id', id)
-    if (ctx === 'prod') setProdExpenses(pp => pp.filter(e => e.id !== id)); else setBudgetExpenses(pp => pp.filter(e => e.id !== id))
+    setBudgetExpenses(pp => pp.filter(e => e.id !== id))
   }
 
   function openBudget(ev: EventWithCounts) {
-    setBudgetEv(ev); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]); setExpAdding(false)
+    setBudgetEv(ev); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]); setBudgetRes([]); setBudgetTasks([]); setExpAdding(false)
     supabase.from('event_expenses').select('*').eq('event_id', ev.id).order('created_at').then(r => setBudgetExpenses((r.data ?? []) as EventExpense[]))
+    supabase.from('reservations').select('id,name,location,people_count,amount_cents,status').eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled').then(r => setBudgetRes((r.data ?? []) as ProdReservation[]))
+    supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order').then(r => setBudgetTasks((r.data ?? []) as EventTask[]))
     supabase.from('event_freelancers').select('*,freelancers(full_name,work_types,daily_rate_cents)')
       .eq('event_id', ev.id).then(r => setBudgetFreelancers((r.data ?? []) as EventFreelancer[]))
     supabase.from('promoter_lists').select('id,name,fixed_fee_cents,min_entries,entry_fee_cents,consumacao_cents,promoters(full_name)')
@@ -711,39 +709,39 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   if (ldg) return <div style={{ padding: 60, textAlign: 'center', color: C.mut }}>Carregando...</div>
 
-  const renderExpenses = (list: EventExpense[], ev: EventWithCounts, ctx: 'prod' | 'budget') => {
+  const renderExpenses = (list: EventExpense[], ev: EventWithCounts) => {
     const tot = list.reduce((s, e) => s + e.amount_cents, 0)
     return (
       <div style={{ marginTop: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
           <span style={{ fontSize: 11, color: C.mut, fontWeight: 700 }}>💸 Outras despesas{tot > 0 ? ` · ${fmtCurrency(tot)}` : ''}</span>
-          {expAdding !== ctx && <button onClick={() => { setExpAdding(ctx); setExpForm({ description: '', amount: '' }) }} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Despesa</button>}
+          {!expAdding && <button onClick={() => { setExpAdding(true); setExpForm({ description: '', amount: '' }) }} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Despesa</button>}
         </div>
         {list.map(e => (
           <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
             <span style={{ color: C.txt }}>{e.description}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ color: '#f59e0b', fontWeight: 600 }}>{fmtCurrency(e.amount_cents)}</span>
-              <button onClick={() => deleteExpense(e.id, ctx)} title="Remover" style={{ background: 'none', border: 'none', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
+              <button onClick={() => deleteExpense(e.id)} title="Remover" style={{ background: 'none', border: 'none', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
             </div>
           </div>
         ))}
-        {expAdding === ctx && (
+        {expAdding && (
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <input value={expForm.description} onChange={ev2 => setExpForm(pp => ({ ...pp, description: ev2.target.value }))} placeholder="Descrição (ex: gerador, gelo...)" autoFocus style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
-            <input value={expForm.amount} onChange={ev2 => setExpForm(pp => ({ ...pp, amount: ev2.target.value }))} onKeyDown={ev2 => ev2.key === 'Enter' && addExpense(ev, ctx)} placeholder="R$" style={{ width: 90, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
-            <button onClick={() => addExpense(ev, ctx)} style={{ background: '#f59e0b', border: 'none', borderRadius: 8, padding: '7px 12px', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
+            <input value={expForm.amount} onChange={ev2 => setExpForm(pp => ({ ...pp, amount: ev2.target.value }))} onKeyDown={ev2 => ev2.key === 'Enter' && addExpense(ev)} placeholder="R$" style={{ width: 90, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+            <button onClick={() => addExpense(ev)} style={{ background: '#f59e0b', border: 'none', borderRadius: 8, padding: '7px 12px', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
             <button onClick={() => setExpAdding(false)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
           </div>
         )}
-        {list.length === 0 && expAdding !== ctx && <div style={{ fontSize: 12, color: C.mut }}>Nenhuma despesa avulsa.</div>}
+        {list.length === 0 && !expAdding && <div style={{ fontSize: 12, color: C.mut }}>Nenhuma despesa avulsa.</div>}
       </div>
     )
   }
 
   const renderProdTabs = () => (
               <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-                {(['tasks', 'freelancers', 'budget'] as const).map(tab => {
+                {(['tasks', 'freelancers'] as const).map(tab => {
                   const labels = { tasks: '📋 Tarefas', freelancers: `👥 Equipe (${prodFr.length})`, budget: '💰 Budget' }
                   return (
                     <button key={tab} onClick={() => setProdTab(tab)} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${prodTab === tab ? '#f59e0b' : C.brd}`, background: prodTab === tab ? '#f59e0b22' : 'transparent', color: prodTab === tab ? '#f59e0b' : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -1042,130 +1040,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                         </div>
                       )
                     })()}
-                  </div>
-                )
-              })()}
-
-              {/* ── TAB: BUDGET ── */}
-              {prodTab === 'budget' && (() => {
-                const totalRevenue = prodRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
-                const tasksEstimated = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-                const tasksActual = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-                const frTotal = prodFr.reduce((s, f) => s + ((f as any).custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
-                const ab = artistsBreakdown(prodEv as EventWithCounts)
-                const artistsTotal = ab.fee + ab.cons
-                const productionCost = prodEv?.production_cost_cents ?? 0
-                const expensesTotal = prodExpenses.reduce((s, e) => s + e.amount_cents, 0)
-                const fixedCosts = artistsTotal + productionCost + expensesTotal
-                const totalCostEst = tasksEstimated + frTotal + fixedCosts
-                const totalCostReal = tasksActual + frTotal + fixedCosts
-                const marginEst = totalRevenue - totalCostEst
-                const marginReal = totalRevenue - totalCostReal
-                const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
-                prodTasks.forEach(t => { if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }; areas[t.area].tasks.push(t) })
-
-                return (
-                  <div>
-                    {/* Summary cards */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-                      <div style={{ background: '#10b98110', border: '1px solid #10b98133', borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, color: '#10b981', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Receita</div>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: '#10b981' }}>R$ {(totalRevenue / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        <div style={{ fontSize: 11, color: C.mut }}>{prodRes.length} reservas</div>
-                      </div>
-                      <div style={{ background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Despesas Estimadas</div>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: '#f59e0b' }}>R$ {(totalCostEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        <div style={{ fontSize: 11, color: C.mut }}>{prodTasks.length} tarefas + {prodFr.length} freelancers</div>
-                      </div>
-                      <div style={{ background: marginEst >= 0 ? '#10b98110' : '#f8717110', border: `1px solid ${marginEst >= 0 ? '#10b98133' : '#f8717133'}`, borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, color: marginEst >= 0 ? '#10b981' : '#f87171', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Margem Estimada</div>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: marginEst >= 0 ? '#10b981' : '#f87171' }}>R$ {(marginEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                      </div>
-                      {tasksActual > 0 && (
-                        <div style={{ background: marginReal >= 0 ? '#3b82f610' : '#f8717110', border: `1px solid ${marginReal >= 0 ? '#3b82f633' : '#f8717133'}`, borderRadius: 10, padding: '12px 14px' }}>
-                          <div style={{ fontSize: 10, color: marginReal >= 0 ? '#3b82f6' : '#f87171', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Margem Real</div>
-                          <div style={{ fontSize: 20, fontWeight: 900, color: marginReal >= 0 ? '#3b82f6' : '#f87171' }}>R$ {(marginReal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                          <div style={{ fontSize: 11, color: C.mut }}>Custo real: R$ {(totalCostReal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Receita breakdown */}
-                    <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>📥 Receita — Reservas</div>
-                      {prodRes.length === 0
-                        ? <div style={{ color: C.mut, fontSize: 12 }}>Nenhuma reserva para este evento.</div>
-                        : prodRes.map(r => (
-                          <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                            <span style={{ color: C.txt }}>{r.name}{r.location ? ` · ${r.location}` : ''}</span>
-                            <span style={{ color: '#10b981', fontWeight: 600 }}>R$ {((r.amount_cents ?? 0) / 100).toFixed(2)}</span>
-                          </div>
-                        ))
-                      }
-                    </div>
-
-                    {/* Despesas breakdown */}
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>📤 Despesas</div>
-                      {/* Artistas */}
-                      {(ab.list.length > 0 || artistsTotal > 0) && (
-                        <div style={{ marginBottom: 8 }}>
-                          <div style={{ fontSize: 11, color: C.mut, marginBottom: 4 }}>🎤 Artistas</div>
-                          {ab.list.length > 0
-                            ? ab.list.map((a, i) => (
-                              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                                <span style={{ color: C.txt }}>{a.name || `Artista ${i + 1}`}{a.fee_type === 'percent' ? ` · ${a.fee_percent}% portaria` : ''}</span>
-                                <span style={{ color: '#f59e0b' }}>{fmtCurrency((a.fee_cents ?? 0) + (a.consumption_cents ?? 0))}</span>
-                              </div>
-                            ))
-                            : <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}><span style={{ color: C.txt }}>Cachê</span><span style={{ color: '#f59e0b' }}>{fmtCurrency(artistsTotal)}</span></div>
-                          }
-                        </div>
-                      )}
-                      {productionCost > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13, marginBottom: 8 }}>
-                          <span style={{ color: C.txt }}>🔧 Gastos de produção</span>
-                          <span style={{ color: '#8b5cf6' }}>{fmtCurrency(productionCost)}</span>
-                        </div>
-                      )}
-                      {/* Freelancers */}
-                      {prodFr.length > 0 && (
-                        <div style={{ marginBottom: 8 }}>
-                          <div style={{ fontSize: 11, color: C.mut, marginBottom: 4 }}>👷 Freelancers</div>
-                          {prodFr.map(fr => {
-                            const frData = (fr as any).freelancers
-                            const fee = (fr as any).custom_fee_cents ?? frData?.daily_rate_cents ?? 0
-                            return (
-                              <div key={fr.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                                <span style={{ color: C.txt }}>{frData?.full_name ?? '—'}</span>
-                                <span style={{ color: '#f59e0b' }}>R$ {(fee / 100).toFixed(2)}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                      {/* Tasks by area */}
-                      {Object.entries(areas).map(([area, { icon, tasks }]) => {
-                        const areaEst = tasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-                        const areaReal = tasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-                        if (areaEst === 0 && areaReal === 0) return null
-                        return (
-                          <div key={area} style={{ marginBottom: 6 }}>
-                            <div style={{ fontSize: 11, color: C.mut, marginBottom: 4 }}>{icon} {area}</div>
-                            {tasks.filter(t => t.estimated_cost_cents || t.actual_cost_cents).map(t => (
-                              <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                                <span style={{ color: t.status === 'done' ? C.mut : C.txt }}>{t.title}</span>
-                                <div style={{ textAlign: 'right' }}>
-                                  {t.actual_cost_cents ? <span style={{ color: '#10b981', fontWeight: 700 }}>R$ {(t.actual_cost_cents / 100).toFixed(2)}</span> : <span style={{ color: '#f59e0b' }}>R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(2)}</span>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )
-                      })}
-                      {prodEv && renderExpenses(prodExpenses, prodEv, 'prod')}
-                    </div>
                   </div>
                 )
               })()}
@@ -1688,7 +1562,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       </Modal>
 
       {/* Budget modal */}
-      <Modal open={!!budgetEv} title={`💰 Budget — ${budgetEv?.name ?? ''}`} onClose={() => { setBudgetEv(null); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]) }} wide>
+      <Modal open={!!budgetEv} title={`💰 Budget — ${budgetEv?.name ?? ''}`} onClose={() => { setBudgetEv(null); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]); setBudgetRes([]); setBudgetTasks([]) }} wide>
         {budgetEv && (() => {
           const ab = artistsBreakdown(budgetEv)
           const cache = ab.fee
@@ -1701,7 +1575,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           }, 0)
           const resItemsTotal = budgetResItems.reduce((s, i) => s + (i.quantity || 1) * (i.unit_cost_cents || 0), 0)
           const expensesTotal = budgetExpenses.reduce((s, e) => s + e.amount_cents, 0)
-          const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal
+          const tasksEst = budgetTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+          const tasksReal = budgetTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
+          const tasksTotal = tasksReal > 0 ? tasksReal : tasksEst
+          const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
+          const revenue = budgetRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
+          const margin = revenue - total
+          const taskAreas: Record<string, { icon: string; tasks: EventTask[] }> = {}
+          budgetTasks.forEach(t => { if (!taskAreas[t.area]) taskAreas[t.area] = { icon: t.area_icon, tasks: [] }; taskAreas[t.area].tasks.push(t) })
 
           const row = (icon: string, label: string, value: number, color: string, sub?: string) => (
             <div style={{ display: 'flex', alignItems: 'center', padding: '11px 0', borderBottom: `1px solid ${C.brd}` }}>
@@ -1716,6 +1597,22 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
           return (
             <div>
+              {/* Resumo */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
+                <div style={{ background: '#10b98110', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#10b981', fontWeight: 700, textTransform: 'uppercase' }}>Receita</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: '#10b981' }}>{fmtCurrency(revenue)}</div>
+                  <div style={{ fontSize: 10, color: C.mut }}>{budgetRes.length} reservas</div>
+                </div>
+                <div style={{ background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, textTransform: 'uppercase' }}>Despesas</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: '#f59e0b' }}>{fmtCurrency(total)}</div>
+                </div>
+                <div style={{ background: margin >= 0 ? '#10b98110' : '#f8717110', border: `1px solid ${margin >= 0 ? '#10b98133' : '#f8717133'}`, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: margin >= 0 ? '#10b981' : '#f87171', fontWeight: 700, textTransform: 'uppercase' }}>Margem</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: margin >= 0 ? '#10b981' : '#f87171' }}>{fmtCurrency(margin)}</div>
+                </div>
+              </div>
               {/* Artistas */}
               {ab.list.length > 0
                 ? ab.list.map((a, i) => (
@@ -1791,15 +1688,42 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 </div>
               )}
 
-              {/* Outras despesas */}
-              {budgetEv && renderExpenses(budgetExpenses, budgetEv, 'budget')}
+              {/* Tarefas de produção */}
+              {budgetTasks.length > 0 && (
+                <div style={{ borderBottom: `1px solid ${C.brd}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '11px 0 6px' }}>
+                    <div style={{ fontSize: 20, width: 34 }}>📋</div>
+                    <div style={{ flex: 1, color: C.txt, fontSize: 14, fontWeight: 600 }}>Tarefas de produção</div>
+                    <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 15 }}>{fmtCurrency(tasksTotal)}</div>
+                  </div>
+                  {Object.entries(taskAreas).map(([area, g]) => {
+                    const at = g.tasks.reduce((s, t) => s + (t.actual_cost_cents ?? t.estimated_cost_cents ?? 0), 0)
+                    if (at === 0) return null
+                    return (
+                      <div key={area} style={{ display: 'flex', padding: '3px 0 3px 34px' }}>
+                        <div style={{ flex: 1, color: C.mut, fontSize: 12 }}>{g.icon} {area}</div>
+                        <div style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>{fmtCurrency(at)}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
-              {/* Total */}
-              <div style={{ display: 'flex', alignItems: 'center', padding: '16px 0 4px', background: `linear-gradient(135deg,${C.grn}08,transparent)`, borderRadius: 8, marginTop: 4 }}>
-                <div style={{ fontSize: 22, width: 34 }}>💰</div>
-                <div style={{ flex: 1, color: C.txt, fontSize: 16, fontWeight: 900 }}>TOTAL DO EVENTO</div>
-                <div style={{ color: C.grn, fontWeight: 900, fontSize: 22 }}>{fmtCurrency(total)}</div>
+              {/* Outras despesas */}
+              {budgetEv && renderExpenses(budgetExpenses, budgetEv)}
+
+              {/* Total de despesas + Margem */}
+              <div style={{ display: 'flex', alignItems: 'center', padding: '14px 0 4px', borderTop: `2px solid ${C.brd}`, marginTop: 6 }}>
+                <div style={{ fontSize: 20, width: 34 }}>📤</div>
+                <div style={{ flex: 1, color: C.txt, fontSize: 15, fontWeight: 800 }}>Total de despesas</div>
+                <div style={{ color: '#f59e0b', fontWeight: 900, fontSize: 18 }}>{fmtCurrency(total)}</div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0 4px', background: `linear-gradient(135deg,${(margin >= 0 ? C.grn : C.red)}10,transparent)`, borderRadius: 8 }}>
+                <div style={{ fontSize: 22, width: 34 }}>{margin >= 0 ? '🟢' : '🔴'}</div>
+                <div style={{ flex: 1, color: C.txt, fontSize: 16, fontWeight: 900 }}>{margin >= 0 ? 'MARGEM' : 'PREJUÍZO'}</div>
+                <div style={{ color: margin >= 0 ? C.grn : C.red, fontWeight: 900, fontSize: 22 }}>{fmtCurrency(margin)}</div>
+              </div>
+              <div style={{ fontSize: 11, color: C.mut, marginTop: 8 }}>Receita = reservas do dia. Custos de tarefas usam o valor real quando informado, senão o estimado.</div>
             </div>
           )
         })()}
