@@ -124,7 +124,7 @@ export function CheckinPage({ house, user }: Props) {
   const [search, setSearch] = useState('')
   const [result, setResult] = useState<Client | null>(null)
   const [ciCount, setCiCount] = useState(0)
-  const [events, setEvents] = useState<Array<{ id: string; name: string; event_date: string; price_male_cents?: number; price_female_cents?: number }>>([])
+  const [events, setEvents] = useState<Array<{ id: string; name: string; event_date: string; price_male_cents?: number; price_female_cents?: number; capacity?: number }>>([])
   const [selEv, setSelEv] = useState('bar')
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -717,8 +717,11 @@ export function CheckinPage({ house, user }: Props) {
         {(() => {
           const pend = reservations.filter(r => r.status !== 'arrived' && r.status !== 'confirmado' && r.status !== 'cancelled')
           const expectedPeople = pend.reduce((s, r) => s + (r.people_count ?? 0), 0)
+          const cap = events.find(e => e.id === selEv)?.capacity ?? 0
+          const occPct = cap > 0 ? Math.round(ciToday / cap * 100) : 0
           const cards = [
             { icon: '✅', label: 'Check-ins hoje', val: String(ciToday), sub: '', color: C.grn },
+            ...(cap > 0 ? [{ icon: '🏠', label: 'Lotação', val: `${ciToday}/${cap}`, sub: `${occPct}%`, color: occPct >= 90 ? C.red : occPct >= 60 ? C.gold : C.acc }] : []),
             { icon: '🪑', label: 'Reservas aguardando', val: `${expectedPeople} pessoas`, sub: `${pend.length} reservas`, color: C.gold },
           ]
           return cards.map((c, i) => (
