@@ -124,7 +124,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [prodRes, setProdRes] = useState<ProdReservation[]>([])
   const [prodTab, setProdTab] = useState<'tasks' | 'checklist' | 'freelancers' | 'budget' | 'layout'>('tasks')
   const [prodFr, setProdFr] = useState<EventFreelancer[]>([])
-  const [addingTeam, setAddingTeam] = useState(false)
+  const [teamArea, setTeamArea] = useState<string | null>(null)
   const [addingArea, setAddingArea] = useState(false)
   const [newAreaIcon, setNewAreaIcon] = useState('📋')
   const [newAreaName, setNewAreaName] = useState('')
@@ -156,7 +156,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   async function openProd(ev: EventWithCounts) {
-    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setChecklist([]); setAddingTeam(false)
+    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setChecklist([]); setTeamArea(null)
     const [tasksR, resR, frR, clR] = await Promise.all([
       supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
       supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
@@ -177,9 +177,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setProdFr((data ?? []) as EventFreelancer[])
   }
 
-  async function addProdFreelancer(freelancerId: string) {
+  async function addProdFreelancer(freelancerId: string, role: string) {
     if (!prodEv) return
-    await supabase.from('event_freelancers').insert({ event_id: prodEv.id, freelancer_id: freelancerId, confirmed: false })
+    await supabase.from('event_freelancers').insert({ event_id: prodEv.id, freelancer_id: freelancerId, confirmed: false, role })
     await reloadProdFr()
   }
 
@@ -967,93 +967,110 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 )
               })()}
 
-              {/* ── TAB: EQUIPE (FREELANCERS) ── */}
-              {prodTab === 'freelancers' && (
-                <div>
-                  {prodFr.length === 0
-                    ? <div style={{ color: C.mut, textAlign: 'center', padding: '40px 0', fontSize: 13 }}>Nenhum freelancer escalado para este evento.</div>
-                    : prodFr.map(fr => {
-                      const frData = (fr as any).freelancers
-                      const dailyRate = frData?.daily_rate_cents ?? 0
-                      const effectiveFee = (fr as any).custom_fee_cents ?? dailyRate
-                      return (
-                        <div key={fr.id} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontWeight: 700, fontSize: 13, color: C.txt }}>{frData?.full_name ?? '—'}</div>
-                              <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>
-                                {Object.entries(WORK_LABELS).filter(([k]) => (frData?.work_types ?? []).includes(k)).map(([, v]) => v).join(' · ')}
-                              </div>
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                              {frFeeEdit?.id === fr.id
-                                ? <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                                    <input value={frFeeEdit.val} onChange={e => setFrFeeEdit({ id: fr.id, val: e.target.value })} placeholder="R$" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.txt, fontSize: 12, width: 80, fontFamily: 'inherit' }} autoFocus />
-                                    <button onClick={() => saveFrFee(fr.id, frFeeEdit.val)} style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 8px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>✓</button>
-                                  </div>
-                                : <div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>R$ {(effectiveFee / 100).toFixed(2)}</div>
-                                    {(fr as any).custom_fee_cents && (fr as any).custom_fee_cents !== dailyRate && <div style={{ fontSize: 10, color: C.mut }}>Diária: R$ {(dailyRate / 100).toFixed(2)}</div>}
-                                    <button onClick={() => setFrFeeEdit({ id: fr.id, val: String(effectiveFee / 100) })} style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>ajustar</button>
-                                  </div>
-                              }
-                            </div>
-                            <button onClick={() => toggleProdFrConfirmed(fr)} title={fr.confirmed ? 'Confirmado' : 'Pendente'} style={{ background: fr.confirmed ? '#10b98122' : '#ffffff08', border: `1px solid ${fr.confirmed ? '#10b98144' : C.brd}`, borderRadius: 8, padding: '5px 8px', color: fr.confirmed ? '#10b981' : C.mut, fontSize: 13, cursor: 'pointer' }}>{fr.confirmed ? '✅' : '⏳'}</button>
-                            <button onClick={() => convocateFrWA(fr)} style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 8, padding: '5px 10px', color: '#25d366', fontSize: 13, cursor: 'pointer' }} title="Convocar via WhatsApp">📲</button>
-                            <button onClick={() => removeProdFreelancer(fr.id)} title="Remover da equipe" style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 8, padding: '5px 8px', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
-                          </div>
-                        </div>
-                      )
-                    })
-                  }
+              {/* ── TAB: EQUIPE (por área → freelancer) ── */}
+              {prodTab === 'freelancers' && (() => {
+                const roleOf = (fr: EventFreelancer) => (fr.role || (fr as any).freelancers?.work_types?.[0] || 'outros')
+                const roleLabel = (r: string) => WORK_LABELS[r] ?? r
+                const groups: Record<string, EventFreelancer[]> = {}
+                prodFr.forEach(fr => { const r = roleOf(fr); (groups[r] ||= []).push(fr) })
+                const frTotal = prodFr.reduce((s, f) => s + (f.custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
 
-                  {/* Team total */}
-                  {prodFr.length > 0 && (() => {
-                    const frTotal = prodFr.reduce((s, f) => s + ((f as any).custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
-                    return (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, padding: '10px 12px', background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10 }}>
+                const memberRow = (fr: EventFreelancer) => {
+                  const frData = (fr as any).freelancers
+                  const dailyRate = frData?.daily_rate_cents ?? 0
+                  const effectiveFee = fr.custom_fee_cents ?? dailyRate
+                  return (
+                    <div key={fr.id} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: C.txt }}>{frData?.full_name ?? '—'}</div>
+                          <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>{(frData?.work_types ?? []).map((wt: string) => WORK_LABELS[wt] ?? wt).join(' · ')}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          {frFeeEdit?.id === fr.id
+                            ? <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                <input value={frFeeEdit.val} onChange={e => setFrFeeEdit({ id: fr.id, val: e.target.value })} placeholder="R$" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.txt, fontSize: 12, width: 80, fontFamily: 'inherit' }} autoFocus />
+                                <button onClick={() => saveFrFee(fr.id, frFeeEdit.val)} style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 8px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>✓</button>
+                              </div>
+                            : <div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>R$ {(effectiveFee / 100).toFixed(2)}</div>
+                                {fr.custom_fee_cents != null && fr.custom_fee_cents !== dailyRate && <div style={{ fontSize: 10, color: C.mut }}>Diária: R$ {(dailyRate / 100).toFixed(2)}</div>}
+                                <button onClick={() => setFrFeeEdit({ id: fr.id, val: String(effectiveFee / 100) })} style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>ajustar valor</button>
+                              </div>
+                          }
+                        </div>
+                        <button onClick={() => toggleProdFrConfirmed(fr)} title={fr.confirmed ? 'Confirmado' : 'Pendente'} style={{ background: fr.confirmed ? '#10b98122' : '#ffffff08', border: `1px solid ${fr.confirmed ? '#10b98144' : C.brd}`, borderRadius: 8, padding: '5px 8px', color: fr.confirmed ? '#10b981' : C.mut, fontSize: 13, cursor: 'pointer' }}>{fr.confirmed ? '✅' : '⏳'}</button>
+                        <button onClick={() => convocateFrWA(fr)} style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 8, padding: '5px 10px', color: '#25d366', fontSize: 13, cursor: 'pointer' }} title="Convocar via WhatsApp">📲</button>
+                        <button onClick={() => removeProdFreelancer(fr.id)} title="Remover da equipe" style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 8, padding: '5px 8px', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div>
+                    {prodFr.length === 0 && !teamArea && (
+                      <div style={{ color: C.mut, textAlign: 'center', padding: '20px 0', fontSize: 13 }}>Monte a equipe por área: escolha uma área abaixo e adicione os freelancers.</div>
+                    )}
+
+                    {Object.entries(groups).map(([role, members]) => (
+                      <div key={role} style={{ marginBottom: 16 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${C.brd}` }}>
+                          <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{roleLabel(role)} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length})</span></span>
+                          <button onClick={() => setTeamArea(role)} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Freelancer</button>
+                        </div>
+                        {members.map(fr => memberRow(fr))}
+                      </div>
+                    ))}
+
+                    {prodFr.length > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0 12px', padding: '10px 12px', background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10 }}>
                         <span style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>💰 Custo da equipe ({prodFr.length})</span>
                         <span style={{ fontSize: 15, fontWeight: 900, color: '#f59e0b' }}>R$ {(frTotal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                       </div>
-                    )
-                  })()}
+                    )}
 
-                  {/* Add to team */}
-                  {(() => {
-                    const available = allFreelancers.filter(fr => !prodFr.find(pf => pf.freelancer_id === fr.id))
-                    if (!addingTeam) {
-                      return (
-                        <button onClick={() => setAddingTeam(true)} style={{ width: '100%', background: '#ffffff06', border: `1px dashed ${C.brd}`, borderRadius: 10, padding: '10px', color: C.mut, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 12 }}>
-                          ➕ Adicionar à equipe
-                        </button>
-                      )
-                    }
-                    return (
-                      <div style={{ marginTop: 12, padding: '12px 14px', background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700 }}>Adicionar freelancer</span>
-                          <button onClick={() => setAddingTeam(false)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
+                    {!teamArea ? (
+                      <div>
+                        <div style={{ fontSize: 11, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>➕ ADICIONAR POR ÁREA</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {Object.entries(WORK_LABELS).map(([k, label]) => (
+                            <button key={k} onClick={() => setTeamArea(k)} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 12px', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{label}</button>
+                          ))}
                         </div>
-                        {available.length === 0
-                          ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Freelancers.' : 'Todos os freelancers já estão na equipe.'}</div>
-                          : available.map(fr => (
-                            <div key={fr.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{fr.full_name}</div>
-                                <div style={{ fontSize: 11, color: C.mut }}>
-                                  {(fr.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
-                                  {fr.daily_rate_cents ? ` · ${fmtCurrency(fr.daily_rate_cents)}/dia` : ''}
-                                </div>
-                              </div>
-                              <button onClick={() => addProdFreelancer(fr.id)} style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: 8, padding: '5px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
-                            </div>
-                          ))
-                        }
                       </div>
-                    )
-                  })()}
-                </div>
-              )}
+                    ) : (() => {
+                      const available = allFreelancers.filter(f => !prodFr.some(pf => pf.freelancer_id === f.id && roleOf(pf) === teamArea))
+                      const suggested = available.filter(f => (f.work_types ?? []).includes(teamArea as never))
+                      const others = available.filter(f => !(f.work_types ?? []).includes(teamArea as never))
+                      const ordered = [...suggested, ...others]
+                      return (
+                        <div style={{ padding: '12px 14px', background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700 }}>Adicionar em {roleLabel(teamArea)}</span>
+                            <button onClick={() => setTeamArea(null)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
+                          </div>
+                          {ordered.length === 0
+                            ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Freelancers.' : 'Todos os freelancers já estão nesta área.'}</div>
+                            : ordered.map(f => (
+                              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name} {(f.work_types ?? []).includes(teamArea as never) && <span style={{ fontSize: 10, color: '#10b981' }}>• da função</span>}</div>
+                                  <div style={{ fontSize: 11, color: C.mut }}>
+                                    {(f.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
+                                    {f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}
+                                  </div>
+                                </div>
+                                <button onClick={() => { addProdFreelancer(f.id, teamArea) }} style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: 8, padding: '5px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
+                              </div>
+                            ))
+                          }
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )
+              })()}
 
               {/* ── TAB: BUDGET ── */}
               {prodTab === 'budget' && (() => {
