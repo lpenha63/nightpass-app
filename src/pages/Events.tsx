@@ -56,7 +56,6 @@ interface ProdReservation {
 }
 
 const GENRES = ['Sertanejo', 'Samba', 'Pagode', 'Forró', 'Funk', 'Eletrônico', 'Axé', 'MPB', 'Pop', 'Rock', 'Outros']
-const AREA_ICONS = ['📋', '🔊', '🎤', '🎚️', '💡', '🍺', '🍸', '🍽️', '👨‍🍳', '🛡️', '🧹', '🎨', '📣', '📸', '🎥', '📄', '⚡', '🚪', '🚻', '🅿️', '🎁', '🪑']
 const REPT = [
   { v: 'none', l: 'Sem repetição' },
   { v: 'weekly', l: 'Semanal' },
@@ -901,259 +900,57 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         </div>{/* end LEFT */}
 
         {/* RIGHT: production panel (35%) */}
+        {/* RIGHT: production panel (35%) — resumo + abre o MESMO painel do card */}
         <div style={{ flex: '0 0 35%', overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column' }}>
           {!editing
             ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: C.mut }}>
                 <div style={{ fontSize: 32 }}>🏭</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.sub }}>Produção</div>
-                <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 200 }}>Salve o evento para começar a organizar tarefas, freelancers e orçamento.</div>
+                <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 220 }}>Salve o evento para liberar o painel de Produção (tarefas, checklist, equipe e budget).</div>
               </div>
-            : <>
-            {/* Header */}
-            <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.brd}`, flexShrink: 0 }}>
-              <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, letterSpacing: '0.08em', marginBottom: 2 }}>🏭 PRODUÇÃO</div>
-              {prodTasks.length > 0 && (() => {
+            : (() => {
+                const prodEvent = events.find(e => e.id === editing)
                 const done = prodTasks.filter(t => t.status === 'done').length
-                const pct = Math.round(done / prodTasks.length * 100)
+                const pct = prodTasks.length ? Math.round(done / prodTasks.length * 100) : 0
+                const estCost = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+                const frCost = prodFr.reduce((s, f) => s + ((f as any).custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
                 return (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.mut, marginBottom: 3 }}>
-                      <span>{done}/{prodTasks.length} tarefas</span>
-                      <span style={{ color: pct === 100 ? '#10b981' : '#f59e0b', fontWeight: 700 }}>{pct}%</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, letterSpacing: '0.08em', marginBottom: 12 }}>🏭 PRODUÇÃO</div>
+
+                    {prodTasks.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.mut, marginBottom: 4 }}>
+                          <span>{done}/{prodTasks.length} tarefas concluídas</span>
+                          <span style={{ color: pct === 100 ? '#10b981' : '#f59e0b', fontWeight: 700 }}>{pct}%</span>
+                        </div>
+                        <div style={{ height: 6, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : 'linear-gradient(90deg,#f59e0b,#fbbf24)', borderRadius: 4 }} />
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+                      {[
+                        { label: '📋 Tarefas', val: String(prodTasks.length) },
+                        { label: '👥 Equipe', val: String(prodFr.length) },
+                        { label: '💰 Custo tarefas', val: fmtCurrency(estCost) },
+                        { label: '👷 Custo equipe', val: fmtCurrency(frCost) },
+                      ].map((s, i) => (
+                        <div key={i} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
+                          <div style={{ fontSize: 10, color: C.mut, marginBottom: 3 }}>{s.label}</div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: C.txt }}>{s.val}</div>
+                        </div>
+                      ))}
                     </div>
-                    <div style={{ height: 4, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : '#f59e0b', borderRadius: 4 }} />
-                    </div>
+
+                    <button onClick={() => prodEvent && openProd(prodEvent)} style={{ width: '100%', background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 10, padding: '12px 0', color: '#fff', fontSize: 14, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      🏭 Abrir painel de Produção
+                    </button>
+                    <div style={{ fontSize: 11, color: C.mut, textAlign: 'center', marginTop: 8 }}>Tarefas, checklist, equipe e budget — o mesmo painel do botão 🏭 Produção do card.</div>
                   </div>
                 )
-              })()}
-              {/* Tabs */}
-              <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
-                {(['tasks', 'layout', 'budget'] as const).map(tab => {
-                  const labels = { tasks: `📋 Tarefas (${prodTasks.length})`, layout: `🪑 Layout (${prodRes.length})`, budget: '💰 Budget' }
-                  return (
-                    <button key={tab} onClick={() => setProdTab(tab as typeof prodTab)} style={{ padding: '4px 10px', borderRadius: 6, border: `1px solid ${prodTab === tab ? '#f59e0b' : C.brd}`, background: prodTab === tab ? '#f59e0b22' : 'transparent', color: prodTab === tab ? '#f59e0b' : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      {labels[tab]}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Tab: Tarefas */}
-            {prodTab === 'tasks' && (() => {
-              const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
-              prodTasks.forEach(t => { if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }; areas[t.area].tasks.push(t) })
-              const [formArea, formIcon] = (taskFormArea ?? '').split('|||')
-              const totEst = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-              const totReal = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-              const sInp = { ...inp.style, minHeight: 34, padding: '6px 10px' }
-              const resetTaskForm = () => { setTaskFormArea(null); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }
-
-              const taskFormBlock = (area: string, icon: string) => (
-                <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: 10, marginTop: 6, marginBottom: 8, display: 'grid', gap: 6 }}>
-                  <input style={sInp} value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Tarefa (ex: Locar PA + técnico)" autoFocus />
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    <input style={sInp} value={taskForm.assignee_name} onChange={e => setTaskForm(p => ({ ...p, assignee_name: e.target.value }))} placeholder="Responsável" />
-                    <input style={sInp} value={taskForm.assignee_phone} onChange={e => setTaskForm(p => ({ ...p, assignee_phone: e.target.value }))} placeholder="WhatsApp" />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    <input type="datetime-local" style={sInp} value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} />
-                    <input type="number" step="0.01" min="0" style={sInp} value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Custo est. R$" />
-                  </div>
-                  <textarea style={{ ...sInp, height: 40, resize: 'vertical' as const }} value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Observação (opcional)" />
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => addProdTask(area, icon)} style={{ flex: 1, background: '#f59e0b', border: 'none', borderRadius: 6, padding: '7px 0', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Adicionar tarefa</button>
-                    <button onClick={resetTaskForm} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
-                  </div>
-                </div>
-              )
-
-              return (
-                <div style={{ flex: 1 }}>
-                  {/* Add area */}
-                  {!addingArea ? (
-                    <button onClick={() => { setAddingArea(true); setNewAreaName(''); setNewAreaIcon('📋') }} style={{ width: '100%', background: '#f59e0b15', border: '1px dashed #f59e0b55', borderRadius: 8, padding: '8px 0', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginBottom: 12 }}>+ Adicionar área</button>
-                  ) : (
-                    <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: 10, marginBottom: 12 }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                        {AREA_ICONS.map(ic => (
-                          <button key={ic} onClick={() => setNewAreaIcon(ic)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${newAreaIcon === ic ? '#f59e0b' : C.brd}`, background: newAreaIcon === ic ? '#f59e0b22' : 'transparent', fontSize: 15, cursor: 'pointer' }}>{ic}</button>
-                        ))}
-                      </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input style={sInp} value={newAreaName} onChange={e => setNewAreaName(e.target.value)} placeholder="Nome da área (ex: Som & Luz)" autoFocus onKeyDown={e => { if (e.key === 'Enter') addProdArea() }} />
-                        <button onClick={addProdArea} style={{ background: '#f59e0b', border: 'none', borderRadius: 6, padding: '0 14px', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
-                        <button onClick={() => setAddingArea(false)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '0 10px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* New area (created but no tasks yet) → show its task form */}
-                  {taskFormArea && formArea && !areas[formArea] && (
-                    <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{formIcon} {formArea}</div>
-                      {taskFormBlock(formArea, formIcon)}
-                    </div>
-                  )}
-
-                  {Object.entries(areas).map(([area, { icon, tasks }]) => {
-                    const aEst = tasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-                    return (
-                      <div key={area} style={{ marginBottom: 14 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{icon} {area}</span>
-                          <span style={{ color: C.mut, fontSize: 10, fontWeight: 600 }}>{tasks.filter(t => t.status === 'done').length}/{tasks.length}{aEst > 0 ? ` · R$ ${(aEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}</span>
-                        </div>
-                        {tasks.map(t => (
-                          <div key={t.id} style={{ borderBottom: `1px solid ${C.brd}22` }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
-                              <button onClick={() => toggleProdTask(t)} style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${t.status === 'done' ? '#10b981' : C.brd}`, background: t.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 10, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {t.status === 'done' ? '✓' : ''}
-                              </button>
-                              <span onClick={() => setExpandedTask(expandedTask === t.id ? null : t.id)} style={{ flex: 1, fontSize: 12, color: t.status === 'done' ? C.mut : C.txt, textDecoration: t.status === 'done' ? 'line-through' : 'none', cursor: 'pointer' }}>{t.title}</span>
-                              {(t.estimated_cost_cents ?? 0) > 0 && <span style={{ fontSize: 10, color: C.mut }}>R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(0)}</span>}
-                              {t.deadline && <span style={{ fontSize: 10, color: C.mut }}>{new Date(t.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
-                              {t.assignee_phone && <button onClick={() => sendTaskWA(t)} style={{ background: 'none', border: 'none', fontSize: 14, cursor: 'pointer', padding: 0 }}>📲</button>}
-                            </div>
-                            {expandedTask === t.id && (
-                              <div style={{ padding: '2px 0 8px 26px', display: 'grid', gap: 5, fontSize: 11, color: C.mut }}>
-                                {t.assignee_name && <div>👤 {t.assignee_name}{t.assignee_phone ? ` · ${t.assignee_phone}` : ''}</div>}
-                                {t.description && <div>📝 {t.description}</div>}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                  <span>💰 Est: R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(2)}</span>
-                                  {actualCostEdit?.id === t.id ? (
-                                    <>
-                                      <input type="number" step="0.01" autoFocus value={actualCostEdit.val} onChange={e => setActualCostEdit({ id: t.id, val: e.target.value })} style={{ width: 80, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 6px', color: C.txt, fontSize: 11, fontFamily: 'inherit' }} placeholder="Real R$" />
-                                      <button onClick={() => saveProdActualCost(t.id, actualCostEdit.val)} style={{ background: '#10b981', border: 'none', borderRadius: 5, padding: '3px 8px', color: '#052e1a', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓</button>
-                                      <button onClick={() => setActualCostEdit(null)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 6px', color: C.mut, fontSize: 11, cursor: 'pointer' }}>✕</button>
-                                    </>
-                                  ) : (
-                                    <button onClick={() => setActualCostEdit({ id: t.id, val: t.actual_cost_cents ? String(t.actual_cost_cents / 100) : '' })} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 8px', color: (t.actual_cost_cents ?? 0) > 0 ? '#10b981' : C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
-                                      {(t.actual_cost_cents ?? 0) > 0 ? `Real: R$ ${((t.actual_cost_cents ?? 0) / 100).toFixed(2)}` : '+ custo real'}
-                                    </button>
-                                  )}
-                                  <button onClick={() => deleteProdTask(t.id)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer' }}>🗑</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {taskFormArea && formArea === area ? taskFormBlock(area, icon) : (
-                          <button onClick={() => { setTaskFormArea(area + '|||' + icon); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }} style={{ marginTop: 4, background: 'transparent', border: 'none', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Tarefa</button>
-                        )}
-                      </div>
-                    )
-                  })}
-
-                  {prodTasks.length === 0 && !addingArea && !taskFormArea && <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Nenhuma área criada ainda. Clique em "+ Adicionar área" para montar a produção do evento.</div>}
-
-                  {/* Cost summary + export */}
-                  {prodTasks.length > 0 && (
-                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.brd}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                        <span style={{ color: C.mut }}>Custo estimado</span>
-                        <span style={{ color: '#f59e0b', fontWeight: 700 }}>R$ {(totEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                      {totReal > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                          <span style={{ color: C.mut }}>Custo real</span>
-                          <span style={{ color: '#10b981', fontWeight: 700 }}>R$ {(totReal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                        <button onClick={printProdCosts} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 0', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Planilha</button>
-                        <button onClick={exportProdCostsCsv} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 0', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>📥 CSV</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-
-            {/* Tab: Layout (Reservas) */}
-            {prodTab === 'layout' && (
-              <div style={{ flex: 1 }}>
-                {/* Summary */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
-                  <div style={{ background: '#3b82f610', border: '1px solid #3b82f633', borderRadius: 8, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: '#3b82f6' }}>{prodRes.length}</div>
-                    <div style={{ fontSize: 10, color: C.mut }}>Reservas</div>
-                  </div>
-                  <div style={{ background: '#a78bfa10', border: '1px solid #a78bfa33', borderRadius: 8, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: '#a78bfa' }}>{prodRes.reduce((s, r) => s + (r.people_count ?? 0), 0)}</div>
-                    <div style={{ fontSize: 10, color: C.mut }}>Pessoas esperadas</div>
-                  </div>
-                </div>
-                {/* Reservations list */}
-                {prodRes.length === 0
-                  ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Nenhuma reserva para esta data.</div>
-                  : prodRes.map(r => (
-                    <div key={r.id} style={{ background: r.status === 'arrived' ? '#10b98108' : '#ffffff05', border: `1px solid ${r.status === 'arrived' ? '#10b98122' : C.brd}`, borderRadius: 8, padding: '7px 10px', marginBottom: 5 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-                          <div style={{ fontSize: 11, color: C.mut, display: 'flex', gap: 8, marginTop: 1 }}>
-                            {r.location && <span>📍 {r.location}</span>}
-                            {r.people_count && <span>👥 {r.people_count}px</span>}
-                          </div>
-                          {/* Special items */}
-                          {(r.reservation_items ?? []).length > 0 && (
-                            <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                              {(r.reservation_items ?? []).map((item, i) => (
-                                <span key={i} style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b33', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>
-                                  {item.quantity > 1 ? `${item.quantity}× ` : ''}{item.name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: r.status === 'arrived' ? '#10b98122' : '#f59e0b22', color: r.status === 'arrived' ? '#10b981' : '#f59e0b', fontWeight: 700, flexShrink: 0 }}>
-                          {r.status === 'arrived' ? '✅' : '⏳'}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                }
-              </div>
-            )}
-
-            {/* Tab: Budget */}
-            {prodTab === 'budget' && (() => {
-              const totalRevenue = prodRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
-              const tasksEst = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-              const tasksReal = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-              const frTotal = prodFr.reduce((s, f) => s + ((f as any).custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
-              const totalEst = tasksEst + frTotal
-              const margin = totalRevenue - totalEst
-              return (
-                <div style={{ flex: 1 }}>
-                  {[
-                    { label: '📥 Receita (reservas)', val: totalRevenue, color: '#10b981' },
-                    { label: '📤 Despesas estimadas', val: totalEst, color: '#f59e0b' },
-                    { label: '📊 Margem', val: margin, color: margin >= 0 ? '#10b981' : '#f87171' },
-                  ].map(({ label, val, color }) => (
-                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                      <span style={{ color: C.mut }}>{label}</span>
-                      <span style={{ color, fontWeight: 700 }}>R$ {(val / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  ))}
-                  {tasksReal > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                      <span style={{ color: C.mut }}>💸 Margem real</span>
-                      <span style={{ color: totalRevenue - tasksReal - frTotal >= 0 ? '#3b82f6' : '#f87171', fontWeight: 700 }}>R$ {((totalRevenue - tasksReal - frTotal) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  {prodFr.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 10, color: C.mut, marginBottom: 4 }}>👷 Freelancers: R$ {(frTotal / 100).toFixed(2)}</div>
-                      <div style={{ fontSize: 10, color: C.mut }}>📋 Tarefas: R$ {(tasksEst / 100).toFixed(2)}</div>
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-            </>
+              })()
           }
         </div>{/* end RIGHT */}
           </div>{/* end flex body */}
@@ -1842,6 +1639,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                         </button>
                       )
                     }
+                    {prodTasks.length > 0 && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.brd}` }}>
+                        <button onClick={printProdCosts} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 0', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Planilha</button>
+                        <button onClick={exportProdCostsCsv} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 0', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>📥 CSV</button>
+                      </div>
+                    )}
                   </div>
                 )
               })()}
