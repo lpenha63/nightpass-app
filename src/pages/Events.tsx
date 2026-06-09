@@ -515,24 +515,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
 
-  function toggleFreelancer(freelancerId: string) {
-    if (!frModal) return
-    const existing = evFreelancers.find(ef => ef.freelancer_id === freelancerId)
-    if (existing) {
-      supabase.from('event_freelancers').delete().eq('id', existing.id)
-        .then(() => loadEvFreelancers(frModal))
-    } else {
-      supabase.from('event_freelancers').insert({ event_id: frModal.id, freelancer_id: freelancerId, confirmed: false })
-        .then(() => loadEvFreelancers(frModal))
-    }
-  }
-
-  function toggleConfirmed(ef: EventFreelancer) {
-    if (!frModal) return
-    supabase.from('event_freelancers').update({ confirmed: !ef.confirmed }).eq('id', ef.id)
-      .then(() => loadEvFreelancers(frModal))
-  }
-
   function loadGuests(ev: EventWithCounts) {
     setGuestEv(ev)
     setGuests([])
@@ -1472,73 +1454,51 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       </Modal>
 
       {/* Freelancers modal */}
-      <Modal open={!!frModal} title={`👷 Freelancers — ${frModal?.name ?? ''}`} onClose={() => { setFrModal(null); setEvFreelancers([]) }}>
-        {/* Budget summary */}
-        {(() => {
-          const artistFee = frModal?.artist_fee_cents ?? 0
-          const freelancerTotal = evFreelancers.reduce((sum, ef) => sum + (ef.freelancers?.daily_rate_cents ?? 0), 0)
-          const total = artistFee + freelancerTotal
-          return (
-            <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '12px 16px', marginBottom: 16, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-              <div>
-                <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🎤 CACHÊ</div>
-                <div style={{ color: C.gold, fontWeight: 700, fontSize: 15 }}>{fmtCurrency(artistFee)}</div>
-              </div>
-              <div>
-                <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>👷 FREELANCERS</div>
-                <div style={{ color: C.acc, fontWeight: 700, fontSize: 15 }}>{fmtCurrency(freelancerTotal)}</div>
-              </div>
-              <div style={{ borderLeft: `1px solid ${C.brd}`, paddingLeft: 10 }}>
-                <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>💰 TOTAL</div>
-                <div style={{ color: C.grn, fontWeight: 900, fontSize: 16 }}>{fmtCurrency(total)}</div>
-              </div>
-            </div>
-          )
-        })()}
-
-        {/* Already linked */}
-        {evFreelancers.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: C.mut, fontWeight: 600, marginBottom: 8 }}>VINCULADOS ({evFreelancers.length})</div>
-            {evFreelancers.map(ef => {
-              const fr = ef.freelancers
+      <Modal open={!!frModal} title={`👷 Equipe — ${frModal?.name ?? ''}`} onClose={() => { setFrModal(null); setEvFreelancers([]) }}>
+        <div style={{ fontSize: 12, color: C.mut, marginBottom: 14 }}>Visualização da equipe de trabalho escalada para o evento.</div>
+        {evFreelancers.length === 0
+          ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 24 }}>Nenhum profissional escalado para este evento.</div>
+          : (() => {
+              const roleOf = (ef: EventFreelancer) => (ef.role || ef.freelancers?.work_types?.[0] || 'outros')
+              const groups: Record<string, EventFreelancer[]> = {}
+              evFreelancers.forEach(ef => { const r = roleOf(ef); (groups[r] ||= []).push(ef) })
+              const confirmed = evFreelancers.filter(ef => ef.confirmed).length
               return (
-                <div key={ef.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{fr?.full_name ?? '—'}</div>
-                    <div style={{ color: C.mut, fontSize: 11 }}>
-                      {(fr?.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
-                      {fr?.daily_rate_cents ? ` · ${fmtCurrency(fr.daily_rate_cents)}/dia` : ''}
-                    </div>
+                <div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                    {[
+                      { label: 'Profissionais', val: evFreelancers.length, color: C.acc },
+                      { label: 'Confirmados', val: confirmed, color: C.grn },
+                      { label: 'Áreas', val: Object.keys(groups).length, color: C.gold },
+                    ].map((b, i) => (
+                      <div key={i} style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: b.color }}>{b.val}</div>
+                        <div style={{ fontSize: 10, color: C.mut, marginTop: 2 }}>{b.label}</div>
+                      </div>
+                    ))}
                   </div>
-                  <Btn onClick={() => toggleConfirmed(ef)} small
-                    style={{ background: ef.confirmed ? C.grn + '22' : C.mut + '22', color: ef.confirmed ? C.grn : C.mut, border: `1px solid ${ef.confirmed ? C.grn : C.brd}44` }}>
-                    {ef.confirmed ? '✅ Confirmado' : '⏳ Pendente'}
-                  </Btn>
-                  <Btn onClick={() => toggleFreelancer(ef.freelancer_id)} small variant="danger">✕</Btn>
+                  {Object.entries(groups).map(([role, members]) => (
+                    <div key={role} style={{ marginBottom: 14 }}>
+                      <div style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
+                        {WORK_LABELS[role] ?? role} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length})</span>
+                      </div>
+                      {members.map(ef => (
+                        <div key={ef.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{ef.freelancers?.full_name ?? '—'}</div>
+                            <div style={{ color: C.mut, fontSize: 11 }}>{(ef.freelancers?.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}</div>
+                          </div>
+                          <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 8, background: ef.confirmed ? C.grn + '22' : C.gold + '22', color: ef.confirmed ? C.grn : C.gold, fontWeight: 700 }}>
+                            {ef.confirmed ? '✅ Confirmado' : '⏳ Pendente'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 11, color: C.mut, marginTop: 8, paddingTop: 10, borderTop: `1px solid ${C.brd}` }}>Para escalar a equipe, definir valores e custos, use <strong style={{ color: C.sub }}>Produção › Equipe</strong>.</div>
                 </div>
               )
-            })}
-          </div>
-        )}
-        {/* Available to add */}
-        <div style={{ fontSize: 12, color: C.mut, fontWeight: 600, marginBottom: 8 }}>DISPONÍVEIS PARA ADICIONAR</div>
-        {allFreelancers.filter(fr => !evFreelancers.find(ef => ef.freelancer_id === fr.id)).length === 0
-          ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 16 }}>
-              {allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Freelancers.' : 'Todos os freelancers já estão vinculados.'}
-            </div>
-          : allFreelancers.filter(fr => !evFreelancers.find(ef => ef.freelancer_id === fr.id)).map(fr => (
-            <div key={fr.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{fr.full_name}</div>
-                <div style={{ color: C.mut, fontSize: 11 }}>
-                  {(fr.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
-                  {fr.daily_rate_cents ? ` · ${fmtCurrency(fr.daily_rate_cents)}/dia` : ''}
-                </div>
-              </div>
-              <Btn onClick={() => toggleFreelancer(fr.id)} small>➕ Adicionar</Btn>
-            </div>
-          ))
+            })()
         }
       </Modal>
 
@@ -1864,7 +1824,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <Btn onClick={() => openEdit(ev)} small variant="ghost" style={{ justifyContent: 'center' }}>✏️ Editar</Btn>
                 <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>👥 Lista</Btn>
                 <Btn onClick={() => onGoToReservas ? onGoToReservas(ev.event_date, ev.id) : openRes(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>🪑 Reservas</Btn>
-                <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>👷 Freelancers</Btn>
+                <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>👷 Equipe</Btn>
                 <Btn onClick={() => openTickets(ev)} small style={{ background: C.acc + '22', color: C.acc, border: `1px solid ${C.acc}44`, justifyContent: 'center' }}>🎟️ Ingressos</Btn>
                 <Btn onClick={() => openBudget(ev)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44`, justifyContent: 'center' }}>💰 Budget</Btn>
                 <Btn onClick={() => openProd(ev)} small style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', justifyContent: 'center' }}>🏭 Produção</Btn>
