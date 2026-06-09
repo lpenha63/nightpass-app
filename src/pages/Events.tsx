@@ -161,6 +161,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [resForm, setResForm] = useState(RDEF2)
   const [resEdit, setResEdit] = useState<string | null>(null)
 
+  // Consulta de reservas do card (somente leitura + impressão)
+  interface ResView { id: string; name: string; location?: string; people_count?: number; observations?: string; status: string; expected_arrival?: string }
+  const [resViewEv, setResViewEv] = useState<EventWithCounts | null>(null)
+  const [resViewList, setResViewList] = useState<ResView[]>([])
+
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   async function openProd(ev: EventWithCounts) {
@@ -669,6 +674,44 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setResEv(ev)
     supabase.from('reservations').select('*').eq('event_id', ev.id).order('expected_arrival')
       .then(r => setResList((r.data ?? []) as ResItem[]))
+  }
+
+  function openResView(ev: EventWithCounts) {
+    setResViewEv(ev); setResViewList([])
+    supabase.from('reservations').select('id,name,location,people_count,observations,status,expected_arrival')
+      .eq('house_id', house.id).or(`reservation_date.eq.${ev.event_date},event_id.eq.${ev.id}`).neq('status', 'cancelled')
+      .order('location', { nullsFirst: false }).order('name')
+      .then(r => setResViewList((r.data ?? []) as ResView[]))
+  }
+
+  function printResView(ev: EventWithCounts) {
+    const rows = resViewList
+    const totalPeople = rows.reduce((s, r) => s + (r.people_count ?? 0), 0)
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reservas — ${ev.name}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 32px; max-width: 900px; margin: 0 auto; color: #111; }
+      h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th { text-align: left; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 8px; border-bottom: 2px solid #333; }
+      td { padding: 9px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+      td.c, th.c { text-align: center; white-space: nowrap; }
+      .loc { font-weight: 700; }
+      .footer { margin-top: 28px; font-size: 12px; color: #999; text-align: center; }
+      @media print { body { padding: 14px; } }
+    </style></head><body>
+    <h1>🪑 Reservas — ${ev.name}</h1>
+    <div class="sub">📅 ${new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} &nbsp;·&nbsp; ${rows.length} reservas &nbsp;·&nbsp; ${totalPeople} pessoas</div>
+    <table>
+      <thead><tr><th class="c" style="width:70px">Local</th><th>Nome</th><th class="c" style="width:70px">Pessoas</th><th>Observação</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `<tr><td class="c loc">${r.location ?? '—'}</td><td>${r.name}</td><td class="c">${r.people_count ?? '-'}</td><td>${r.observations ?? ''}</td></tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="footer">Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — NightPass</div>
+    <script>window.onload = () => window.print()</script>
+    </body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
   }
 
   function saveRes() {
@@ -1576,6 +1619,39 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         )}
       </Modal>
 
+      {/* Reservas — consulta (somente leitura + impressão p/ montagem) */}
+      <Modal open={!!resViewEv} title={`🪑 Reservas — ${resViewEv?.name ?? ''}`} onClose={() => { setResViewEv(null); setResViewList([]) }} wide>
+        {resViewEv && (() => {
+          const totalPeople = resViewList.reduce((s, r) => s + (r.people_count ?? 0), 0)
+          return (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 12, color: C.mut }}>{resViewList.length} reservas · {totalPeople} pessoas previstas</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {onGoToReservas && <Btn onClick={() => { onGoToReservas(resViewEv.event_date, resViewEv.id); setResViewEv(null) }} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Gerenciar</Btn>}
+                  <Btn onClick={() => printResView(resViewEv)} small variant="secondary" style={cbtn('#3b82f6')}>🖨️ Imprimir (montagem)</Btn>
+                </div>
+              </div>
+              {resViewList.length === 0
+                ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 24 }}>Nenhuma reserva para este evento.</div>
+                : resViewList.map(r => (
+                  <div key={r.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0', borderBottom: `1px solid ${C.brd}` }}>
+                    <div style={{ minWidth: 60, flexShrink: 0 }}>
+                      <div style={{ background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', borderRadius: 8, padding: '4px 6px', fontSize: 13, fontWeight: 800, textAlign: 'center' }}>{r.location || '—'}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: C.txt, fontSize: 14, fontWeight: 700 }}>{r.name}</div>
+                      {r.observations && <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>📝 {r.observations}</div>}
+                    </div>
+                    <div style={{ flexShrink: 0, textAlign: 'right', color: C.sub, fontSize: 13, fontWeight: 700 }}>👥 {r.people_count ?? '-'}</div>
+                  </div>
+                ))
+              }
+            </div>
+          )
+        })()}
+      </Modal>
+
       {/* Budget modal */}
       <Modal open={!!budgetEv} title={`💰 Budget — ${budgetEv?.name ?? ''}`} onClose={() => { setBudgetEv(null); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]); setBudgetRes([]); setBudgetTasks([]) }} wide>
         {budgetEv && (() => {
@@ -1854,7 +1930,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <Btn onClick={() => openEdit(ev)} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Editar</Btn>
                 <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={cbtn('#3b82f6')}>👥 Lista</Btn>
-                <Btn onClick={() => onGoToReservas ? onGoToReservas(ev.event_date, ev.id) : openRes(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
+                <Btn onClick={() => openResView(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
                 <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={cbtn('#22d3ee')}>👷 Equipe</Btn>
                 <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎟️ Ingressos</Btn>
                 <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>
