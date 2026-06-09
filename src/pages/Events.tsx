@@ -1166,10 +1166,10 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: C.txt }}>{editing ? 'Editar Evento' : 'Novo Evento'}</h2>
             <button onClick={() => { setModal(false); setEditing(null); setProdEv(null) }} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 26, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>
           </div>
-          {/* Body: always 65/35 split */}
+          {/* Body: 55/45 split (form / produção) */}
           <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* LEFT: event form (65%) */}
-        <div style={{ flex: '0 0 65%', overflowY: 'auto', padding: '20px 28px', borderRight: `1px solid ${C.brd}` }}>
+        {/* LEFT: event form (55%) */}
+        <div style={{ flex: '0 0 55%', overflowY: 'auto', padding: '20px 28px', borderRight: `1px solid ${C.brd}` }}>
         {/* 2-column layout: left = info, right = prices + flyer */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
@@ -1346,8 +1346,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         </div>
         </div>{/* end LEFT */}
 
-        {/* RIGHT: production panel (35%) — MESMO painel inline (renderProdTabs/renderProdBody) */}
-        <div style={{ flex: '0 0 35%', overflowY: 'hidden', padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
+        {/* RIGHT: production panel (45%) — MESMO painel inline (renderProdTabs/renderProdBody) */}
+        <div style={{ flex: '0 0 45%', overflowY: 'hidden', padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
           {!editing
             ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: C.mut }}>
                 <div style={{ fontSize: 32 }}>🏭</div>
