@@ -122,7 +122,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [prodEv, setProdEv] = useState<EventWithCounts | null>(null)
   const [prodTasks, setProdTasks] = useState<EventTask[]>([])
   const [prodRes, setProdRes] = useState<ProdReservation[]>([])
-  const [prodTab, setProdTab] = useState<'tasks' | 'checklist' | 'freelancers' | 'budget' | 'layout'>('tasks')
+  const [prodTab, setProdTab] = useState<'tasks' | 'freelancers' | 'budget' | 'layout'>('tasks')
   const [prodFr, setProdFr] = useState<EventFreelancer[]>([])
   const [teamArea, setTeamArea] = useState<string | null>(null)
   const [addingArea, setAddingArea] = useState(false)
@@ -140,11 +140,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function removeArtist(i: number) { setArtists(a => a.filter((_, idx) => idx !== i)) }
   function setArtist(i: number, patch: Partial<ArtistEntry>) { setArtists(a => a.map((ar, idx) => idx === i ? { ...ar, ...patch } : ar)) }
 
-  // Checklist (dentro do painel Produção)
-  interface ChecklistItem { id: string; category: string; title: string; done: boolean; sort_order: number }
-  const [checklist, setChecklist] = useState<ChecklistItem[]>([])
-  const [clForm, setClForm] = useState({ category: 'Equipe', title: '' })
-  const CHECKLIST_CATS = ['Equipe','Som & Iluminação','Bebidas & Bar','Alimentação','Decoração','Artistas','Marketing','Documentos','Infraestrutura','Outros']
+  // Checklist do card — checagem das tarefas adicionadas na Produção
+  const [checkEv, setCheckEv] = useState<EventWithCounts | null>(null)
+  const [checkTasks, setCheckTasks] = useState<EventTask[]>([])
 
   // Reservations modal
   const [resEv, setResEv] = useState<EventWithCounts | null>(null)
@@ -156,18 +154,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   async function openProd(ev: EventWithCounts) {
-    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setChecklist([]); setTeamArea(null)
-    const [tasksR, resR, frR, clR] = await Promise.all([
+    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setTeamArea(null)
+    const [tasksR, resR, frR] = await Promise.all([
       supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
       supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
         .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled'),
       supabase.from('event_freelancers').select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', ev.id),
-      supabase.from('event_checklist_items').select('*').eq('event_id', ev.id).order('category').order('sort_order'),
     ])
     setProdTasks((tasksR.data ?? []) as EventTask[])
     setProdRes((resR.data ?? []) as ProdReservation[])
     setProdFr((frR.data ?? []) as EventFreelancer[])
-    setChecklist((clR.data ?? []) as ChecklistItem[])
   }
 
   async function reloadProdFr() {
@@ -343,31 +339,23 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     window.open(`https://wa.me/55${ph}?text=${encodeURIComponent(lines)}`, '_blank')
   }
 
-  async function addClItem() {
-    if (!clForm.title.trim() || !prodEv) return
-    const maxOrder = checklist.filter(i => i.category === clForm.category).length
-    const { data } = await supabase.from('event_checklist_items').insert({
-      event_id: prodEv.id, house_id: house.id,
-      category: clForm.category, title: clForm.title.trim(), sort_order: maxOrder,
-    }).select().single()
-    if (data) { setChecklist(p => [...p, data as ChecklistItem]); setClForm(p => ({ ...p, title: '' })) }
+  function openCheck(ev: EventWithCounts) {
+    setCheckEv(ev); setCheckTasks([])
+    supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order')
+      .then(r => setCheckTasks((r.data ?? []) as EventTask[]))
   }
 
-  async function toggleClItem(id: string, done: boolean) {
-    await supabase.from('event_checklist_items').update({ done }).eq('id', id)
-    setChecklist(p => p.map(i => i.id === id ? { ...i, done } : i))
+  async function toggleCheckTask(task: EventTask) {
+    const done = task.status !== 'done'
+    await supabase.from('event_tasks').update({ status: done ? 'done' : 'pending', completed_at: done ? new Date().toISOString() : null, completed_by: done ? 'operador' : null }).eq('id', task.id)
+    setCheckTasks(p => p.map(t => t.id === task.id ? { ...t, status: done ? 'done' : 'pending' } as EventTask : t))
   }
 
-  async function deleteClItem(id: string) {
-    await supabase.from('event_checklist_items').delete().eq('id', id)
-    setChecklist(p => p.filter(i => i.id !== id))
-  }
-
-  function printChecklist(ev: EventWithCounts) {
-    const grouped: Record<string, ChecklistItem[]> = {}
-    checklist.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i) })
-    const total = checklist.length
-    const done = checklist.filter(i => i.done).length
+  function printCheck(ev: EventWithCounts) {
+    const grouped: Record<string, { icon: string; tasks: EventTask[] }> = {}
+    checkTasks.forEach(t => { if (!grouped[t.area]) grouped[t.area] = { icon: t.area_icon, tasks: [] }; grouped[t.area].tasks.push(t) })
+    const total = checkTasks.length
+    const done = checkTasks.filter(t => t.status === 'done').length
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Checklist — ${ev.name}</title>
     <style>
       body { font-family: Arial, sans-serif; padding: 32px; max-width: 800px; margin: 0 auto; color: #111; }
@@ -379,15 +367,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       .box { width: 18px; height: 18px; border: 2px solid #999; border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
       .box.done { background: #10b981; border-color: #10b981; color: #fff; font-size: 12px; }
       .label { font-size: 14px; } .label.done { text-decoration: line-through; color: #999; }
+      .meta { color: #888; font-size: 12px; margin-left: auto; }
       .footer { margin-top: 32px; font-size: 12px; color: #999; text-align: center; }
       @media print { body { padding: 16px; } }
     </style></head><body>
     <h1>📋 ${ev.name}</h1>
-    <div class="sub">📅 ${new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} &nbsp;·&nbsp; ${done}/${total} itens concluídos</div>
+    <div class="sub">📅 ${new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} &nbsp;·&nbsp; ${done}/${total} tarefas concluídas</div>
     <div class="progress"><div class="progress-bar"></div></div>
-    ${Object.entries(grouped).map(([cat, items]) => `
-      <h2>${cat}</h2>
-      ${items.map(i => `<div class="item"><div class="box ${i.done ? 'done' : ''}">${i.done ? '✓' : ''}</div><span class="label ${i.done ? 'done' : ''}">${i.title}</span></div>`).join('')}
+    ${Object.entries(grouped).map(([area, g]) => `
+      <h2>${g.icon} ${area}</h2>
+      ${g.tasks.map(t => `<div class="item"><div class="box ${t.status === 'done' ? 'done' : ''}">${t.status === 'done' ? '✓' : ''}</div><span class="label ${t.status === 'done' ? 'done' : ''}">${t.title}</span>${t.assignee_name ? `<span class="meta">${t.assignee_name}</span>` : ''}</div>`).join('')}
     `).join('')}
     <div class="footer">Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
     <script>window.onload = () => window.print()</script>
@@ -691,9 +680,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   const renderProdTabs = () => (
               <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-                {(['tasks', 'checklist', 'freelancers', 'budget'] as const).map(tab => {
-                  const clDone = checklist.filter(i => i.done).length
-                  const labels = { tasks: '📋 Tarefas', checklist: `✅ Checklist${checklist.length ? ` (${clDone}/${checklist.length})` : ''}`, freelancers: `👥 Equipe (${prodFr.length})`, budget: '💰 Budget' }
+                {(['tasks', 'freelancers', 'budget'] as const).map(tab => {
+                  const labels = { tasks: '📋 Tarefas', freelancers: `👥 Equipe (${prodFr.length})`, budget: '💰 Budget' }
                   return (
                     <button key={tab} onClick={() => setProdTab(tab)} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${prodTab === tab ? '#f59e0b' : C.brd}`, background: prodTab === tab ? '#f59e0b22' : 'transparent', color: prodTab === tab ? '#f59e0b' : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       {labels[tab]}
@@ -886,65 +874,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                         <button onClick={exportProdCostsCsv} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 0', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>📥 CSV</button>
                       </div>
                     )}
-                  </div>
-                )
-              })()}
-
-              {/* ── TAB: CHECKLIST ── */}
-              {prodTab === 'checklist' && (() => {
-                const grouped: Record<string, ChecklistItem[]> = {}
-                checklist.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i) })
-                const done = checklist.filter(i => i.done).length
-                const pct = checklist.length ? Math.round(done / checklist.length * 100) : 0
-                return (
-                  <div>
-                    {/* Add item */}
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                      <select value={clForm.category} onChange={e => setClForm(p => ({ ...p, category: e.target.value }))}
-                        style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', flexShrink: 0 }}>
-                        {CHECKLIST_CATS.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <input value={clForm.title} onChange={e => setClForm(p => ({ ...p, title: e.target.value }))}
-                        onKeyDown={e => e.key === 'Enter' && addClItem()}
-                        placeholder="Adicionar item... (Enter)"
-                        style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }} />
-                      <button onClick={addClItem}
-                        style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: '#f59e0b', color: '#1a1205', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>➕</button>
-                    </div>
-
-                    {/* Progress + print */}
-                    {checklist.length > 0 && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                        <div style={{ flex: 1, height: 6, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : '#f59e0b', borderRadius: 4 }} />
-                        </div>
-                        <span style={{ fontSize: 11, color: C.mut, fontWeight: 600 }}>{done}/{checklist.length}</span>
-                        <button onClick={() => prodEv && printChecklist(prodEv)} style={{ padding: '5px 12px', borderRadius: 8, border: `1px solid ${C.brd}`, background: 'transparent', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Imprimir</button>
-                      </div>
-                    )}
-
-                    {/* Items grouped by category */}
-                    {checklist.length === 0
-                      ? <div style={{ color: C.mut, textAlign: 'center', padding: '40px 0', fontSize: 13 }}>Nenhum item ainda. Use o campo acima para montar a checklist do evento.</div>
-                      : Object.entries(grouped).map(([cat, items]) => (
-                        <div key={cat} style={{ marginBottom: 16 }}>
-                          <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
-                            {cat} <span style={{ color: C.brd, fontWeight: 400 }}>({items.filter(i => i.done).length}/{items.length})</span>
-                          </div>
-                          {items.map(item => (
-                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                              <button onClick={() => toggleClItem(item.id, !item.done)}
-                                style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${item.done ? '#10b981' : C.brd}`, background: item.done ? '#10b981' : 'transparent', color: '#fff', fontSize: 13, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {item.done ? '✓' : ''}
-                              </button>
-                              <span style={{ flex: 1, color: item.done ? C.mut : C.txt, fontSize: 14, textDecoration: item.done ? 'line-through' : 'none' }}>{item.title}</span>
-                              <button onClick={() => deleteClItem(item.id)}
-                                style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer', padding: '2px 6px', opacity: 0.5 }}>✕</button>
-                            </div>
-                          ))}
-                        </div>
-                      ))
-                    }
                   </div>
                 )
               })()}
@@ -1352,7 +1281,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: C.mut }}>
                 <div style={{ fontSize: 32 }}>🏭</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.sub }}>Produção</div>
-                <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 220 }}>Salve o evento para liberar o painel de Produção (tarefas, checklist, equipe e budget).</div>
+                <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 220 }}>Salve o evento para liberar o painel de Produção (tarefas, equipe e budget).</div>
               </div>
             : <>
                 <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, letterSpacing: '0.08em', flexShrink: 0 }}>🏭 PRODUÇÃO</div>
@@ -1500,6 +1429,54 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               )
             })()
         }
+      </Modal>
+
+      {/* Checklist do card — checagem das tarefas de produção */}
+      <Modal open={!!checkEv} title={`📋 Checklist — ${checkEv?.name ?? ''}`} onClose={() => { setCheckEv(null); setCheckTasks([]) }}>
+        {(() => {
+          const total = checkTasks.length
+          const done = checkTasks.filter(t => t.status === 'done').length
+          const pct = total ? Math.round(done / total * 100) : 0
+          const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
+          checkTasks.forEach(t => { if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }; areas[t.area].tasks.push(t) })
+          return (
+            <div>
+              <div style={{ fontSize: 12, color: C.mut, marginBottom: 12 }}>Marque as tarefas conforme forem concluídas. As tarefas são cadastradas em Produção › Tarefas.</div>
+              {total === 0
+                ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 24 }}>Nenhuma tarefa cadastrada na Produção deste evento.</div>
+                : <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                      <div style={{ flex: 1, height: 8, background: C.brd, borderRadius: 6, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : 'linear-gradient(90deg,#f59e0b,#fbbf24)', borderRadius: 6, transition: 'width .3s' }} />
+                      </div>
+                      <span style={{ fontSize: 12, color: pct === 100 ? '#10b981' : C.sub, fontWeight: 700 }}>{done}/{total} ({pct}%)</span>
+                      <button onClick={() => checkEv && printCheck(checkEv)} style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${C.brd}`, background: 'transparent', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Imprimir</button>
+                    </div>
+                    {Object.entries(areas).map(([area, g]) => (
+                      <div key={area} style={{ marginBottom: 16 }}>
+                        <div style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
+                          {g.icon} {area} <span style={{ color: C.brd, fontWeight: 400 }}>({g.tasks.filter(t => t.status === 'done').length}/{g.tasks.length})</span>
+                        </div>
+                        {g.tasks.map(t => (
+                          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                            <button onClick={() => toggleCheckTask(t)} style={{ width: 24, height: 24, borderRadius: 6, border: `2px solid ${t.status === 'done' ? '#10b981' : C.brd}`, background: t.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 13, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{t.status === 'done' ? '✓' : ''}</button>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ color: t.status === 'done' ? C.mut : C.txt, fontSize: 14, fontWeight: 500, textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>{t.title}</div>
+                              {(t.assignee_name || t.deadline) && (
+                                <div style={{ fontSize: 11, color: C.mut, marginTop: 1 }}>
+                                  {t.assignee_name ? `👤 ${t.assignee_name}` : ''}{t.assignee_name && t.deadline ? ' · ' : ''}{t.deadline ? `⏰ ${new Date(t.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}` : ''}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </>
+              }
+            </div>
+          )
+        })()}
       </Modal>
 
       {/* Tickets modal */}
@@ -1828,6 +1805,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <Btn onClick={() => openTickets(ev)} small style={{ background: C.acc + '22', color: C.acc, border: `1px solid ${C.acc}44`, justifyContent: 'center' }}>🎟️ Ingressos</Btn>
                 <Btn onClick={() => openBudget(ev)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44`, justifyContent: 'center' }}>💰 Budget</Btn>
                 <Btn onClick={() => openProd(ev)} small style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', justifyContent: 'center' }}>🏭 Produção</Btn>
+                <Btn onClick={() => openCheck(ev)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44', justifyContent: 'center' }}>📋 Checklist</Btn>
                 <Btn onClick={() => cancelEv(ev)} small variant={ev.status === 'cancelado' ? 'secondary' : 'danger'} style={{ justifyContent: 'center' }}>
                   {ev.status === 'cancelado' ? '✅ Reativar' : '❌ Cancelar'}
                 </Btn>
