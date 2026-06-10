@@ -8,6 +8,14 @@ import { sT, _err, type ToastState } from '../utils/toast'
 import type { House, Event, ArtistEntry, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 
+function fmtMoneyInput(v: number | string): string {
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')) || 0
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function parseMoneyInput(raw: string): number {
+  return parseInt(raw.replace(/\D/g, '') || '0', 10) / 100
+}
+
 interface Props { house: House; onGoToReservas?: (date: string, eventId: string) => void }
 
 interface EventWithCounts extends Event {
@@ -1270,21 +1278,21 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cover Masc (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_male_cents ?? 0)} onChange={e => setF('price_male_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_male_cents as number)}`} onChange={e => setF('price_male_cents', parseMoneyInput(e.target.value))} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cover Fem (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_female_cents ?? 0)} onChange={e => setF('price_female_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_female_cents as number)}`} onChange={e => setF('price_female_cents', parseMoneyInput(e.target.value))} />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lista Masc (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_male_list_cents ?? 0)} onChange={e => setF('price_male_list_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_male_list_cents as number)}`} onChange={e => setF('price_male_list_cents', parseMoneyInput(e.target.value))} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lista Fem (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_female_list_cents ?? 0)} onChange={e => setF('price_female_list_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_female_list_cents as number)}`} onChange={e => setF('price_female_list_cents', parseMoneyInput(e.target.value))} />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -1344,14 +1352,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               </select>
               {/* Fee value cell */}
               {ar.fee_type === 'fixed' && (
-                <input type="number" step="0.01" min="0" {...inp} value={ar.fee_cents} onChange={e => setArtist(i, { fee_cents: parseFloat(e.target.value) || 0 })} placeholder="R$ 0,00" />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(ar.fee_cents)}`} onChange={e => setArtist(i, { fee_cents: parseMoneyInput(e.target.value) })} />
               )}
               {ar.fee_type === 'percent' && (
                 <input type="number" step="1" min="0" max="100" {...inp} value={ar.fee_percent} onChange={e => setArtist(i, { fee_percent: parseFloat(e.target.value) || 0 })} placeholder="%" />
               )}
               {ar.fee_type === 'mixed' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                  <input type="number" step="0.01" min="0" {...inp} value={ar.fee_cents} onChange={e => setArtist(i, { fee_cents: parseFloat(e.target.value) || 0 })} placeholder="R$ fixo" />
+                  <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(ar.fee_cents)}`} onChange={e => setArtist(i, { fee_cents: parseMoneyInput(e.target.value) })} placeholder="R$ fixo" />
                   <input type="number" step="1" min="0" max="100" {...inp} value={ar.fee_percent} onChange={e => setArtist(i, { fee_percent: parseFloat(e.target.value) || 0 })} placeholder="%" />
                 </div>
               )}
@@ -1359,7 +1367,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <div style={{ ...inp.style, display: 'flex', alignItems: 'center', color: C.gold, fontSize: 11 }}>A combinar</div>
               )}
               {/* Consumação */}
-              <input type="number" step="0.01" min="0" {...inp} value={ar.consumption_cents} onChange={e => setArtist(i, { consumption_cents: parseFloat(e.target.value) || 0 })} placeholder="R$" />
+              <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(ar.consumption_cents)}`} onChange={e => setArtist(i, { consumption_cents: parseMoneyInput(e.target.value) })} />
               <button onClick={() => removeArtist(i)} style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 8, padding: '6px 8px', color: C.red, cursor: 'pointer', fontSize: 14 }}>✕</button>
             </div>
           ))}

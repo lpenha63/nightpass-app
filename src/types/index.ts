@@ -2,6 +2,7 @@ export interface House {
   id: string
   name: string
   slug?: string
+  logo_url?: string
   created_at: string
 }
 

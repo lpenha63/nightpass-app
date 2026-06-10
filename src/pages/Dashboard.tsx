@@ -334,14 +334,19 @@ export function DashboardPage({ house, user }: Props) {
       <Toast toast={toast} />
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 900, color: C.txt, letterSpacing: '-0.02em', marginBottom: 4 }}>
-            📊 Dashboard
-          </h1>
-          <p style={{ color: C.mut, fontSize: 14 }}>
-            {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
-          </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+          {house.logo_url && (
+            <img src={house.logo_url} alt={house.name} style={{ width: 52, height: 52, borderRadius: 12, objectFit: 'cover', border: `1px solid ${C.brd}`, flexShrink: 0 }} />
+          )}
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ fontSize: 28, fontWeight: 900, color: C.txt, letterSpacing: '-0.02em', marginBottom: 4 }}>
+              {house.name || '📊 Dashboard'}
+            </h1>
+            <p style={{ color: C.mut, fontSize: 14, textTransform: 'capitalize' }}>
+              {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </p>
+          </div>
         </div>
       </div>
 
