@@ -105,7 +105,7 @@ export function ClientsPage({ house, user }: Props) {
     if (!form.full_name.trim()) { sT(setToast, 'Nome obrigatório', 'error'); return }
     if (cn(form.phone).length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
     if (!form.birth_date) { sT(setToast, 'Data de nascimento obrigatória', 'error'); return }
-    const data = { full_name: form.full_name, cpf: cn(form.cpf) || null, phone: cn(form.phone), birth_date: form.birth_date, gender: form.gender || null, email: form.email || null, photo_url: form.photo_url || null, fingerprint_id: form.fingerprint_id || null, house_id: house.id, status: 'ativo', created_by: user.id }
+    const data = { full_name: form.full_name, cpf: cn(form.cpf) || null, phone: cn(form.phone), birth_date: form.birth_date || null, gender: form.gender || null, email: form.email || null, photo_url: form.photo_url || null, fingerprint_id: form.fingerprint_id || null, house_id: house.id, status: 'active', created_by: user.id }
     const q = editing ? supabase.from('clients').update(data).eq('id', editing.id) : supabase.from('clients').insert(data)
     q.then(r => {
       if (r.error) { sT(setToast, 'Erro: ' + r.error.message, 'error'); return }

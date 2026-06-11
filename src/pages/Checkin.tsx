@@ -61,6 +61,7 @@ interface PromoterGuest {
   phone?: string
   cpf?: string
   gender?: string
+  birth_date?: string
   list_type?: string
   checked_in: boolean
   checked_in_at?: string
@@ -321,6 +322,7 @@ export function CheckinPage({ house, user }: Props) {
         full_name: g.full_name,
         cpf: cpfClean || null,
         phone: phoneClean || null,
+        birth_date: g.birth_date || null,
         status: 'ativo',
         created_by: user.id,
       }).select('id').single()
@@ -431,6 +433,9 @@ export function CheckinPage({ house, user }: Props) {
 
   async function saveCompleteGuest() {
     if (!completeGuest) return
+    // Dados básicos obrigatórios para cadastrar: celular + data de nascimento
+    if (cn(completeForm.phone).length < 10) { sT(setToast, 'Celular obrigatório para cadastrar', 'warn'); return }
+    if (!completeForm.birth_date) { sT(setToast, 'Data de nascimento obrigatória para cadastrar', 'warn'); return }
     // Update reservation_guests record with form data
     await supabase.from('reservation_guests').update({
       phone: completeForm.phone || null,
@@ -945,8 +950,9 @@ export function CheckinPage({ house, user }: Props) {
                                   </div>
                                 : <div style={{ maxHeight: 308, overflowY: 'auto', paddingRight: 2 }}>
                                   {[...guests].sort((a, b) => (a.checked_in ? 1 : 0) - (b.checked_in ? 1 : 0)).map(g => {
-                                    const hasData = !!(g.confirmed || (g.name && (g.phone || g.cpf || g.birth_date)))
                                     const hasBirth = !!g.birth_date
+                                    // Dados básicos para cadastro automático: celular + data de nascimento
+                                    const hasBasic = !!(g.phone && g.birth_date)
                                     return (
                                       <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, marginBottom: 6, background: g.checked_in ? C.grn + '0d' : C.bg, border: `1px solid ${g.checked_in ? C.grn + '33' : C.brd + '55'}` }}>
                                         <div style={{ width: 8, height: 8, borderRadius: '50%', background: g.checked_in ? C.grn : C.mut, flexShrink: 0, boxShadow: g.checked_in ? `0 0 6px ${C.grn}` : 'none' }} />
@@ -958,21 +964,24 @@ export function CheckinPage({ house, user }: Props) {
                                           <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                                             {g.phone && <span>📱 {ftel(g.phone)}</span>}
                                             {hasBirth && <span style={{ color: C.acc }}>🎂 {new Date(g.birth_date! + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}</span>}
-                                            {!hasData && <span style={{ color: C.gold }}>⚠️ dados incompletos</span>}
+                                            {!hasBasic && <span style={{ color: C.gold }}>⚠️ falta cel/nascimento</span>}
                                           </div>
                                         </div>
                                         {g.checked_in
-                                          ? <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✅ Entrou</span>
-                                          : hasData
+                                          ? <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                              <div style={{ color: C.grn, fontSize: 11, fontWeight: 700 }}>✅ Entrou</div>
+                                              {g.checked_in_at && <div style={{ color: C.acc, fontSize: 11, fontWeight: 700 }}>🕐 {new Date(g.checked_in_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
+                                            </div>
+                                          : hasBasic
                                             ? <button
                                                 onClick={() => { setPendingCI({ type: 'reserva', guest: g, reservation: res }); setListComanda(''); setListAmount(prefilledAmount(res, g)) }}
                                                 style={{ background: `linear-gradient(135deg,${C.acc},#1d4ed8)`, border: 'none', borderRadius: 8, padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, boxShadow: '0 2px 8px rgba(59,130,246,0.4)' }}>
                                                 ✅ Check-in
                                               </button>
                                             : <button
-                                                onClick={() => { setCompleteGuest(g); setCompleteForm({ phone: g.phone ?? '', cpf: g.cpf ?? '', birth_date: g.birth_date ?? '', photoDataUrl: '', comanda: '', amount: '' }) }}
+                                                onClick={() => { setCompleteGuest(g); setCompleteForm({ phone: g.phone ?? '', cpf: g.cpf ?? '', birth_date: g.birth_date ?? '', photoDataUrl: '', comanda: '', amount: prefilledAmount(res, g) }) }}
                                                 style={{ background: C.gold + '22', border: `1px solid ${C.gold}44`, borderRadius: 8, padding: '6px 10px', color: C.gold, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                                                ✏️ Manual
+                                                📝 Cadastrar
                                               </button>
                                         }
                                       </div>
@@ -1019,7 +1028,10 @@ export function CheckinPage({ house, user }: Props) {
                               </div>
                             </div>
                             {g.checked_in
-                              ? <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✅ Entrou</span>
+                              ? <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                  <div style={{ color: C.grn, fontSize: 11, fontWeight: 700 }}>✅ Entrou</div>
+                                  {g.checked_in_at && <div style={{ color: C.acc, fontSize: 11, fontWeight: 700 }}>🕐 {new Date(g.checked_in_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
+                                </div>
                               : <button
                                   onClick={() => { setPendingCI({ type: 'promo', guest: g }); setListComanda('') }}
                                   style={{ background: `linear-gradient(135deg,${C.acc},#1d4ed8)`, border: 'none', borderRadius: 8, padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, boxShadow: '0 2px 8px rgba(59,130,246,0.4)' }}>
@@ -1039,14 +1051,19 @@ export function CheckinPage({ house, user }: Props) {
               <div style={{ fontWeight: 700, fontSize: 13, color: C.txt, marginBottom: 10 }}>⏱ Recentes</div>
               {recent.length === 0
                 ? <div style={{ color: C.mut, fontSize: 12 }}>Nenhum ainda</div>
-                : recent.slice(0, 6).map((ci, i) => {
-                  const mins = Math.floor((Date.now() - new Date(ci.created_at).getTime()) / 60000)
+                : recent.slice(0, 8).map((ci, i) => {
+                  const dt = new Date(ci.created_at)
+                  const timeStr = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                  const mins = Math.floor((Date.now() - dt.getTime()) / 60000)
                   const cl = ci.clients as { full_name?: string } | undefined
                   return (
-                    <div key={ci.id || i} style={{ padding: '6px 0', borderBottom: i < Math.min(recent.length, 6) - 1 ? `1px solid ${C.brd}` : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div key={ci.id || i} style={{ padding: '7px 0', borderBottom: i < Math.min(recent.length, 8) - 1 ? `1px solid ${C.brd}` : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <div style={{ color: C.txt, fontSize: 12, fontWeight: 600 }}>{cl?.full_name ?? 'Visitante'}</div>
-                        <div style={{ color: C.mut, fontSize: 11 }}>há {mins < 60 ? `${mins}min` : `${Math.floor(mins / 60)}h`}</div>
+                        <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{cl?.full_name ?? 'Visitante'}</div>
+                        <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, marginTop: 1 }}>
+                          <span style={{ color: C.acc, fontWeight: 700 }}>🕐 {timeStr}</span>
+                          <span>há {mins < 60 ? `${mins}min` : `${Math.floor(mins / 60)}h`}</span>
+                        </div>
                       </div>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                         {ci.comanda && <span style={{ background: C.gold + '22', color: C.gold, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 6 }}>#{ci.comanda}</span>}
@@ -1161,10 +1178,15 @@ export function CheckinPage({ house, user }: Props) {
                                               )}
                                             </div>
                                             {!g.checked_in && (
-                                              <button onClick={() => { setPendingCI({ type: 'reserva', guest: g, reservation: r }); setListComanda(''); setListAmount(prefilledAmount(r, g)) }}
-                                                style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, color: C.acc, borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                                                Entrada
-                                              </button>
+                                              (g.phone && g.birth_date)
+                                                ? <button onClick={() => { setPendingCI({ type: 'reserva', guest: g, reservation: r }); setListComanda(''); setListAmount(prefilledAmount(r, g)) }}
+                                                    style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, color: C.acc, borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+                                                    Entrada
+                                                  </button>
+                                                : <button onClick={() => { setCompleteGuest(g); setCompleteForm({ phone: g.phone ?? '', cpf: g.cpf ?? '', birth_date: g.birth_date ?? '', photoDataUrl: '', comanda: '', amount: prefilledAmount(r, g) }) }}
+                                                    style={{ background: C.gold + '22', border: `1px solid ${C.gold}44`, color: C.gold, borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+                                                    📝 Cadastrar
+                                                  </button>
                                             )}
                                           </div>
                                         ))}
@@ -1381,7 +1403,7 @@ export function CheckinPage({ house, user }: Props) {
 
             <div style={{ display: 'grid', gap: 12 }}>
               <div>
-                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>TELEFONE</label>
+                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>TELEFONE *</label>
                 <input value={ftel(completeForm.phone)} onChange={e => setCompleteForm(p => ({ ...p, phone: cn(e.target.value).slice(0, 11) }))} placeholder="(00) 00000-0000"
                   style={{ ...SL }} />
               </div>
@@ -1391,7 +1413,7 @@ export function CheckinPage({ house, user }: Props) {
                   style={{ ...SL }} />
               </div>
               <div>
-                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>DATA DE NASCIMENTO</label>
+                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>DATA DE NASCIMENTO *</label>
                 <input type="date" value={completeForm.birth_date} onChange={e => setCompleteForm(p => ({ ...p, birth_date: e.target.value }))}
                   style={{ ...SL }} />
               </div>

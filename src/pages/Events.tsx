@@ -75,7 +75,7 @@ const STATUS_LABEL: Record<string, string> = { pending: 'Pendente', confirmed: '
 const DEF = {
   name: '', event_date: '', genre: 'Sertanejo', start_time: '22:00', end_time: '04:00',
   price_male_cents: 0, price_female_cents: 0, price_male_list_cents: 0, price_female_list_cents: 0,
-  promotions: '', repeat_rule: 'none', capacity: '', birthday_list_enabled: false,
+  promotions: '', repeat_rule: 'none', capacity: '', birthday_list_enabled: false, house_list_enabled: false,
   attractions: '', flyer_url: '', observations: '',
   artist_fee_cents: 0, artist_fee_type: 'fixed', artist_fee_percent: 0,
   consumption_cents: 0, production_cost_cents: 0, status: 'ativo',
@@ -102,6 +102,17 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [guestEv, setGuestEv] = useState<EventWithCounts | null>(null)
   const [guests, setGuests] = useState<Guest[]>([])
   const [guestFilter, setGuestFilter] = useState('all')
+  const [guestListToken, setGuestListToken] = useState<string | null>(null)
+  const [guestListId, setGuestListId] = useState<string | null>(null)
+  const [guestListPromoId, setGuestListPromoId] = useState<string | null>(null)
+  const [guestAddForm, setGuestAddForm] = useState({ name: '', phone: '', gender: '' })
+  const [guestAdding, setGuestAdding] = useState(false)
+  const [listaTab, setListaTab] = useState<'lista' | 'convidar'>('lista')
+  const [listaClients, setListaClients] = useState<FlyerClient[]>([])
+  const [listaSearch, setListaSearch] = useState('')
+
+  // House list link in event form
+  const [houseListToken, setHouseListToken] = useState<string | null>(null)
 
   // Freelancers
   const [allFreelancers, setAllFreelancers] = useState<Freelancer[]>([])
@@ -132,7 +143,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [prodRes, setProdRes] = useState<ProdReservation[]>([])
   const [prodTab, setProdTab] = useState<'tasks' | 'freelancers' | 'budget' | 'layout'>('tasks')
   const [prodFr, setProdFr] = useState<EventFreelancer[]>([])
+  const [prodStaffing, setProdStaffing] = useState<Record<string, number>>({})
   const [teamArea, setTeamArea] = useState<string | null>(null)
+  const [frModalArea, setFrModalArea] = useState<string | null>(null)
   const [addingArea, setAddingArea] = useState(false)
   const [newAreaIcon, setNewAreaIcon] = useState('📋')
   const [newAreaName, setNewAreaName] = useState('')
@@ -187,7 +200,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   async function openProd(ev: EventWithCounts) {
-    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setTeamArea(null)
+    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setTeamArea(null); setProdStaffing(ev.staffing_needs ?? {})
     const [tasksR, resR, frR] = await Promise.all([
       supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
       supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
@@ -215,6 +228,34 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   async function removeProdFreelancer(id: string) {
     await supabase.from('event_freelancers').delete().eq('id', id)
     setProdFr(p => p.filter(f => f.id !== id))
+  }
+
+  // Quota: número de freelancers necessário por área (planejamento do gestor)
+  async function saveStaffingNeed(areaKey: string, value: number) {
+    if (!prodEv) return
+    const next = { ...prodStaffing }
+    if (value > 0) next[areaKey] = value; else delete next[areaKey]
+    setProdStaffing(next)
+    setProdEv(p => (p ? { ...p, staffing_needs: next } : p))
+    setEvents(prev => prev.map(e => e.id === prodEv.id ? { ...e, staffing_needs: next } : e))
+    await supabase.from('events').update({ staffing_needs: next }).eq('id', prodEv.id)
+  }
+
+  // Associação de freelancers pelo modal Equipe do card (recrutamento)
+  async function addEvFreelancer(freelancerId: string, role: string) {
+    if (!frModal) return
+    await supabase.from('event_freelancers').insert({ event_id: frModal.id, freelancer_id: freelancerId, confirmed: false, role })
+    loadEvFreelancers(frModal)
+  }
+  async function removeEvFreelancer(id: string) {
+    if (!frModal) return
+    await supabase.from('event_freelancers').delete().eq('id', id)
+    loadEvFreelancers(frModal)
+  }
+  async function toggleEvFrConfirmed(ef: EventFreelancer) {
+    if (!frModal) return
+    await supabase.from('event_freelancers').update({ confirmed: !ef.confirmed }).eq('id', ef.id)
+    loadEvFreelancers(frModal)
   }
 
   async function toggleProdFrConfirmed(fr: EventFreelancer) {
@@ -573,13 +614,52 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
 
-  function loadGuests(ev: EventWithCounts) {
+  async function loadGuests(ev: EventWithCounts) {
     setGuestEv(ev)
     setGuests([])
     setGuestFilter('all')
+    setGuestListToken(null)
+    setGuestListId(null)
+    setGuestListPromoId(null)
+    setGuestAddForm({ name: '', phone: '', gender: '' })
+    setListaTab('lista')
+    setListaSearch('')
+    setListaClients([])
     supabase.from('promoter_list_guests').select('full_name,phone,gender,list_type,checked_in,promoter_id')
       .eq('event_id', ev.id).order('full_name')
       .then(r => setGuests((r.data ?? []) as Guest[]))
+    const [rec, cl] = await Promise.all([
+      ensureHouseListRecord(ev),
+      supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).order('full_name'),
+    ])
+    if (rec) {
+      setGuestListToken(rec.token)
+      setGuestListId(rec.listId)
+      setGuestListPromoId(rec.promoterId)
+    }
+    setListaClients((cl.data ?? []) as FlyerClient[])
+  }
+
+  async function addGuestManually() {
+    if (!guestAddForm.name.trim() || !guestEv || !guestListId || !guestListPromoId) return
+    setGuestAdding(true)
+    const { error } = await supabase.from('promoter_list_guests').insert({
+      list_id: guestListId,
+      house_id: house.id,
+      event_id: guestEv.id,
+      promoter_id: guestListPromoId,
+      full_name: guestAddForm.name.trim(),
+      phone: guestAddForm.phone.replace(/\D/g, '') || null,
+      gender: guestAddForm.gender || null,
+      promoter_confirmed: true,
+    })
+    setGuestAdding(false)
+    if (error) { st2('Erro ao adicionar convidado', 'error'); return }
+    setGuestAddForm({ name: '', phone: '', gender: '' })
+    supabase.from('promoter_list_guests').select('full_name,phone,gender,list_type,checked_in,promoter_id')
+      .eq('event_id', guestEv.id).order('full_name')
+      .then(r => setGuests((r.data ?? []) as Guest[]))
+    st2('Convidado adicionado!', 'success')
   }
 
   function doExport() {
@@ -597,6 +677,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   function openEdit(ev: EventWithCounts) {
     setEditing(ev.id)
+    setHouseListToken(null)
     // Carrega o MESMO painel de Produção (tarefas, reservas, equipe e checklist) inline no cadastro
     openProd(ev)
     setForm({
@@ -609,6 +690,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       consumption_cents: ((ev.consumption_cents ?? 0) / 100) || 0,
       production_cost_cents: ((ev.production_cost_cents ?? 0) / 100) || 0,
     })
+    if (ev.house_list_enabled) {
+      ensureHouseListRecord(ev).then(rec => { if (rec) setHouseListToken(rec.token) })
+    }
     // Load artists: from new column or migrate from old single fields
     const saved = ev.artists ?? []
     if (saved.length > 0) {
@@ -640,7 +724,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     return out
   }
 
-  async function ensureHouseListToken(ev: EventWithCounts): Promise<string | null> {
+  async function ensureHouseListRecord(ev: EventWithCounts): Promise<{ token: string; listId: string; promoterId: string } | null> {
     let promoterId: string | undefined
     const { data: pr } = await supabase.from('promoters').select('id').eq('house_id', house.id).eq('full_name', 'Lista da Casa').limit(1).maybeSingle()
     promoterId = pr?.id
@@ -651,14 +735,19 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     if (!promoterId) return null
     const { data: list } = await supabase.from('promoter_lists').select('id,token').eq('house_id', house.id).eq('event_id', ev.id).eq('promoter_id', promoterId).limit(1).maybeSingle()
     if (list) {
-      if (list.token) return list.token
+      if (list.token) return { token: list.token, listId: list.id, promoterId }
       const token = crypto.randomUUID()
       await supabase.from('promoter_lists').update({ token }).eq('id', list.id)
-      return token
+      return { token, listId: list.id, promoterId }
     }
     const token = crypto.randomUUID()
-    await supabase.from('promoter_lists').insert({ house_id: house.id, event_id: ev.id, promoter_id: promoterId, name: 'Lista da Casa', token, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 })
-    return token
+    const { data: newList } = await supabase.from('promoter_lists').insert({ house_id: house.id, event_id: ev.id, promoter_id: promoterId, name: 'Lista da Casa', token, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 }).select('id').single()
+    return newList ? { token, listId: newList.id, promoterId } : null
+  }
+
+  async function ensureHouseListToken(ev: EventWithCounts): Promise<string | null> {
+    const rec = await ensureHouseListRecord(ev)
+    return rec?.token ?? null
   }
 
   async function openFlyer(ev: EventWithCounts) {
@@ -754,6 +843,20 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const ns = ev.status === 'cancelado' ? 'ativo' : 'cancelado'
     if (!confirm(ev.status === 'cancelado' ? 'Reativar este evento?' : 'Cancelar este evento?')) return
     supabase.from('events').update({ status: ns, updated_at: new Date().toISOString() }).eq('id', ev.id)
+      .then(r => { if (!r.error) load(); else _err(r.error.message) })
+  }
+
+  async function closeEv(ev: EventWithCounts) {
+    if (!confirm(`Encerrar "${ev.name}"?\n\nO evento será marcado como encerrado e todas as suas reservas serão arquivadas (saem da view principal mas ficam no histórico).`)) return
+    const now = new Date().toISOString()
+    await supabase.from('events').update({ status: 'encerrado', updated_at: now }).eq('id', ev.id)
+    await supabase.from('reservations').update({ archived_at: now }).eq('house_id', house.id).eq('event_id', ev.id).is('archived_at', null)
+    load()
+  }
+
+  function deleteEv(ev: EventWithCounts) {
+    if (!confirm(`Excluir permanentemente "${ev.name}"?\n\nEsta ação não pode ser desfeita. Check-ins e reservas vinculados também serão excluídos.`)) return
+    supabase.from('events').delete().eq('id', ev.id)
       .then(r => { if (!r.error) load(); else _err(r.error.message) })
   }
 
@@ -884,6 +987,15 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     )
   }
 
+  // Executor da tarefa: puxa do cadastro de equipe (freelancers) e preenche nome+celular
+  const executorSelect = () => (
+    <select value="" onChange={e => { const f = allFreelancers.find(x => x.id === e.target.value); if (f) setTaskForm(p => ({ ...p, assignee_name: f.full_name, assignee_phone: f.phone ?? '' })) }}
+      style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.mut, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }}>
+      <option value="">👤 Vincular executor da equipe…</option>
+      {allFreelancers.map(f => <option key={f.id} value={f.id}>{f.full_name}{f.phone ? ` · ${f.phone}` : ''}</option>)}
+    </select>
+  )
+
   const renderProdTabs = () => (
               <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
                 {(['tasks', 'freelancers'] as const).map(tab => {
@@ -894,6 +1006,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                     </button>
                   )
                 })}
+                {prodEv && (
+                  <button onClick={() => openBudget(prodEv)} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid #10b98144`, background: '#10b98115', color: '#10b981', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    💰 Budget
+                  </button>
+                )}
               </div>
   )
 
@@ -1007,6 +1124,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                           {isAdding && (
                             <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '10px 12px', marginBottom: 5 }}>
                               <input value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Título da tarefa *" autoFocus onKeyDown={e => e.key === 'Enter' && addProdTask(area, icon)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 6 }} />
+                              {executorSelect()}
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
                                 <input type="datetime-local" value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
                                 <input value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Valor estimado (R$)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
@@ -1037,6 +1155,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                           </div>
                           <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '10px 12px' }}>
                             <input value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Título da 1ª tarefa *" autoFocus onKeyDown={e => e.key === 'Enter' && addProdTask(formArea, formIcon)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 6 }} />
+                            {executorSelect()}
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
                               <input type="datetime-local" value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
                               <input value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Valor estimado (R$)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
@@ -1126,6 +1245,26 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
                 return (
                   <div>
+                    {/* Quota: necessário por área (planejamento) */}
+                    <div style={{ marginBottom: 16, padding: '10px 12px', background: '#ffffff04', border: `1px solid ${C.brd}`, borderRadius: 10 }}>
+                      <div style={{ fontSize: 11, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>📊 NECESSÁRIO POR ÁREA <span style={{ fontWeight: 400 }}>(quantos freelancers cada área precisa)</span></div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 6 }}>
+                        {workAreas.map(a => {
+                          const assigned = prodFr.filter(fr => roleOf(fr) === a.key).length
+                          const need = prodStaffing[a.key] ?? 0
+                          const ok = need > 0 && assigned >= need
+                          return (
+                            <div key={a.key} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#ffffff06', border: `1px solid ${ok ? '#10b98144' : C.brd}`, borderRadius: 8, padding: '5px 8px' }}>
+                              <span style={{ fontSize: 12, flex: 1, color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.icon} {a.label}</span>
+                              <span style={{ fontSize: 11, color: need > 0 ? (ok ? '#10b981' : '#f59e0b') : C.mut, fontWeight: 700 }}>{assigned}/{need || '–'}</span>
+                              <input type="number" min="0" value={need || ''} onChange={e => saveStaffingNeed(a.key, parseInt(e.target.value) || 0)} placeholder="0"
+                                style={{ width: 42, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 6px', color: C.txt, fontSize: 12, fontFamily: 'inherit', textAlign: 'center' }} />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
                     {prodFr.length === 0 && !teamArea && (
                       <div style={{ color: C.mut, textAlign: 'center', padding: '20px 0', fontSize: 13 }}>Monte a equipe por área: escolha uma área abaixo e adicione os freelancers.</div>
                     )}
@@ -1295,6 +1434,65 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_female_list_cents as number)}`} onChange={e => setF('price_female_list_cents', parseMoneyInput(e.target.value))} />
               </div>
             </div>
+            {/* Lista da Casa toggle */}
+            {(() => {
+              const hle = !!form.house_list_enabled
+              return (
+                <div
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '10px 12px', borderRadius: 8,
+                    background: hle ? '#10b98111' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${hle ? '#10b98144' : C.brd}`,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>🏠 Lista da Casa</div>
+                    <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Gera link para convidados confirmarem presença</div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const next = !hle
+                      setF('house_list_enabled', next)
+                      if (next && editing) {
+                        const ev = events.find(e => e.id === editing)
+                        if (ev) {
+                          const rec = await ensureHouseListRecord({ ...ev, house_list_enabled: true })
+                          if (rec) setHouseListToken(rec.token)
+                        }
+                      } else if (!next) {
+                        setHouseListToken(null)
+                      }
+                    }}
+                    style={{
+                      width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer',
+                      background: hle ? '#10b981' : C.brd,
+                      position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+                    }}
+                  >
+                    <span style={{
+                      position: 'absolute', top: 3, left: hle ? 26 : 4,
+                      width: 22, height: 22, borderRadius: '50%', background: '#fff',
+                      transition: 'left 0.2s', display: 'block',
+                    }} />
+                  </button>
+                </div>
+              )
+            })()}
+            {/* Link da lista (visível ao editar com toggle ON) */}
+            {editing && !!form.house_list_enabled && houseListToken && (
+              <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <i className="bi bi-link-45deg" style={{ color: '#10b981', fontSize: 16, flexShrink: 0 }} />
+                <span style={{ color: '#10b981', fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {`${window.location.origin}/lista/${houseListToken}`}
+                </span>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista/${houseListToken}`); st2('Link copiado!', 'success') }}
+                  style={{ background: '#10b98133', border: '1px solid #10b98166', borderRadius: 6, padding: '3px 10px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+                  Copiar
+                </button>
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Capacidade</label>
@@ -1408,27 +1606,177 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         </div>
       )}{/* end overlay */}
 
-      {/* Guest list modal */}
-      <Modal open={!!guestEv} title={`👥 Lista — ${guestEv?.name ?? ''}`} onClose={() => { setGuestEv(null); setGuests([]) }}>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-          {['all', 'present', 'pending'].map(f => (
-            <Btn key={f} onClick={() => setGuestFilter(f)} variant={guestFilter === f ? 'primary' : 'ghost'} small>
-              {f === 'all' ? `Todos (${guests.length})` : f === 'present' ? `✅ Presentes (${guests.filter(g => g.checked_in).length})` : `⏳ Pendentes (${guests.filter(g => !g.checked_in).length})`}
-            </Btn>
+      {/* Guest list modal — large, two-tab layout */}
+      <Modal open={!!guestEv} title={`👥 Lista da Casa — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListaClients([]) }}>
+
+        {/* Link compartilhável */}
+        {guestListToken && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
+            <i className="bi bi-link-45deg" style={{ color: '#10b981', fontSize: 18, flexShrink: 0 }} />
+            <span style={{ color: '#10b981', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {`${window.location.origin}/lista/${guestListToken}`}
+            </span>
+            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista/${guestListToken}`); st2('Link copiado!', 'success') }}
+              style={{ background: '#10b98133', border: '1px solid #10b98166', borderRadius: 7, padding: '5px 14px', color: '#10b981', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+              Copiar Link
+            </button>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+          {(['lista', 'convidar'] as const).map(t => (
+            <button key={t} onClick={() => setListaTab(t)} style={{
+              padding: '8px 18px', borderRadius: 8, border: `1px solid ${listaTab === t ? C.acc : C.brd}`,
+              background: listaTab === t ? C.acc + '22' : 'transparent',
+              color: listaTab === t ? C.acc : C.mut, fontSize: 13, fontWeight: 700,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              {t === 'lista' ? `📋 Lista (${guests.length})` : `📨 Convidar Clientes`}
+            </button>
           ))}
-          <Btn onClick={doExport} small variant="secondary">📥 CSV</Btn>
         </div>
-        {guests.length === 0
-          ? <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>Nenhum convidado na lista</div>
-          : guests.filter(g => guestFilter === 'all' ? true : guestFilter === 'present' ? g.checked_in : !g.checked_in).map((g, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}` }}>
-              <span style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, flex: 1, fontWeight: g.checked_in ? 700 : 400 }}>{g.full_name}</span>
-              <span style={{ color: C.mut, fontSize: 12, width: 20, textAlign: 'center' }}>{g.gender === 'M' ? '♂' : g.gender === 'F' ? '♀' : ''}</span>
-              {g.phone && <span style={{ color: C.mut, fontSize: 12 }}>{g.phone}</span>}
-              <span style={{ color: g.checked_in ? C.grn : C.mut, fontSize: 13, width: 20, textAlign: 'center' }}>{g.checked_in ? '✓' : '—'}</span>
+
+        {/* ── ABA LISTA ── */}
+        {listaTab === 'lista' && (
+          <>
+            {/* Adicionar manualmente */}
+            <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 8, letterSpacing: '0.06em' }}>➕ ADICIONAR MANUALMENTE</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input placeholder="Nome *" value={guestAddForm.name} onChange={e => setGuestAddForm(p => ({ ...p, name: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && addGuestManually()}
+                  style={{ flex: '2 1 160px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                <input placeholder="Telefone" value={guestAddForm.phone} onChange={e => setGuestAddForm(p => ({ ...p, phone: e.target.value }))}
+                  style={{ flex: '1 1 130px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                <select value={guestAddForm.gender} onChange={e => setGuestAddForm(p => ({ ...p, gender: e.target.value }))}
+                  style={{ flex: '0 0 100px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
+                  <option value="">Gênero</option>
+                  <option value="M">♂ Masc</option>
+                  <option value="F">♀ Fem</option>
+                </select>
+                <Btn onClick={addGuestManually} disabled={!guestAddForm.name.trim() || guestAdding} small>
+                  {guestAdding ? '...' : 'Adicionar'}
+                </Btn>
+              </div>
             </div>
-          ))
-        }
+
+            {/* Filtros */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              {(['all', 'present', 'pending'] as const).map(f => (
+                <Btn key={f} onClick={() => setGuestFilter(f)} variant={guestFilter === f ? 'primary' : 'ghost'} small>
+                  {f === 'all' ? `Todos (${guests.length})` : f === 'present' ? `✅ Presentes (${guests.filter(g => g.checked_in).length})` : `⏳ Pendentes (${guests.filter(g => !g.checked_in).length})`}
+                </Btn>
+              ))}
+              <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV</Btn>
+            </div>
+
+            {/* Lista de convidados — grid de 2 colunas se houver espaço */}
+            {guests.length === 0
+              ? <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhum convidado na lista ainda</div>
+              : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0 24px' }}>
+                  {guests
+                    .filter(g => guestFilter === 'all' ? true : guestFilter === 'present' ? g.checked_in : !g.checked_in)
+                    .map((g, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
+                        <span style={{ fontSize: 16, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: g.checked_in ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.full_name}</div>
+                          {g.phone && <div style={{ color: C.mut, fontSize: 11 }}>{g.phone}</div>}
+                        </div>
+                        {g.checked_in && <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✓ Entrou</span>}
+                      </div>
+                    ))
+                  }
+                </div>
+              )
+            }
+          </>
+        )}
+
+        {/* ── ABA CONVIDAR CLIENTES ── */}
+        {listaTab === 'convidar' && (() => {
+          const baseLink = guestListToken ? `${window.location.origin}/lista/${guestListToken}` : ''
+          const q = listaSearch.toLowerCase()
+          const filtered = listaClients.filter(c =>
+            c.full_name.toLowerCase().includes(q) || (c.phone ?? '').includes(q)
+          )
+
+          function makePersonalLink(c: FlyerClient) {
+            return `${baseLink}?nome=${encodeURIComponent(c.full_name)}${c.phone ? `&tel=${c.phone.replace(/\D/g, '')}` : ''}`
+          }
+
+          function openWhatsApp(c: FlyerClient) {
+            if (!c.phone) { st2('Cliente sem telefone cadastrado', 'warn'); return }
+            const ev = guestEv!
+            const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+            const link = makePersonalLink(c)
+            const msg = `Olá ${c.full_name.split(' ')[0]}! 🎉 Você está convidado(a) para *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}.\n\n✅ Confirme sua presença na lista da casa:\n${link}\n\nTe esperamos! 🔥`
+            const phone = '55' + c.phone.replace(/\D/g, '')
+            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+          }
+
+          return (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <input
+                  placeholder="🔍 Buscar cliente por nome ou telefone..."
+                  value={listaSearch}
+                  onChange={e => setListaSearch(e.target.value)}
+                  style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' as const }}
+                />
+              </div>
+
+              {!baseLink && (
+                <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>
+                  Ative a Lista da Casa no cadastro do evento para gerar o link de convite.
+                </div>
+              )}
+
+              {baseLink && filtered.length === 0 && (
+                <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>
+                  {listaSearch ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado'}
+                </div>
+              )}
+
+              {baseLink && filtered.length > 0 && (
+                <>
+                  <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 10, letterSpacing: '0.06em' }}>
+                    {filtered.length} CLIENTE{filtered.length !== 1 ? 'S' : ''} — clique para enviar convite via WhatsApp
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                    {filtered.map(c => (
+                      <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
+                        <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.acc + '22', border: `1px solid ${C.acc}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0, color: C.acc, fontWeight: 800 }}>
+                          {c.full_name.charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: C.txt, fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.full_name}</div>
+                          <div style={{ color: C.mut, fontSize: 11 }}>{c.phone ?? 'Sem telefone'}</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                          <button
+                            onClick={() => { navigator.clipboard.writeText(makePersonalLink(c)); st2('Link copiado!', 'success') }}
+                            title="Copiar link personalizado"
+                            style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 7, padding: '5px 8px', color: C.acc, fontSize: 13, cursor: 'pointer' }}>
+                            <i className="bi bi-link-45deg" />
+                          </button>
+                          <button
+                            onClick={() => openWhatsApp(c)}
+                            title="Enviar via WhatsApp"
+                            style={{ background: '#25D36622', border: '1px solid #25D36644', borderRadius: 7, padding: '5px 8px', color: '#25D366', fontSize: 13, cursor: 'pointer' }}>
+                            <i className="bi bi-whatsapp" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )
+        })()}
       </Modal>
 
       {/* Reservations modal */}
@@ -1488,52 +1836,111 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       </Modal>
 
       {/* Freelancers modal */}
-      <Modal open={!!frModal} title={`👷 Equipe — ${frModal?.name ?? ''}`} onClose={() => { setFrModal(null); setEvFreelancers([]) }}>
-        <div style={{ fontSize: 12, color: C.mut, marginBottom: 14 }}>Visualização da equipe de trabalho escalada para o evento.</div>
-        {evFreelancers.length === 0
-          ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 24 }}>Nenhum profissional escalado para este evento.</div>
-          : (() => {
-              const roleOf = (ef: EventFreelancer) => (ef.role || ef.freelancers?.work_types?.[0] || 'outros')
-              const groups: Record<string, EventFreelancer[]> = {}
-              evFreelancers.forEach(ef => { const r = roleOf(ef); (groups[r] ||= []).push(ef) })
-              const confirmed = evFreelancers.filter(ef => ef.confirmed).length
-              return (
-                <div>
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                    {[
-                      { label: 'Profissionais', val: evFreelancers.length, color: C.acc },
-                      { label: 'Confirmados', val: confirmed, color: C.grn },
-                      { label: 'Áreas', val: Object.keys(groups).length, color: C.gold },
-                    ].map((b, i) => (
-                      <div key={i} style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: b.color }}>{b.val}</div>
-                        <div style={{ fontSize: 10, color: C.mut, marginTop: 2 }}>{b.label}</div>
-                      </div>
-                    ))}
+      <Modal open={!!frModal} title={`👷 Equipe — ${frModal?.name ?? ''}`} onClose={() => { setFrModal(null); setEvFreelancers([]); setFrModalArea(null) }}>
+        {(() => {
+          const roleOf = (ef: EventFreelancer) => (ef.role || ef.freelancers?.work_types?.[0] || 'outros')
+          const groups: Record<string, EventFreelancer[]> = {}
+          evFreelancers.forEach(ef => { const r = roleOf(ef); (groups[r] ||= []).push(ef) })
+          const confirmed = evFreelancers.filter(ef => ef.confirmed).length
+          const needs = frModal?.staffing_needs ?? {}
+          return (
+            <div>
+              <div style={{ fontSize: 12, color: C.mut, marginBottom: 12 }}>Escale a equipe por área. As metas (necessário por área) vêm de <strong style={{ color: C.sub }}>Produção › Equipe</strong>.</div>
+
+              {/* Stats */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                {[
+                  { label: 'Escalados', val: evFreelancers.length, color: C.acc },
+                  { label: 'Confirmados', val: confirmed, color: C.grn },
+                  { label: 'Áreas', val: Object.keys(groups).length, color: C.gold },
+                ].map((b, i) => (
+                  <div key={i} style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: b.color }}>{b.val}</div>
+                    <div style={{ fontSize: 10, color: C.mut, marginTop: 2 }}>{b.label}</div>
                   </div>
-                  {Object.entries(groups).map(([role, members]) => (
-                    <div key={role} style={{ marginBottom: 14 }}>
-                      <div style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
-                        {wlabel(role)} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length})</span>
+                ))}
+              </div>
+
+              {/* Progresso das metas */}
+              {Object.keys(needs).length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                  {Object.entries(needs).map(([key, need]) => {
+                    const assigned = evFreelancers.filter(ef => roleOf(ef) === key).length
+                    const ok = assigned >= (need as number)
+                    return (
+                      <span key={key} style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 8, background: ok ? '#10b98118' : '#f59e0b18', color: ok ? '#10b981' : '#f59e0b', border: `1px solid ${ok ? '#10b98144' : '#f59e0b44'}` }}>
+                        {wlabel(key)} {assigned}/{need as number}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Membros por área */}
+              {Object.entries(groups).map(([role, members]) => (
+                <div key={role} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
+                    <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{wlabel(role)} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length}{needs[role] ? `/${needs[role]}` : ''})</span></span>
+                    <button onClick={() => setFrModalArea(role)} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Freelancer</button>
+                  </div>
+                  {members.map(ef => (
+                    <div key={ef.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{ef.freelancers?.full_name ?? '—'}</div>
+                        <div style={{ color: C.mut, fontSize: 11 }}>{(ef.freelancers?.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}</div>
                       </div>
-                      {members.map(ef => (
-                        <div key={ef.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{ef.freelancers?.full_name ?? '—'}</div>
-                            <div style={{ color: C.mut, fontSize: 11 }}>{(ef.freelancers?.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}</div>
-                          </div>
-                          <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 8, background: ef.confirmed ? C.grn + '22' : C.gold + '22', color: ef.confirmed ? C.grn : C.gold, fontWeight: 700 }}>
-                            {ef.confirmed ? '✅ Confirmado' : '⏳ Pendente'}
-                          </span>
-                        </div>
-                      ))}
+                      <button onClick={() => toggleEvFrConfirmed(ef)} title={ef.confirmed ? 'Confirmado' : 'Pendente'} style={{ background: ef.confirmed ? C.grn + '22' : '#ffffff08', border: `1px solid ${ef.confirmed ? C.grn + '44' : C.brd}`, borderRadius: 8, padding: '4px 8px', color: ef.confirmed ? C.grn : C.mut, fontSize: 12, cursor: 'pointer' }}>{ef.confirmed ? '✅' : '⏳'}</button>
+                      <button onClick={() => removeEvFreelancer(ef.id)} title="Remover" style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 8, padding: '4px 8px', color: C.red, fontSize: 12, cursor: 'pointer' }}>🗑</button>
                     </div>
                   ))}
-                  <div style={{ fontSize: 11, color: C.mut, marginTop: 8, paddingTop: 10, borderTop: `1px solid ${C.brd}` }}>Para escalar a equipe, definir valores e custos, use <strong style={{ color: C.sub }}>Produção › Equipe</strong>.</div>
                 </div>
-              )
-            })()
-        }
+              ))}
+
+              {/* Escalar por área */}
+              {!frModalArea ? (
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>➕ ESCALAR POR ÁREA</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {workAreas.map(a => {
+                      const assigned = evFreelancers.filter(ef => roleOf(ef) === a.key).length
+                      const need = needs[a.key] ?? 0
+                      return (
+                        <button key={a.key} onClick={() => setFrModalArea(a.key)} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 12px', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                          {a.icon} {a.label}{need ? <span style={{ color: assigned >= need ? '#10b981' : '#f59e0b', marginLeft: 4, fontWeight: 700 }}>{assigned}/{need}</span> : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : (() => {
+                const available = allFreelancers.filter(f => !evFreelancers.some(ef => ef.freelancer_id === f.id && roleOf(ef) === frModalArea))
+                const suggested = available.filter(f => (f.work_types ?? []).includes(frModalArea as never))
+                const others = available.filter(f => !(f.work_types ?? []).includes(frModalArea as never))
+                const ordered = [...suggested, ...others]
+                return (
+                  <div style={{ padding: '12px 14px', background: '#ffffff06', border: `1px solid ${C.acc}44`, borderRadius: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, color: C.acc, fontWeight: 700 }}>Escalar em {wlabel(frModalArea)}</span>
+                      <button onClick={() => setFrModalArea(null)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
+                    </div>
+                    {ordered.length === 0
+                      ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Equipe.' : 'Todos já estão nesta área.'}</div>
+                      : ordered.map(f => (
+                        <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name} {(f.work_types ?? []).includes(frModalArea as never) && <span style={{ fontSize: 10, color: '#10b981' }}>• da função</span>}</div>
+                            <div style={{ fontSize: 11, color: C.mut }}>{(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}{f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}</div>
+                          </div>
+                          <button onClick={() => addEvFreelancer(f.id, frModalArea)} style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 8, padding: '5px 12px', color: C.acc, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
+                        </div>
+                      ))
+                    }
+                  </div>
+                )
+              })()}
+            </div>
+          )
+        })()}
       </Modal>
 
       {/* Checklist do card — checagem das tarefas de produção */}
@@ -2004,85 +2411,128 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         </div>
       </Card>
 
-      {/* Event cards — full width */}
+      {/* Event cards */}
       {filteredEvents.length === 0
         ? <Card><div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>{selDate ? 'Nenhum evento nesta data' : showArchive ? 'Nenhum evento no arquivo' : 'Nenhum evento futuro cadastrado'}</div></Card>
-        : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-          {filteredEvents.map(ev => (
-            <Card key={ev.id}>
-              {/* Flyer */}
-              {ev.flyer_url && (
-                <div style={{ position: 'relative', width: '100%', paddingBottom: '56%', borderRadius: 10, overflow: 'hidden', marginBottom: 12 }}>
-                  <img src={ev.flyer_url} alt={ev.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                </div>
-              )}
-              {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                    <div style={{ color: C.txt, fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
-                    <button onClick={() => openFlyer(ev)} title="Enviar flyer para contatos" style={{ flexShrink: 0, background: '#25d36622', border: '1px solid #25d36644', borderRadius: 7, padding: '3px 9px', color: '#25d366', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>📤 Flyer</button>
-                  </div>
-                  <div style={{ color: C.mut, fontSize: 12 }}>{fd(ev.event_date)} · {(ev.start_time ?? '').slice(0, 5)}</div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0, marginLeft: 8 }}>
-                  <Pill color={evStatusColor(ev.status ?? 'ativo')} small>{ev.status ?? 'ativo'}</Pill>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {!!ev.checkinCount && <span style={{ background: C.grn + '22', color: C.grn, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.checkinCount} ✓</span>}
-                    {!!ev.resCount && <span style={{ background: '#a78bfa22', color: '#a78bfa', borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.resCount} 🪑</span>}
-                    {!!((ev.resPeople ?? 0) + (ev.listGuests ?? 0)) && (
-                      <span title={`Previstas: ${ev.resPeople ?? 0} em reservas + ${ev.listGuests ?? 0} em listas`} style={{ background: C.acc + '22', color: C.acc, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>👥 {(ev.resPeople ?? 0) + (ev.listGuests ?? 0)}</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {ev.genre && <div style={{ color: C.acc, fontSize: 11, fontWeight: 600, marginBottom: 6 }}>🎵 {ev.genre}</div>}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, color: C.mut, marginBottom: 10 }}>
-                {ev.price_male_cents ? <span>♂ {fmtCurrency(ev.price_male_cents)}</span> : null}
-                {ev.price_female_cents ? <span>♀ {fmtCurrency(ev.price_female_cents)}</span> : null}
-                {ev.capacity ? <span>👥 Cap. {ev.capacity}</span> : null}
-                {(ev as any).artist_fee_type === 'percent'
-                  ? <span style={{ color: C.gold }}>🎤 {(ev as any).artist_fee_percent}% portaria</span>
-                  : (ev as any).artist_fee_type === 'tbd'
-                    ? <span style={{ color: C.gold }}>🎤 A combinar</span>
-                    : ev.artist_fee_cents ? <span style={{ color: C.gold }}>🎤 {fmtCurrency(ev.artist_fee_cents)}</span> : null}
-              </div>
-              {/* Checklist — barra de conclusão (abaixo das reservas) */}
-              {(() => {
-                const total = ev.tasksTotal ?? 0
-                const done = ev.tasksDone ?? 0
-                const pct = total > 0 ? Math.round(done / total * 100) : 0
-                const complete = total > 0 && done === total
-                return (
-                  <button onClick={() => openCheck(ev)} title="Abrir checklist de produção" style={{ width: '100%', textAlign: 'left', background: complete ? '#10b98112' : '#7c3aed12', border: `1px solid ${complete ? '#10b98140' : '#7c3aed33'}`, borderRadius: 10, padding: '8px 12px', marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: total > 0 ? 6 : 0 }}>
-                      <span style={{ color: complete ? C.grn : '#a78bfa', fontSize: 12, fontWeight: 700 }}>📋 Checklist</span>
-                      <span style={{ color: complete ? C.grn : C.mut, fontSize: 11, fontWeight: 700 }}>{total > 0 ? `${done}/${total} · ${pct}%` : 'sem tarefas'}</span>
+        : showArchive
+          /* ── ARQUIVO: cards compactos em lista ── */
+          ? <Card style={{ padding: 0 }}>
+              {filteredEvents.map((ev, idx) => (
+                <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: idx < filteredEvents.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+                  {/* Thumb */}
+                  {ev.flyer_url
+                    ? <img src={ev.flyer_url} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover', flexShrink: 0, border: `1px solid ${C.brd}` }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    : <div style={{ width: 40, height: 40, borderRadius: 6, background: C.card, border: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🎉</div>
+                  }
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
+                    <div style={{ color: C.mut, fontSize: 12, display: 'flex', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
+                      <span>📅 {fd(ev.event_date)}</span>
+                      {!!ev.checkinCount && <span style={{ color: C.grn }}>✓ {ev.checkinCount}</span>}
+                      {!!ev.resCount && <span style={{ color: '#a78bfa' }}>🪑 {ev.resCount}</span>}
+                      {!!((ev.resPeople ?? 0) + (ev.listGuests ?? 0)) && <span style={{ color: C.acc }}>👥 {(ev.resPeople ?? 0) + (ev.listGuests ?? 0)}</span>}
                     </div>
-                    {total > 0 && (
-                      <div style={{ height: 6, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${pct}%`, background: complete ? '#10b981' : 'linear-gradient(90deg,#7c3aed,#a78bfa)', borderRadius: 4, transition: 'width .3s' }} />
-                      </div>
+                  </div>
+                  {/* Status + ações */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <Pill color={evStatusColor(ev.status ?? 'ativo')} small>{ev.status ?? 'ativo'}</Pill>
+                    <Btn onClick={() => openEdit(ev)} small variant="ghost" title="Editar">✏️</Btn>
+                    <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')} title="Budget">💰</Btn>
+                    {ev.status !== 'encerrado' && (
+                      <Btn onClick={() => closeEv(ev)} small variant="secondary" style={cbtn('#6366f1')} title="Encerrar evento e arquivar reservas">
+                        <i className="bi bi-archive-fill" /> Encerrar
+                      </Btn>
                     )}
-                  </button>
-                )
-              })()}
-              {/* Botões */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                <Btn onClick={() => openEdit(ev)} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Editar</Btn>
-                <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={cbtn('#3b82f6')}>👥 Lista</Btn>
-                <Btn onClick={() => openResView(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
-                <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={cbtn('#22d3ee')}>👷 Equipe</Btn>
-                <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎟️ Ingressos</Btn>
-                <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>
-                <Btn onClick={() => openProd(ev)} small variant="secondary" style={cbtn('#f59e0b')}>🏭 Produção</Btn>
-                <Btn onClick={() => cancelEv(ev)} small variant="secondary" style={cbtn(ev.status === 'cancelado' ? '#10b981' : '#ef4444')}>
-                  {ev.status === 'cancelado' ? '✅ Reativar' : '❌ Cancelar'}
-                </Btn>
-              </div>
+                    {ev.status === 'encerrado' && (
+                      <Btn onClick={() => cancelEv(ev)} small variant="secondary" style={cbtn('#10b981')} title="Reativar evento">
+                        ↩ Reativar
+                      </Btn>
+                    )}
+                    <Btn onClick={() => deleteEv(ev)} small variant="danger" title="Excluir permanentemente">
+                      <i className="bi bi-trash3-fill" />
+                    </Btn>
+                  </div>
+                </div>
+              ))}
             </Card>
-          ))}
-        </div>
+          /* ── PRÓXIMOS: cards completos em grid ── */
+          : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
+            {filteredEvents.map(ev => (
+              <Card key={ev.id}>
+                {/* Flyer */}
+                {ev.flyer_url && (
+                  <div style={{ position: 'relative', width: '100%', paddingBottom: '56%', borderRadius: 10, overflow: 'hidden', marginBottom: 12 }}>
+                    <img src={ev.flyer_url} alt={ev.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                )}
+                {/* Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <div style={{ color: C.txt, fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
+                      <button onClick={() => openFlyer(ev)} title="Enviar flyer para contatos" style={{ flexShrink: 0, background: '#25d36622', border: '1px solid #25d36644', borderRadius: 7, padding: '3px 9px', color: '#25d366', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>📤 Flyer</button>
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 12 }}>{fd(ev.event_date)} · {(ev.start_time ?? '').slice(0, 5)}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0, marginLeft: 8 }}>
+                    <Pill color={evStatusColor(ev.status ?? 'ativo')} small>{ev.status ?? 'ativo'}</Pill>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {!!ev.checkinCount && <span style={{ background: C.grn + '22', color: C.grn, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.checkinCount} ✓</span>}
+                      {!!ev.resCount && <span style={{ background: '#a78bfa22', color: '#a78bfa', borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.resCount} 🪑</span>}
+                      {!!((ev.resPeople ?? 0) + (ev.listGuests ?? 0)) && (
+                        <span title={`Previstas: ${ev.resPeople ?? 0} em reservas + ${ev.listGuests ?? 0} em listas`} style={{ background: C.acc + '22', color: C.acc, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>👥 {(ev.resPeople ?? 0) + (ev.listGuests ?? 0)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {ev.genre && <div style={{ color: C.acc, fontSize: 11, fontWeight: 600, marginBottom: 6 }}>🎵 {ev.genre}</div>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, color: C.mut, marginBottom: 10 }}>
+                  {ev.price_male_cents ? <span>♂ {fmtCurrency(ev.price_male_cents)}</span> : null}
+                  {ev.price_female_cents ? <span>♀ {fmtCurrency(ev.price_female_cents)}</span> : null}
+                  {ev.capacity ? <span>👥 Cap. {ev.capacity}</span> : null}
+                  {(ev as any).artist_fee_type === 'percent'
+                    ? <span style={{ color: C.gold }}>🎤 {(ev as any).artist_fee_percent}% portaria</span>
+                    : (ev as any).artist_fee_type === 'tbd'
+                      ? <span style={{ color: C.gold }}>🎤 A combinar</span>
+                      : ev.artist_fee_cents ? <span style={{ color: C.gold }}>🎤 {fmtCurrency(ev.artist_fee_cents)}</span> : null}
+                </div>
+                {/* Checklist */}
+                {(() => {
+                  const total = ev.tasksTotal ?? 0
+                  const done = ev.tasksDone ?? 0
+                  const pct = total > 0 ? Math.round(done / total * 100) : 0
+                  const complete = total > 0 && done === total
+                  return (
+                    <button onClick={() => openCheck(ev)} title="Abrir checklist de produção" style={{ width: '100%', textAlign: 'left', background: complete ? '#10b98112' : '#7c3aed12', border: `1px solid ${complete ? '#10b98140' : '#7c3aed33'}`, borderRadius: 10, padding: '8px 12px', marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: total > 0 ? 6 : 0 }}>
+                        <span style={{ color: complete ? C.grn : '#a78bfa', fontSize: 12, fontWeight: 700 }}>📋 Checklist</span>
+                        <span style={{ color: complete ? C.grn : C.mut, fontSize: 11, fontWeight: 700 }}>{total > 0 ? `${done}/${total} · ${pct}%` : 'sem tarefas'}</span>
+                      </div>
+                      {total > 0 && (
+                        <div style={{ height: 6, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: complete ? '#10b981' : 'linear-gradient(90deg,#7c3aed,#a78bfa)', borderRadius: 4, transition: 'width .3s' }} />
+                        </div>
+                      )}
+                    </button>
+                  )
+                })()}
+                {/* Botões */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <Btn onClick={() => openEdit(ev)} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Editar</Btn>
+                  <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={cbtn('#3b82f6')}>👥 Lista</Btn>
+                  <Btn onClick={() => openResView(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
+                  <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={cbtn('#22d3ee')}>👷 Equipe</Btn>
+                  <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎟️ Ingressos</Btn>
+                  <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>
+                  <Btn onClick={() => openProd(ev)} small variant="secondary" style={cbtn('#f59e0b')}>🏭 Produção</Btn>
+                  <Btn onClick={() => cancelEv(ev)} small variant="secondary" style={cbtn(ev.status === 'cancelado' ? '#10b981' : '#ef4444')}>
+                    {ev.status === 'cancelado' ? '✅ Reativar' : '❌ Cancelar'}
+                  </Btn>
+                </div>
+              </Card>
+            ))}
+          </div>
       }
 
       {/* ── Production panel (drawer standalone — só fora do cadastro) ── */}

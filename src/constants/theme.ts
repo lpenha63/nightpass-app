@@ -16,18 +16,26 @@ export const C = {
 
 export const RC: Record<string, string> = {
   super_admin: '#60a5fa',
-  admin: '#3b82f6',
-  door: '#10b981',
-  finance: '#9ca3af',
-  promoter: '#6366f1',
+  admin:       '#3b82f6',
+  operador:    '#10b981',
+  portaria:    '#f59e0b',
+  financeiro:  '#8b5cf6',
+  promoter:    '#6366f1',
+  // legacy aliases
+  door:    '#f59e0b',
+  finance: '#8b5cf6',
 }
 
 export const RL: Record<string, string> = {
   super_admin: 'Super Admin',
-  admin: 'Admin',
-  door: 'Porteiro',
+  admin:       'Administrador',
+  operador:    'Operador',
+  portaria:    'Portaria',
+  financeiro:  'Financeiro',
+  promoter:    'Promoter',
+  // legacy aliases
+  door:    'Portaria',
   finance: 'Financeiro',
-  promoter: 'Promoter',
 }
 
 export type Role = keyof typeof RL

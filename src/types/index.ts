@@ -16,6 +16,8 @@ export interface Session {
   house: House
   user: UserProfile
   role: string
+  allowedPages: string[]
+  freelancerId?: string | null
 }
 
 export interface Client {
@@ -60,11 +62,13 @@ export interface Event {
   promotions?: string
   flyer_url?: string
   birthday_list_enabled?: boolean
+  house_list_enabled?: boolean
   observations?: string
   artist_fee_cents?: number
   artists?: ArtistEntry[]
   consumption_cents?: number
   production_cost_cents?: number
+  staffing_needs?: Record<string, number>
   status: string
   created_at: string
 }
