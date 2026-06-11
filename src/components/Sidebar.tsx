@@ -16,17 +16,17 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { id: 'dashboard',  icon: 'speedometer2',    label: 'Dashboard' },
-  { id: 'checkin',    icon: 'door-open',        label: 'Check-in' },
-  { id: 'clients',    icon: 'people',           label: 'Clientes' },
-  { id: 'events',     icon: 'calendar-event',   label: 'Eventos' },
-  { id: 'reservas',   icon: 'bookmark-check',   label: 'Reservas' },
-  { id: 'promoters',  icon: 'person-badge',     label: 'Promoters' },
-  { id: 'freelancers', icon: 'hammer',          label: 'Freelancers' },
-  { id: 'reports',    icon: 'bar-chart-line',   label: 'Relatórios' },
-  { id: 'whatsapp',   icon: 'whatsapp',         label: 'WhatsApp' },
-  { id: 'users',      icon: 'person-gear',      label: 'Usuários',      adminOnly: true },
-  { id: 'settings',  icon: 'sliders',          label: 'Configurações', adminOnly: true },
+  { id: 'dashboard',   icon: 'house-fill',            label: 'Dashboard' },
+  { id: 'checkin',     icon: 'person-check-fill',     label: 'Check-in' },
+  { id: 'clients',     icon: 'person-lines-fill',     label: 'Clientes' },
+  { id: 'events',      icon: 'calendar-event-fill',   label: 'Eventos' },
+  { id: 'reservas',    icon: 'calendar2-check-fill',  label: 'Reservas' },
+  { id: 'promoters',   icon: 'megaphone-fill',        label: 'Promoters' },
+  { id: 'freelancers', icon: 'people-fill',           label: 'Equipe' },
+  { id: 'reports',     icon: 'graph-up-arrow',        label: 'Relatórios' },
+  { id: 'whatsapp',    icon: 'whatsapp',              label: 'WhatsApp' },
+  { id: 'users',       icon: 'person-gear',           label: 'Usuários',      adminOnly: true },
+  { id: 'settings',    icon: 'gear-fill',             label: 'Configurações', adminOnly: true },
 ]
 
 interface SidebarProps {
@@ -75,13 +75,10 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, on
           background: `linear-gradient(135deg,${C.acd}18,transparent)`,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <div style={{
-              width: 34, height: 34,
-              background: `linear-gradient(135deg,${C.acd},${C.acc})`,
-              borderRadius: 10, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', fontSize: 16,
-              boxShadow: `0 0 14px ${C.acd}55`,
-            }}>🎭</div>
+            {session.house.logo_url
+              ? <img src={session.house.logo_url} alt={session.house.name} style={{ width: 34, height: 34, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
+              : <div style={{ width: 34, height: 34, background: `linear-gradient(135deg,${C.acd},${C.acc})`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, boxShadow: `0 0 14px ${C.acd}55` }}>🎭</div>
+            }
             <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, lineHeight: 1.3 }}>
               {session.house.name || 'NightPass'}
             </div>
@@ -93,7 +90,10 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, on
 
         {/* Nav */}
         <nav style={{ flex: 1, padding: '10px 8px', overflowY: 'auto' }}>
-          {NAV.filter(n => !n.adminOnly || isAdmin).map(n => {
+          {NAV.filter(n => {
+            if (n.adminOnly && !isAdmin) return false
+            return session.allowedPages.includes(n.id)
+          }).map(n => {
             const isActive = active === n.id
             const showBadge = n.id === 'checkin' && newCI > 0
             return (

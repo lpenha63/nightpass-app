@@ -18,10 +18,10 @@ interface PromoterList {
   houses?: { name: string; logo_url?: string }
 }
 
-interface Guest { name: string; phone: string; cpf: string; gender: string }
+interface Guest { name: string; phone: string; cpf: string; gender: string; birth_date: string }
 interface SavedGuest { id: string; full_name: string; phone?: string; cpf?: string; gender?: string }
 
-const EMPTY: Guest = { name: '', phone: '', cpf: '', gender: '' }
+const EMPTY: Guest = { name: '', phone: '', cpf: '', gender: '', birth_date: '' }
 
 function fmtCPF(v: string) {
   const d = v.replace(/\D/g, '').slice(0, 11)
@@ -45,12 +45,18 @@ const INP: React.CSSProperties = {
 export function ListaPublicPage({ token }: { token: string }) {
   const [lista, setLista] = useState<PromoterList | null>(null)
   const [saved, setSaved] = useState<SavedGuest[]>([])
-  const [form, setForm] = useState<Guest>(EMPTY)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
   const [notFound, setNotFound] = useState(false)
+
+  // Read URL params for pre-filling (when sent via personalized link)
+  const params = new URLSearchParams(window.location.search)
+  const preNome = params.get('nome') ?? ''
+  const preTel  = params.get('tel')  ?? ''
+
+  const [form, setForm] = useState<Guest>({ ...EMPTY, name: preNome, phone: preTel })
 
   useEffect(() => {
     supabase.from('promoter_lists')
@@ -77,12 +83,14 @@ export function ListaPublicPage({ token }: { token: string }) {
       phone: form.phone.replace(/\D/g, '') || null,
       cpf: form.cpf.replace(/\D/g, '') || null,
       gender: form.gender || null,
+      birth_date: form.birth_date || null,
       promoter_confirmed: true,
     }).select().single()
     if (err) { setError('Erro ao salvar. Tente novamente.'); setSubmitting(false); return }
     setSaved(p => [...p, data as SavedGuest])
     setForm(EMPTY)
     setSubmitting(false)
+    setDone(true)
   }
 
   async function removeGuest(id: string) {
@@ -114,9 +122,9 @@ export function ListaPublicPage({ token }: { token: string }) {
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div style={{ textAlign: 'center', maxWidth: 400 }}>
         <div style={{ fontSize: 64, marginBottom: 16 }}>🎉</div>
-        <div style={{ color: C.grn, fontWeight: 900, fontSize: 22, marginBottom: 8 }}>Na lista!</div>
+        <div style={{ color: C.grn, fontWeight: 900, fontSize: 22, marginBottom: 8 }}>Você está na lista!</div>
         <div style={{ color: C.sub, fontSize: 14, marginBottom: 24 }}>
-          {saved.length} convidado{saved.length !== 1 ? 's' : ''} na lista de <strong style={{ color: C.acc }}>{lista?.promoters?.full_name}</strong>
+          Presença confirmada em <strong style={{ color: C.acc }}>{lista?.events?.name}</strong>
         </div>
         <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 16, textAlign: 'left', marginBottom: 16 }}>
           {saved.map((g, i) => (
@@ -129,12 +137,15 @@ export function ListaPublicPage({ token }: { token: string }) {
         <div style={{ background: C.gold + '15', border: `1px solid ${C.gold}33`, borderRadius: 12, padding: '12px 16px', color: C.gold, fontSize: 13, fontWeight: 600 }}>
           📍 Apresente este link ou seu nome na portaria em {lista?.events?.name}
         </div>
+        <button onClick={() => setDone(false)}
+          style={{ marginTop: 16, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 20px', color: C.mut, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+          Adicionar mais pessoas
+        </button>
       </div>
     </div>
   )
 
   const ev = lista!.events
-  const promoter = lista!.promoters
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
@@ -150,70 +161,40 @@ export function ListaPublicPage({ token }: { token: string }) {
             <img src={lista!.houses.logo_url} alt="logo" style={{ width: 48, height: 48, borderRadius: 12, objectFit: 'cover', marginBottom: 10 }} />
           )}
           <div style={{ color: '#a78bfa', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
-            Lista de Convidados
+            Lista da Casa
           </div>
           <h1 style={{ color: C.txt, fontSize: 22, fontWeight: 900, margin: '0 0 6px' }}>
             {ev?.name ?? lista!.name}
           </h1>
           {ev && (
-            <div style={{ color: C.sub, fontSize: 13, marginBottom: 8 }}>
+            <div style={{ color: C.sub, fontSize: 13 }}>
               📅 {fdate(ev.event_date)}{ev.start_time ? ` · 🕙 ${ev.start_time.slice(0, 5)}` : ''}
             </div>
           )}
-          {/* Promoter badge */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', borderRadius: 20, padding: '6px 14px' }}>
-            {promoter?.photo_url
-              ? <img src={promoter.photo_url} style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover' }} />
-              : <span style={{ fontSize: 16 }}>👤</span>
-            }
-            <span style={{ color: '#c4b5fd', fontSize: 13, fontWeight: 700 }}>{promoter?.full_name ?? 'Promoter'}</span>
-          </div>
         </div>
       </div>
 
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 60px' }}>
 
-        {/* Counter */}
-        <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 18px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ color: C.txt, fontWeight: 800, fontSize: 20 }}>{saved.length}</div>
-            <div style={{ color: C.mut, fontSize: 12 }}>convidado{saved.length !== 1 ? 's' : ''} na lista</div>
-          </div>
-          <div style={{ color: '#a78bfa', fontSize: 28 }}>🎭</div>
-        </div>
-
-        {/* Saved guests */}
+        {/* Saved guests counter */}
         {saved.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: '0.06em' }}>
-              JÁ NA LISTA
+          <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 18px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ color: C.txt, fontWeight: 800, fontSize: 20 }}>{saved.length}</div>
+              <div style={{ color: C.mut, fontSize: 12 }}>já na lista</div>
             </div>
-            {saved.map((g, i) => (
-              <div key={g.id} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '12px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ color: C.txt, fontWeight: 700, fontSize: 15 }}>
-                    {i + 1}.{' '}
-                    {g.gender === 'feminino' ? <span style={{ color: '#f472b6' }}>♀ </span> : g.gender === 'masculino' ? <span style={{ color: C.acc }}>♂ </span> : ''}
-                    {g.full_name}
-                  </div>
-                  <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
-                    {g.phone ? `📱 ${fmtPhone(g.phone)}` : ''}
-                    {g.phone && g.cpf ? '  ·  ' : ''}
-                    {g.cpf ? `📄 ${fmtCPF(g.cpf)}` : ''}
-                  </div>
-                </div>
-                <button onClick={() => removeGuest(g.id)}
-                  style={{ background: 'none', border: 'none', color: C.mut, fontSize: 18, cursor: 'pointer', padding: '4px 8px' }}>
-                  ✕
-                </button>
-              </div>
-            ))}
+            <div style={{ color: '#a78bfa', fontSize: 28 }}>🎭</div>
           </div>
         )}
 
         {/* Add form */}
+        {preNome && (
+          <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 12, padding: '12px 16px', marginBottom: 16, color: '#10b981', fontSize: 13, fontWeight: 600 }}>
+            ✅ Confirme seus dados abaixo para entrar na lista
+          </div>
+        )}
         <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: '0.06em' }}>
-          ADICIONAR À LISTA
+          {preNome ? 'CONFIRMAR PRESENÇA' : 'ADICIONAR À LISTA'}
         </div>
 
         <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
@@ -221,7 +202,7 @@ export function ListaPublicPage({ token }: { token: string }) {
             <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 5 }}>NOME COMPLETO *</label>
             <input style={INP} value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
               onKeyDown={e => e.key === 'Enter' && addGuest()}
-              placeholder="Nome completo" autoFocus />
+              placeholder="Nome completo" autoFocus={!preNome} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
@@ -239,15 +220,23 @@ export function ListaPublicPage({ token }: { token: string }) {
                 placeholder="000.000.000-00" />
             </div>
           </div>
-          <div>
-            <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 5 }}>GÊNERO</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {['masculino', 'feminino'].map(g => (
-                <button key={g} onClick={() => setForm(p => ({ ...p, gender: p.gender === g ? '' : g }))}
-                  style={{ flex: 1, padding: 10, borderRadius: 10, border: `2px solid ${form.gender === g ? '#7c3aed' : C.brd}`, background: form.gender === g ? 'rgba(124,58,237,0.2)' : 'transparent', color: form.gender === g ? '#a78bfa' : C.mut, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  {g === 'masculino' ? '♂ Masculino' : '♀ Feminino'}
-                </button>
-              ))}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 5 }}>GÊNERO</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {['masculino', 'feminino'].map(g => (
+                  <button key={g} onClick={() => setForm(p => ({ ...p, gender: p.gender === g ? '' : g }))}
+                    style={{ flex: 1, padding: 10, borderRadius: 10, border: `2px solid ${form.gender === g ? '#7c3aed' : C.brd}`, background: form.gender === g ? 'rgba(124,58,237,0.2)' : 'transparent', color: form.gender === g ? '#a78bfa' : C.mut, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    {g === 'masculino' ? '♂' : '♀'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 5 }}>NASCIMENTO</label>
+              <input style={{ ...INP, color: form.birth_date ? C.txt : C.mut }} type="date"
+                value={form.birth_date}
+                onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} />
             </div>
           </div>
         </div>
@@ -259,15 +248,30 @@ export function ListaPublicPage({ token }: { token: string }) {
         )}
 
         <button onClick={addGuest} disabled={submitting}
-          style={{ width: '100%', background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: '#fff', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 800, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit', marginBottom: 12 }}>
-          {submitting ? 'Salvando...' : '➕ Adicionar à Lista'}
+          style={{ width: '100%', background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', color: '#fff', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 800, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit' }}>
+          {submitting ? 'Salvando...' : preNome ? '✅ Confirmar Presença' : '➕ Entrar na Lista'}
         </button>
 
         {saved.length > 0 && (
-          <button onClick={() => setDone(true)}
-            style={{ width: '100%', background: C.grn + '22', border: `1px solid ${C.grn}44`, color: C.grn, borderRadius: 14, padding: 14, fontSize: 15, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
-            ✅ Fechar lista ({saved.length} convidado{saved.length !== 1 ? 's' : ''})
-          </button>
+          <div style={{ marginTop: 20 }}>
+            <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: '0.06em' }}>JÁ NA LISTA</div>
+            {saved.map((g, i) => (
+              <div key={g.id} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '12px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ color: C.txt, fontWeight: 700, fontSize: 15 }}>
+                    {i + 1}.{' '}
+                    {g.gender === 'feminino' ? <span style={{ color: '#f472b6' }}>♀ </span> : g.gender === 'masculino' ? <span style={{ color: C.acc }}>♂ </span> : ''}
+                    {g.full_name}
+                  </div>
+                  {g.phone && <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>📱 {fmtPhone(g.phone)}</div>}
+                </div>
+                <button onClick={() => removeGuest(g.id)}
+                  style={{ background: 'none', border: 'none', color: C.mut, fontSize: 18, cursor: 'pointer', padding: '4px 8px' }}>
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
         )}
 
         <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', marginTop: 20 }}>

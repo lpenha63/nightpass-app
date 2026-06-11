@@ -2,6 +2,7 @@ export interface House {
   id: string
   name: string
   slug?: string
+  logo_url?: string
   created_at: string
 }
 
@@ -15,6 +16,8 @@ export interface Session {
   house: House
   user: UserProfile
   role: string
+  allowedPages: string[]
+  freelancerId?: string | null
 }
 
 export interface Client {
@@ -24,6 +27,7 @@ export interface Client {
   cpf?: string
   phone?: string
   birth_date?: string
+  gender?: string
   email?: string
   photo_url?: string
   fingerprint_id?: string
@@ -58,11 +62,13 @@ export interface Event {
   promotions?: string
   flyer_url?: string
   birthday_list_enabled?: boolean
+  house_list_enabled?: boolean
   observations?: string
   artist_fee_cents?: number
   artists?: ArtistEntry[]
   consumption_cents?: number
   production_cost_cents?: number
+  staffing_needs?: Record<string, number>
   status: string
   created_at: string
 }
@@ -118,6 +124,7 @@ export interface Freelancer {
   pix_key?: string
   daily_rate_cents?: number
   work_types: WorkType[]
+  staff_type?: string
   notes?: string
   status: string
   created_at: string
@@ -173,6 +180,8 @@ export interface EventFreelancer {
   event_id: string
   freelancer_id: string
   confirmed: boolean
+  role?: string
+  custom_fee_cents?: number | null
   created_at: string
   freelancers?: Pick<Freelancer, 'full_name' | 'work_types' | 'daily_rate_cents' | 'phone'>
 }

@@ -33,7 +33,7 @@ interface Reservation {
   reservation_date?: string; event_id?: string; status: string; token?: string
   reservation_type?: string; flyer_url?: string; invite_message?: string
   payment_status?: string; deposit_cents?: number; observations?: string
-  list_link_sent_at?: string
+  list_link_sent_at?: string; archived_at?: string
   list_type?: string; list_custom_value_cents?: number; list_male_value_cents?: number; list_female_value_cents?: number
   events?: { name: string; event_date?: string }
   reservation_items?: ResItem[]
@@ -44,9 +44,9 @@ const EMPTY_TYPE = { name: '', icon: '🎉', color: '#3b82f6', sort_order: '0' }
 const ICON_OPTS = ['🎉','🎂','🍖','🏢','👶','💍','🎓','🎊','🥂','🍽️','🎭','🎪','🎡','🏆','🌟','🎵','🏖️','🏡','🌺','🎈']
 const STATUS_COLOR: Record<string, string> = { pending: '#f59e0b', confirmed: '#10b981', arrived: '#3b82f6', cancelled: '#f87171' }
 const STATUS_LABEL: Record<string, string> = { pending: 'Pendente', confirmed: 'Confirmado', arrived: 'Chegou', cancelled: 'Cancelado' }
-const PAY_COLOR: Record<string, string> = { unpaid: '#f87171', partial: '#f59e0b', paid: '#10b981' }
-const PAY_LABEL: Record<string, string> = { unpaid: 'A Pagar', partial: 'Sinal Pago', paid: 'Pago' }
-const PAY_ICON: Record<string, string>  = { unpaid: '💸', partial: '💰', paid: '✅' }
+const PAY_COLOR: Record<string, string> = { unpaid: '#f87171', partial: '#f59e0b', paid: '#10b981', free: '#a78bfa' }
+const PAY_LABEL: Record<string, string> = { unpaid: 'A Pagar', partial: 'Sinal Pago', paid: 'Pago', free: 'Free' }
+const PAY_ICON: Record<string, string>  = { unpaid: '💸', partial: '💰', paid: '✅', free: '🎁' }
 const LIST_COLOR: Record<string, string> = { normal: '#94a3b8', vip: '#f59e0b', custom: '#a78bfa' }
 const LIST_LABEL: Record<string, string> = { normal: 'Normal', vip: 'VIP', custom: 'Valor' }
 const LIST_ICON:  Record<string, string> = { normal: '📋', vip: '⭐', custom: '💲' }
@@ -59,7 +59,8 @@ const SL: React.CSSProperties = {
 }
 
 export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
-  const [view, setView] = useState<'list' | 'settings' | 'spaces'>('list')
+  const [view, setView] = useState<'list' | 'settings' | 'spaces' | 'archive'>('list')
+  const [archivedList, setArchivedList] = useState<Reservation[]>([])
   const [selDate, setSelDate] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
@@ -81,6 +82,12 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   const [guestLoading, setGuestLoading] = useState(false)
   const [newGuest, setNewGuest] = useState({ name: '', phone: '', birth_date: '' })
   const [savingGuest, setSavingGuest] = useState(false)
+
+  // ── Tarefa de montagem (executor por reserva) ──
+  const [frList, setFrList] = useState<Array<{ id: string; full_name: string; phone?: string }>>([])
+  const [montagemRes, setMontagemRes] = useState<Reservation | null>(null)
+  const [montagemFr, setMontagemFr] = useState('')
+  const [montagemMsg, setMontagemMsg] = useState('')
 
   // ── Espaços da casa ──
   interface HouseSpace { id: string; name: string; capacity?: number; price_cents: number; active: boolean; sort_order: number }
@@ -159,6 +166,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     const ef = evFilter !== undefined ? evFilter : eventFilter
     let q = supabase.from('reservations').select('*,events(name,event_date),reservation_items(*)')
       .eq('house_id', house.id)
+      .is('archived_at', null)
     if (p === 'day') {
       q = q.eq('reservation_date', d)
     } else if (p === 'week') {
@@ -178,6 +186,16 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     q.order('reservation_date').order('expected_arrival').then(r => setResList(r.data ?? []))
     supabase.from('events').select('id,name,event_date').eq('house_id', house.id).eq('event_date', d)
       .then(r => setEventsForDate(r.data ?? []))
+  }
+
+  function loadArchived() {
+    supabase.from('reservations')
+      .select('*,events(name,event_date),reservation_items(*)')
+      .eq('house_id', house.id)
+      .not('archived_at', 'is', null)
+      .order('archived_at', { ascending: false })
+      .limit(100)
+      .then(r => setArchivedList(r.data ?? []))
   }
 
   function loadPeriodCounts(date: string) {
@@ -222,6 +240,33 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     setForm(p => ({ ...p, reservation_date: date, location: '' }))
     loadOccupied(date)
     pullEventsForDate(date)
+  }
+
+  useEffect(() => {
+    supabase.from('freelancers').select('id,full_name,phone').eq('house_id', house.id).eq('status', 'ativo').order('full_name')
+      .then(r => setFrList((r.data ?? []) as Array<{ id: string; full_name: string; phone?: string }>))
+  }, [house.id])
+
+  function openMontagem(r: Reservation) {
+    setMontagemRes(r); setMontagemFr('')
+    const items = (r.reservation_items ?? []).map(i => `• ${i.quantity > 1 ? i.quantity + '× ' : ''}${i.name}`).join('\n')
+    const dateStr = r.reservation_date ? new Date(r.reservation_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }) : ''
+    setMontagemMsg([
+      `📐 *Tarefa de Montagem* — ${r.name}`,
+      dateStr ? `📅 ${dateStr}` : '',
+      r.location ? `📍 Local: ${r.location}` : '',
+      r.people_count ? `👥 ${r.people_count} pessoas` : '',
+      items ? `\n📦 Itens / estrutura:\n${items}` : '',
+      r.observations ? `\n📝 ${r.observations}` : '',
+      '\nPor favor, confirme a montagem. 🙌',
+    ].filter(Boolean).join('\n'))
+  }
+
+  function sendMontagem() {
+    const fr = frList.find(f => f.id === montagemFr)
+    const ph = (fr?.phone ?? '').replace(/\D/g, '')
+    window.open(`https://wa.me/${ph ? '55' + ph : ''}?text=${encodeURIComponent(montagemMsg)}`, '_blank')
+    setMontagemRes(null)
   }
 
   useEffect(() => { loadTypes() }, [house.id])
@@ -289,7 +334,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   async function saveRes() {
     if (!form.name.trim()) { sT(setToast, 'Nome do responsável obrigatório', 'error'); return }
     if ((form.phone || '').replace(/\D/g, '').length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
-    const totalCents = Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
+    const isFree = form.payment_status === 'free'
+    const totalCents = isFree ? 0 : Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
     const depositCents = form.payment_status === 'partial'
       ? Math.round((parseFloat(String(form.deposit_cents)) || 0) * 100)
       : form.payment_status === 'paid' ? totalCents : 0
@@ -341,6 +387,16 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   function deleteRes(id: string) {
     if (!confirm('Remover reserva?')) return
     supabase.from('reservations').delete().eq('id', id).then(() => { loadRes(); loadPeriodCounts(selDate) })
+  }
+
+  function unarchiveRes(id: string) {
+    supabase.from('reservations').update({ archived_at: null }).eq('id', id)
+      .then(() => loadArchived())
+  }
+
+  function deleteArchivedRes(id: string) {
+    if (!confirm('Excluir permanentemente esta reserva?')) return
+    supabase.from('reservations').delete().eq('id', id).then(() => loadArchived())
   }
 
   function markArrived(id: string) {
@@ -760,9 +816,9 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Status do Pagamento</label>
                 <div style={{ display: 'flex', gap: 6, height: 44 }}>
-                  {(['unpaid','partial','paid'] as const).map(ps => (
+                  {(['unpaid','partial','paid','free'] as const).map(ps => (
                     <button key={ps} type="button"
-                      onClick={() => setForm(p => ({ ...p, payment_status: ps, deposit_cents: ps === 'paid' ? p.amount_cents : ps === 'unpaid' ? '' : p.deposit_cents }))}
+                      onClick={() => setForm(p => ({ ...p, payment_status: ps, amount_cents: ps === 'free' ? '0' : p.amount_cents, deposit_cents: ps === 'paid' ? p.amount_cents : (ps === 'unpaid' || ps === 'free') ? '' : p.deposit_cents }))}
                       style={{ flex: 1, borderRadius: 8, border: `2px solid ${form.payment_status === ps ? PAY_COLOR[ps] : PAY_COLOR[ps] + '33'}`, background: form.payment_status === ps ? PAY_COLOR[ps] + '22' : 'transparent', color: form.payment_status === ps ? PAY_COLOR[ps] : C.mut, fontSize: 11, fontWeight: form.payment_status === ps ? 800 : 500, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, transition: 'all .15s' }}>
                       <span style={{ fontSize: 14 }}>{PAY_ICON[ps]}</span>
                       <span>{PAY_LABEL[ps]}</span>
@@ -793,6 +849,14 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   </>
                 )
               })()}
+              {form.payment_status === 'free' && (
+                <div style={{ gridColumn: 'span 2' }}>
+                  <div style={{ background: '#a78bfa11', border: '1px solid #a78bfa33', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 20 }}>🎁</span>
+                    <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 14 }}>Reserva gratuita · nada será cobrado</span>
+                  </div>
+                </div>
+              )}
               {form.payment_status === 'paid' && parseFloat(String(form.amount_cents)) > 0 && (
                 <div style={{ gridColumn: 'span 2' }}>
                   <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -882,6 +946,30 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
         </div>
       </Modal>
 
+      {/* ── Modal Tarefa de Montagem ── */}
+      <Modal open={!!montagemRes} title={`📐 Montagem — ${montagemRes?.name ?? ''}`} onClose={() => setMontagemRes(null)}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Executor (equipe / freelancer)</label>
+            <select value={montagemFr} onChange={e => setMontagemFr(e.target.value)} style={SL}>
+              <option value="">— Selecionar executor —</option>
+              {frList.map(f => <option key={f.id} value={f.id}>{f.full_name}{f.phone ? ` · ${ftel(f.phone)}` : ' · sem telefone'}</option>)}
+            </select>
+            {frList.length === 0 && <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>Nenhum freelancer cadastrado. Cadastre na aba Equipe.</div>}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Tarefa de montagem</label>
+            <textarea value={montagemMsg} onChange={e => setMontagemMsg(e.target.value)} style={{ ...SL, minHeight: 170, resize: 'vertical' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Btn onClick={sendMontagem} disabled={!montagemFr} style={{ flex: 1, background: '#25d36622', color: '#25d366', border: '1px solid #25d36644' }}>
+              <i className="bi bi-whatsapp" /> Enviar pelo WhatsApp
+            </Btn>
+            <Btn onClick={() => setMontagemRes(null)} variant="ghost">Cancelar</Btn>
+          </div>
+        </div>
+      </Modal>
+
       {/* ── Header ── */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
@@ -890,13 +978,16 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             <p style={{ color: C.mut, fontSize: 14 }}>
               {view === 'list'
                 ? `${resList.length} reserva${resList.length !== 1 ? 's' : ''} · ${viewPeriod === 'day' ? new Date(selDate + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }) : viewPeriod === 'week' ? 'esta semana' : new Date(selDate + 'T12:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`
-                : 'Tipos de celebração configuráveis'}
+                : view === 'archive'
+                  ? `${archivedList.length} reserva${archivedList.length !== 1 ? 's' : ''} arquivada${archivedList.length !== 1 ? 's' : ''}`
+                  : 'Tipos de celebração configuráveis'}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button style={TAB(view === 'list')} onClick={() => setView('list')}>📋 Reservas</button>
             <button style={TAB(view === 'settings')} onClick={() => setView('settings')}>⚙️ Tipos</button>
             <button style={TAB(view === 'spaces')} onClick={() => setView('spaces')}>🗂️ Espaços</button>
+            <button style={TAB(view === 'archive')} onClick={() => { setView('archive'); loadArchived() }}>📦 Arquivo</button>
             {view === 'list' && <Btn onClick={openNew} icon="➕">Nova Reserva</Btn>}
           </div>
         </div>
@@ -951,104 +1042,158 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
               const total = (r.amount_cents ?? 0) + itemsSum
               const ph = (r.phone ?? '').replace(/\D/g, '')
               const waHref = ph ? `https://wa.me/55${ph}` : null
+              const ps = r.payment_status ?? 'unpaid'
+              const payCol = PAY_COLOR[ps] ?? C.mut
+              const depositCents = r.deposit_cents ?? 0
+              const amtCents = r.amount_cents ?? 0
+              const remaining = amtCents - depositCents
+              const lt = r.list_type ?? 'normal'
+              const listCol = LIST_COLOR[lt] ?? C.mut
+              const lm = r.list_male_value_cents ?? 0
+              const lf = r.list_female_value_cents ?? 0
+              const statusCol = STATUS_COLOR[r.status] ?? C.mut
               return (
-                <div key={r.id} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '12px 16px', borderBottom: idx < resList.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
-                  {/* Flyer thumbnail */}
-                  {r.flyer_url
-                    ? <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', flexShrink: 0, border: `1px solid ${C.brd}` }}>
-                        <img src={r.flyer_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }} />
-                      </div>
-                    : <div style={{ width: 44, height: 44, borderRadius: 8, background: resType ? resType.color + '22' : C.card, border: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-                        {resType ? resType.icon : '🪑'}
-                      </div>
-                  }
+                <div key={r.id} style={{ display: 'flex', borderBottom: idx < resList.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
 
-                  {/* Main info */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 3 }}>
-                      <span style={{ color: C.txt, fontWeight: 800, fontSize: 15 }}>{r.name}</span>
-                      <span style={{ background: (STATUS_COLOR[r.status] ?? C.mut) + '22', color: STATUS_COLOR[r.status] ?? C.mut, border: `1px solid ${(STATUS_COLOR[r.status] ?? C.mut)}44`, borderRadius: 8, padding: '1px 8px', fontSize: 11, fontWeight: 700 }}>
-                        {STATUS_LABEL[r.status] ?? r.status}
-                      </span>
-                      {/* Badge de pagamento */}
-                      {(() => {
-                        const ps = r.payment_status ?? 'unpaid'
-                        const col = PAY_COLOR[ps] ?? C.mut
-                        const depositCents = r.deposit_cents ?? 0
-                        const amtCents = r.amount_cents ?? 0
-                        const remaining = amtCents - depositCents
-                        return (
-                          <span style={{ background: col + '18', color: col, border: `1px solid ${col}44`, borderRadius: 8, padding: '1px 8px', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {/* Barra lateral colorida por status */}
+                  <div style={{ width: 4, flexShrink: 0, background: statusCol, borderRadius: idx === 0 ? '4px 0 0 0' : idx === resList.length - 1 ? '0 0 0 4px' : '0', opacity: 0.8 }} />
+
+                  <div style={{ flex: 1, padding: '14px 18px 14px 16px', minWidth: 0 }}>
+
+                    {/* ── Cabeçalho: ícone + nome + tipo + status ── */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                      {/* Ícone / flyer thumb */}
+                      {r.flyer_url
+                        ? <div style={{ width: 48, height: 48, borderRadius: 10, overflow: 'hidden', flexShrink: 0 }}>
+                            <img src={r.flyer_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }} />
+                          </div>
+                        : <div style={{ width: 48, height: 48, borderRadius: 10, background: resType ? resType.color + '18' : '#ffffff0a', border: `2px solid ${resType ? resType.color + '44' : C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
+                            {resType ? resType.icon : '🪑'}
+                          </div>
+                      }
+
+                      {/* Nome + meta info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                          <span style={{ color: C.txt, fontWeight: 900, fontSize: 18, lineHeight: 1 }}>{r.name}</span>
+                          {resType && (
+                            <span style={{ color: resType.color, fontSize: 12, fontWeight: 600, opacity: 0.9 }}>
+                              {resType.icon} {resType.name}
+                            </span>
+                          )}
+                          {r.events && (
+                            <span style={{ color: C.mut, fontSize: 12 }}>
+                              · 🎉 {(r.events as { name: string }).name}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Badges de status, pagamento e lista — compactos */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                          <span style={{ background: statusCol + '20', color: statusCol, border: `1px solid ${statusCol}44`, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 800, letterSpacing: '0.03em' }}>
+                            {STATUS_LABEL[r.status] ?? r.status}
+                          </span>
+                          <span style={{ background: payCol + '18', color: payCol, border: `1px solid ${payCol}33`, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                             {PAY_ICON[ps]} {PAY_LABEL[ps]}
-                            {ps === 'partial' && remaining > 0 && (
-                              <span style={{ opacity: 0.85 }}>· falta {fmtCurrency(remaining)}</span>
-                            )}
+                            {ps === 'partial' && remaining > 0 && <span style={{ opacity: 0.8 }}>· falta {fmtCurrency(remaining)}</span>}
                           </span>
-                        )
-                      })()}
-                      {/* Badge tipo de lista */}
-                      {(() => {
-                        const lt = r.list_type ?? 'normal'
-                        const col = LIST_COLOR[lt] ?? C.mut
-                        const m = r.list_male_value_cents ?? 0
-                        const f = r.list_female_value_cents ?? 0
-                        return (
-                          <span style={{ background: col + '18', color: col, border: `1px solid ${col}44`, borderRadius: 8, padding: '1px 8px', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ background: listCol + '18', color: listCol, border: `1px solid ${listCol}33`, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                             {LIST_ICON[lt]} {LIST_LABEL[lt]}
-                            {lt === 'custom' && (m > 0 || f > 0) && (
-                              <span style={{ opacity: 0.9 }}>
-                                {m > 0 && ` · 👨 ${fmtCurrency(m)}`}{f > 0 && ` · 👩 ${fmtCurrency(f)}`}
-                              </span>
-                            )}
+                            {lt === 'custom' && (lm > 0 || lf > 0) && <span style={{ opacity: 0.85 }}>{lm > 0 && ` · 👨 ${fmtCurrency(lm)}`}{lf > 0 && ` · 👩 ${fmtCurrency(lf)}`}</span>}
                           </span>
-                        )
-                      })()}
-                      {resType && (
-                        <span style={{ background: resType.color + '18', color: resType.color, border: `1px solid ${resType.color}33`, borderRadius: 8, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>
-                          {resType.icon} {resType.name}
+                          {r.list_link_sent_at && (
+                            <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <i className="bi bi-check2-circle" /> link enviado
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Valor total — destaque à direita */}
+                      {total > 0 && (
+                        <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                          <div style={{ color: C.gold, fontWeight: 900, fontSize: 18, lineHeight: 1 }}>{fmtCurrency(total)}</div>
+                          {items.length > 0 && <div style={{ color: C.mut, fontSize: 10, marginTop: 2 }}>📦 {items.length} item{items.length > 1 ? 's' : ''}</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Linha de detalhes: chips compactos ── */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginBottom: r.observations ? 8 : 10, paddingLeft: 60, alignItems: 'center' }}>
+                      {viewPeriod !== 'day' && (
+                        <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <i className="bi bi-calendar3" style={{ color: C.acc }} />
+                          <strong style={{ color: C.txt }}>{new Date((r.reservation_date ?? selDate) + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}</strong>
+                        </span>
+                      )}
+                      {r.expected_arrival && (
+                        <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <i className="bi bi-clock-fill" style={{ color: C.acc }} />
+                          <strong style={{ color: C.txt }}>{r.expected_arrival.slice(0, 5)}</strong>
+                        </span>
+                      )}
+                      {r.people_count && (
+                        <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <i className="bi bi-people-fill" style={{ color: C.sub }} />
+                          <strong style={{ color: C.txt }}>{r.people_count} pessoas</strong>
+                        </span>
+                      )}
+                      {r.location && (
+                        <span style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <i className="bi bi-geo-alt-fill" style={{ color: C.acc }} />
+                          <strong style={{ color: C.acc }}>{r.location}</strong>
+                        </span>
+                      )}
+                      {r.phone && (
+                        <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <i className="bi bi-telephone-fill" style={{ color: C.mut }} />
+                          <span>{ftel(r.phone)}</span>
                         </span>
                       )}
                     </div>
-                    <div style={{ color: C.mut, fontSize: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                      {viewPeriod !== 'day' && <span>📅 {new Date((r.reservation_date ?? selDate) + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
-                      {r.expected_arrival && <span>🕐 {r.expected_arrival.slice(0, 5)}</span>}
-                      {r.people_count && <span>👥 {r.people_count}p</span>}
-                      {r.location && <span style={{ color: C.acc }}>📍 {r.location}</span>}
-                      {r.phone && <span>📱 {ftel(r.phone)}</span>}
-                      {r.events && <span style={{ color: C.acc }}>🎉 {(r.events as { name: string }).name}</span>}
-                      {total > 0 && <span style={{ color: C.gold, fontWeight: 700 }}>💰 {fmtCurrency(total)}</span>}
-                      {items.length > 0 && <span style={{ color: C.sub }}>📦 {items.length} item{items.length > 1 ? 's' : ''}</span>}
-                      {r.list_link_sent_at && <span style={{ color: C.grn, fontWeight: 600 }}>✓ link enviado</span>}
-                    </div>
+
+                    {/* ── Observações ── */}
                     {r.observations && (
-                      <div style={{ marginTop: 4, fontSize: 12, color: C.mut, display: 'flex', alignItems: 'flex-start', gap: 5 }}>
-                        <span style={{ flexShrink: 0 }}>📝</span>
-                        <span style={{ fontStyle: 'italic', lineHeight: 1.4 }}>{r.observations}</span>
+                      <div style={{ marginBottom: 10, marginLeft: 60, display: 'flex', alignItems: 'flex-start', gap: 6, background: '#ffffff07', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px' }}>
+                        <i className="bi bi-chat-left-text" style={{ color: C.mut, fontSize: 13, flexShrink: 0, marginTop: 1 }} />
+                        <span style={{ fontSize: 12, color: C.sub, fontStyle: 'italic', lineHeight: 1.5 }}>{r.observations}</span>
                       </div>
                     )}
-                  </div>
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
-                    {r.status === 'pending' && (
-                      <Btn onClick={() => markArrived(r.id)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` }}>✅</Btn>
-                    )}
-                    {waHref && (
-                      <Btn onClick={() => window.open(waHref, '_blank')} small style={{ background: '#25d36622', color: '#25d366', border: '1px solid #25d36644' }}>
-                        💬 WhatsApp
+                    {/* ── Ações ── */}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 60 }}>
+                      {r.status === 'pending' && (
+                        <Btn onClick={() => markArrived(r.id)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` }}>
+                          <i className="bi bi-check-circle-fill" /> Chegou
+                        </Btn>
+                      )}
+                      {waHref && (
+                        <Btn onClick={() => window.open(waHref, '_blank')} small style={{ background: '#25d36622', color: '#25d366', border: '1px solid #25d36644' }}>
+                          <i className="bi bi-whatsapp" /> WhatsApp
+                        </Btn>
+                      )}
+                      {r.token && r.phone && (
+                        <Btn onClick={() => sendListLink(r)} small variant="secondary"
+                          title={r.list_link_sent_at ? `Link enviado em ${new Date(r.list_link_sent_at).toLocaleString('pt-BR')}` : 'Enviar link da lista'}
+                          style={r.list_link_sent_at ? { background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` } : undefined}>
+                          <i className={`bi bi-${r.list_link_sent_at ? 'send-check-fill' : 'send-fill'}`} /> {r.list_link_sent_at ? 'Link enviado' : 'Enviar Link'}
+                        </Btn>
+                      )}
+                      <Btn onClick={() => openGuestPanel(r)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44' }}>
+                        <i className="bi bi-people-fill" /> Lista
                       </Btn>
-                    )}
-                    {r.token && r.phone && (
-                      <Btn onClick={() => sendListLink(r)} small variant="secondary"
-                        title={r.list_link_sent_at ? `Link enviado em ${new Date(r.list_link_sent_at).toLocaleString('pt-BR')}` : 'Enviar link da lista'}
-                        style={r.list_link_sent_at ? { background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` } : undefined}>
-                        {r.list_link_sent_at ? '📲✓' : '📲'}
+                      <Btn onClick={() => openMontagem(r)} small style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44' }}>
+                        <i className="bi bi-tools" /> Montagem
                       </Btn>
-                    )}
-                    <Btn onClick={() => openGuestPanel(r)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44' }}>👥 Lista</Btn>
-                    <Btn onClick={() => editRes(r)} small variant="ghost">✏️</Btn>
-                    <Btn onClick={() => deleteRes(r.id)} small variant="danger">🗑</Btn>
+                      <Btn onClick={() => editRes(r)} small variant="ghost">
+                        <i className="bi bi-pencil-fill" /> Editar
+                      </Btn>
+                      <Btn onClick={() => deleteRes(r.id)} small variant="danger">
+                        <i className="bi bi-trash3-fill" />
+                      </Btn>
+                    </div>
+
                   </div>
                 </div>
               )
@@ -1366,6 +1511,55 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             </div>
           </div>
         </>
+      )}
+
+      {/* ── ARQUIVO DE RESERVAS ── */}
+      {view === 'archive' && (
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          {archivedList.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 24px', color: C.mut }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, marginBottom: 6 }}>Nenhuma reserva arquivada</div>
+              <div style={{ fontSize: 13 }}>Quando um evento é encerrado, suas reservas aparecem aqui.</div>
+            </div>
+          ) : (
+            archivedList.map((r, i) => {
+              const statusCol = STATUS_COLOR[r.status] ?? '#94a3b8'
+              const total = r.amount_cents ? (r.amount_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : null
+              const archivedDate = r.archived_at ? new Date(r.archived_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : ''
+              return (
+                <div key={r.id} style={{ display: 'flex', borderBottom: i < archivedList.length - 1 ? `1px solid ${C.brd}` : 'none', opacity: 0.85 }}>
+                  <div style={{ width: 4, flexShrink: 0, background: statusCol }} />
+                  <div style={{ flex: 1, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: C.card, border: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                      {r.reservation_type ? (resTypes.find(t => t.name === r.reservation_type)?.icon ?? '🎉') : '🎉'}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                        <span style={{ color: C.txt, fontWeight: 800, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                        {total && <span style={{ color: C.acc, fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{total}</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px 12px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {r.events?.name && <span style={{ fontSize: 11, color: C.mut }}><i className="bi bi-calendar-event-fill" /> {r.events.name}</span>}
+                        {r.reservation_date && <span style={{ fontSize: 11, color: C.mut }}><i className="bi bi-calendar3" /> {new Date(r.reservation_date + 'T12:00').toLocaleDateString('pt-BR')}</span>}
+                        {archivedDate && <span style={{ fontSize: 11, color: C.mut }}><i className="bi bi-archive-fill" /> Arquivado em {archivedDate}</span>}
+                        <span style={{ fontSize: 11, color: statusCol, fontWeight: 700 }}>{STATUS_LABEL[r.status] ?? r.status}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <Btn small onClick={() => unarchiveRes(r.id)}>
+                        <i className="bi bi-arrow-counterclockwise" /> Reativar
+                      </Btn>
+                      <Btn small variant="danger" onClick={() => deleteArchivedRes(r.id)}>
+                        <i className="bi bi-trash3-fill" />
+                      </Btn>
+                    </div>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </Card>
       )}
     </div>
   )

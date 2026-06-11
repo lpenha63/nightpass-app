@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSession } from './hooks/useSession'
 import { supabase } from './lib/supabase'
 import { C } from './constants/theme'
@@ -48,6 +48,46 @@ export default function App() {
   if (niverGuestMatch) return <NiverGuestPage token={niverGuestMatch[1]} />
   const { session, setSession, checked } = useSession()
   const [active, setActive] = useState<PageId>('dashboard')
+  const pageHistoryRef = useRef<PageId[]>([])
+
+  // Push a dummy history entry so popstate fires on back button
+  useEffect(() => {
+    window.history.pushState({ page: 'dashboard' }, '')
+  }, [])
+
+  // Intercept browser back button → navigate within app
+  useEffect(() => {
+    function onPopState() {
+      const hist = pageHistoryRef.current
+      if (hist.length > 0) {
+        const prev = hist[hist.length - 1]
+        pageHistoryRef.current = hist.slice(0, -1)
+        setActive(prev)
+        // Keep a dummy entry so next back press still fires popstate
+        window.history.pushState({ page: prev }, '')
+      } else {
+        // No more internal history — push state back so app stays open
+        window.history.pushState({ page: active }, '')
+      }
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [active])
+
+  function navigateTo(page: PageId) {
+    if (page !== active) {
+      pageHistoryRef.current = [...pageHistoryRef.current, active]
+      window.history.pushState({ page }, '')
+    }
+    setActive(page)
+  }
+
+  // Redirect to dashboard if current page is not allowed
+  useEffect(() => {
+    if (session && !session.allowedPages.includes(active)) {
+      navigateTo('dashboard')
+    }
+  }, [session?.allowedPages])
   const [mOpen, setMOpen] = useState(false)
   const [newCI, setNewCI] = useState(0)
   const [reservaNav, setReservaNav] = useState<{ date: string; eventId?: string } | null>(null)
@@ -91,7 +131,7 @@ export default function App() {
     dashboard: <DashboardPage house={session.house} user={session.user} role={session.role} />,
     checkin:   <CheckinPage house={session.house} user={session.user} role={session.role} />,
     clients:   <ClientsPage house={session.house} user={session.user} role={session.role} />,
-    events:    <EventsPage house={session.house} onGoToReservas={(date, eventId) => { setReservaNav({ date, eventId }); setActive('reservas') }} />,
+    events:    <EventsPage house={session.house} onGoToReservas={(date, eventId) => { setReservaNav({ date, eventId }); navigateTo('reservas') }} />,
     reservas:  <ReservasPage house={session.house} user={session.user} initialNav={reservaNav} onNavConsumed={() => setReservaNav(null)} />,
     promoters: <PromotersPage house={session.house} user={session.user} />,
     reports:   <ReportsPage house={session.house} />,
@@ -106,7 +146,7 @@ export default function App() {
       <Sidebar
         session={session}
         active={active}
-        setActive={setActive}
+        setActive={navigateTo}
         mOpen={mOpen}
         setMOpen={setMOpen}
         newCI={newCI}
@@ -123,7 +163,7 @@ export default function App() {
       </main>
       <BottomNav
         active={active}
-        setActive={setActive}
+        setActive={navigateTo}
         setMOpen={setMOpen}
         newCI={newCI}
       />

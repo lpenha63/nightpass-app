@@ -1,15 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, FAB, Pill } from '../components/ui'
 import { fd, fmtCurrency } from '../utils/format'
+import { fmtWAPhone } from '../utils/whatsapp'
 import { sT, _err, type ToastState } from '../utils/toast'
 import type { House, Event, ArtistEntry, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
+import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 
-const WORK_LABELS: Record<string, string> = {
-  limpeza: '🧹 Limpeza', cozinha: '👨‍🍳 Cozinha', servicos_gerais: '🔧 Serv. Gerais',
-  garcom: '🍽️ Garçom', cumim: '🥄 Cumim', recepcao: '💁 Recepção', atendente: '🎟️ Atendente',
-  seguranca: '🛡️ Segurança',
+function fmtMoneyInput(v: number | string): string {
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')) || 0
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function parseMoneyInput(raw: string): number {
+  return parseInt(raw.replace(/\D/g, '') || '0', 10) / 100
 }
 
 interface Props { house: House; onGoToReservas?: (date: string, eventId: string) => void }
@@ -17,6 +21,10 @@ interface Props { house: House; onGoToReservas?: (date: string, eventId: string)
 interface EventWithCounts extends Event {
   checkinCount?: number
   resCount?: number
+  resPeople?: number
+  listGuests?: number
+  tasksTotal?: number
+  tasksDone?: number
 }
 
 interface Guest {
@@ -54,7 +62,6 @@ interface ProdReservation {
 }
 
 const GENRES = ['Sertanejo', 'Samba', 'Pagode', 'Forró', 'Funk', 'Eletrônico', 'Axé', 'MPB', 'Pop', 'Rock', 'Outros']
-const AREA_ICONS = ['📋', '🔊', '🎤', '🎚️', '💡', '🍺', '🍸', '🍽️', '👨‍🍳', '🛡️', '🧹', '🎨', '📣', '📸', '🎥', '📄', '⚡', '🚪', '🚻', '🅿️', '🎁', '🪑']
 const REPT = [
   { v: 'none', l: 'Sem repetição' },
   { v: 'weekly', l: 'Semanal' },
@@ -68,7 +75,7 @@ const STATUS_LABEL: Record<string, string> = { pending: 'Pendente', confirmed: '
 const DEF = {
   name: '', event_date: '', genre: 'Sertanejo', start_time: '22:00', end_time: '04:00',
   price_male_cents: 0, price_female_cents: 0, price_male_list_cents: 0, price_female_list_cents: 0,
-  promotions: '', repeat_rule: 'none', capacity: '', birthday_list_enabled: false,
+  promotions: '', repeat_rule: 'none', capacity: '', birthday_list_enabled: false, house_list_enabled: false,
   attractions: '', flyer_url: '', observations: '',
   artist_fee_cents: 0, artist_fee_type: 'fixed', artist_fee_percent: 0,
   consumption_cents: 0, production_cost_cents: 0, status: 'ativo',
@@ -95,9 +102,22 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [guestEv, setGuestEv] = useState<EventWithCounts | null>(null)
   const [guests, setGuests] = useState<Guest[]>([])
   const [guestFilter, setGuestFilter] = useState('all')
+  const [guestListToken, setGuestListToken] = useState<string | null>(null)
+  const [guestListId, setGuestListId] = useState<string | null>(null)
+  const [guestListPromoId, setGuestListPromoId] = useState<string | null>(null)
+  const [guestAddForm, setGuestAddForm] = useState({ name: '', phone: '', gender: '' })
+  const [guestAdding, setGuestAdding] = useState(false)
+  const [listaTab, setListaTab] = useState<'lista' | 'convidar'>('lista')
+  const [listaClients, setListaClients] = useState<FlyerClient[]>([])
+  const [listaSearch, setListaSearch] = useState('')
+
+  // House list link in event form
+  const [houseListToken, setHouseListToken] = useState<string | null>(null)
 
   // Freelancers
   const [allFreelancers, setAllFreelancers] = useState<Freelancer[]>([])
+  const [workAreas, setWorkAreas] = useState<WorkArea[]>(DEFAULT_AREAS)
+  const wlabel = (key: string) => { const m = areaMeta(workAreas, key); return `${m.icon} ${m.label}` }
   const [evFreelancers, setEvFreelancers] = useState<EventFreelancer[]>([])
   const [frModal, setFrModal] = useState<EventWithCounts | null>(null)
 
@@ -123,6 +143,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [prodRes, setProdRes] = useState<ProdReservation[]>([])
   const [prodTab, setProdTab] = useState<'tasks' | 'freelancers' | 'budget' | 'layout'>('tasks')
   const [prodFr, setProdFr] = useState<EventFreelancer[]>([])
+  const [prodStaffing, setProdStaffing] = useState<Record<string, number>>({})
+  const [teamArea, setTeamArea] = useState<string | null>(null)
+  const [frModalArea, setFrModalArea] = useState<string | null>(null)
   const [addingArea, setAddingArea] = useState(false)
   const [newAreaIcon, setNewAreaIcon] = useState('📋')
   const [newAreaName, setNewAreaName] = useState('')
@@ -138,12 +161,17 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function removeArtist(i: number) { setArtists(a => a.filter((_, idx) => idx !== i)) }
   function setArtist(i: number, patch: Partial<ArtistEntry>) { setArtists(a => a.map((ar, idx) => idx === i ? { ...ar, ...patch } : ar)) }
 
-  // Checklist modal
-  interface ChecklistItem { id: string; category: string; title: string; done: boolean; sort_order: number }
-  const [checklistEv, setChecklistEv] = useState<EventWithCounts | null>(null)
-  const [checklist, setChecklist] = useState<ChecklistItem[]>([])
-  const [clForm, setClForm] = useState({ category: 'Equipe', title: '' })
-  const CHECKLIST_CATS = ['Equipe','Som & Iluminação','Bebidas & Bar','Alimentação','Decoração','Artistas','Marketing','Documentos','Infraestrutura','Outros']
+  // Checklist do card — checagem das tarefas adicionadas na Produção
+  const [checkEv, setCheckEv] = useState<EventWithCounts | null>(null)
+  const [checkTasks, setCheckTasks] = useState<EventTask[]>([])
+
+  // Outras despesas do evento (budget)
+  interface EventExpense { id: string; event_id: string; description: string; amount_cents: number }
+  const [budgetExpenses, setBudgetExpenses] = useState<EventExpense[]>([])
+  const [budgetRes, setBudgetRes] = useState<ProdReservation[]>([])
+  const [budgetTasks, setBudgetTasks] = useState<EventTask[]>([])
+  const [expForm, setExpForm] = useState({ description: '', amount: '' })
+  const [expAdding, setExpAdding] = useState(false)
 
   // Reservations modal
   const [resEv, setResEv] = useState<EventWithCounts | null>(null)
@@ -152,10 +180,27 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [resForm, setResForm] = useState(RDEF2)
   const [resEdit, setResEdit] = useState<string | null>(null)
 
+  // Consulta de reservas do card (somente leitura + impressão)
+  interface ResView { id: string; name: string; location?: string; people_count?: number; observations?: string; status: string; expected_arrival?: string }
+  const [resViewEv, setResViewEv] = useState<EventWithCounts | null>(null)
+  const [resViewList, setResViewList] = useState<ResView[]>([])
+
+  // Enviar flyer (broadcast WhatsApp)
+  interface FlyerClient { id: string; full_name: string; phone?: string; gender?: string }
+  const [flyerEv, setFlyerEv] = useState<EventWithCounts | null>(null)
+  const [flyerClients, setFlyerClients] = useState<FlyerClient[]>([])
+  const [flyerSel, setFlyerSel] = useState<Set<string>>(new Set())
+  const [flyerMsg, setFlyerMsg] = useState('')
+  const [flyerLink, setFlyerLink] = useState('')
+  const [flyerSearch, setFlyerSearch] = useState('')
+  const [flyerGender, setFlyerGender] = useState<'all' | 'masculino' | 'feminino'>('all')
+  const [flyerSending, setFlyerSending] = useState(false)
+  const [flyerProgress, setFlyerProgress] = useState({ sent: 0, total: 0 })
+
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   async function openProd(ev: EventWithCounts) {
-    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([])
+    setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setTeamArea(null); setProdStaffing(ev.staffing_needs ?? {})
     const [tasksR, resR, frR] = await Promise.all([
       supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
       supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
@@ -165,6 +210,57 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setProdTasks((tasksR.data ?? []) as EventTask[])
     setProdRes((resR.data ?? []) as ProdReservation[])
     setProdFr((frR.data ?? []) as EventFreelancer[])
+  }
+
+  async function reloadProdFr() {
+    if (!prodEv) return
+    const { data } = await supabase.from('event_freelancers')
+      .select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', prodEv.id)
+    setProdFr((data ?? []) as EventFreelancer[])
+  }
+
+  async function addProdFreelancer(freelancerId: string, role: string) {
+    if (!prodEv) return
+    await supabase.from('event_freelancers').insert({ event_id: prodEv.id, freelancer_id: freelancerId, confirmed: false, role })
+    await reloadProdFr()
+  }
+
+  async function removeProdFreelancer(id: string) {
+    await supabase.from('event_freelancers').delete().eq('id', id)
+    setProdFr(p => p.filter(f => f.id !== id))
+  }
+
+  // Quota: número de freelancers necessário por área (planejamento do gestor)
+  async function saveStaffingNeed(areaKey: string, value: number) {
+    if (!prodEv) return
+    const next = { ...prodStaffing }
+    if (value > 0) next[areaKey] = value; else delete next[areaKey]
+    setProdStaffing(next)
+    setProdEv(p => (p ? { ...p, staffing_needs: next } : p))
+    setEvents(prev => prev.map(e => e.id === prodEv.id ? { ...e, staffing_needs: next } : e))
+    await supabase.from('events').update({ staffing_needs: next }).eq('id', prodEv.id)
+  }
+
+  // Associação de freelancers pelo modal Equipe do card (recrutamento)
+  async function addEvFreelancer(freelancerId: string, role: string) {
+    if (!frModal) return
+    await supabase.from('event_freelancers').insert({ event_id: frModal.id, freelancer_id: freelancerId, confirmed: false, role })
+    loadEvFreelancers(frModal)
+  }
+  async function removeEvFreelancer(id: string) {
+    if (!frModal) return
+    await supabase.from('event_freelancers').delete().eq('id', id)
+    loadEvFreelancers(frModal)
+  }
+  async function toggleEvFrConfirmed(ef: EventFreelancer) {
+    if (!frModal) return
+    await supabase.from('event_freelancers').update({ confirmed: !ef.confirmed }).eq('id', ef.id)
+    loadEvFreelancers(frModal)
+  }
+
+  async function toggleProdFrConfirmed(fr: EventFreelancer) {
+    await supabase.from('event_freelancers').update({ confirmed: !fr.confirmed }).eq('id', fr.id)
+    setProdFr(p => p.map(f => f.id === fr.id ? { ...f, confirmed: !f.confirmed } : f))
   }
 
   async function addProdArea() {
@@ -317,37 +413,23 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     window.open(`https://wa.me/55${ph}?text=${encodeURIComponent(lines)}`, '_blank')
   }
 
-  function openChecklist(ev: EventWithCounts) {
-    setChecklistEv(ev); setChecklist([])
-    supabase.from('event_checklist_items').select('*').eq('event_id', ev.id).order('category').order('sort_order')
-      .then(r => setChecklist((r.data ?? []) as ChecklistItem[]))
+  function openCheck(ev: EventWithCounts) {
+    setCheckEv(ev); setCheckTasks([])
+    supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order')
+      .then(r => setCheckTasks((r.data ?? []) as EventTask[]))
   }
 
-  async function addClItem() {
-    if (!clForm.title.trim() || !checklistEv) return
-    const maxOrder = checklist.filter(i => i.category === clForm.category).length
-    const { data } = await supabase.from('event_checklist_items').insert({
-      event_id: checklistEv.id, house_id: house.id,
-      category: clForm.category, title: clForm.title.trim(), sort_order: maxOrder,
-    }).select().single()
-    if (data) { setChecklist(p => [...p, data as ChecklistItem]); setClForm(p => ({ ...p, title: '' })) }
+  async function toggleCheckTask(task: EventTask) {
+    const done = task.status !== 'done'
+    await supabase.from('event_tasks').update({ status: done ? 'done' : 'pending', completed_at: done ? new Date().toISOString() : null, completed_by: done ? 'operador' : null }).eq('id', task.id)
+    setCheckTasks(p => p.map(t => t.id === task.id ? { ...t, status: done ? 'done' : 'pending' } as EventTask : t))
   }
 
-  async function toggleClItem(id: string, done: boolean) {
-    await supabase.from('event_checklist_items').update({ done }).eq('id', id)
-    setChecklist(p => p.map(i => i.id === id ? { ...i, done } : i))
-  }
-
-  async function deleteClItem(id: string) {
-    await supabase.from('event_checklist_items').delete().eq('id', id)
-    setChecklist(p => p.filter(i => i.id !== id))
-  }
-
-  function printChecklist(ev: EventWithCounts) {
-    const grouped: Record<string, ChecklistItem[]> = {}
-    checklist.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i) })
-    const total = checklist.length
-    const done = checklist.filter(i => i.done).length
+  function printCheck(ev: EventWithCounts) {
+    const grouped: Record<string, { icon: string; tasks: EventTask[] }> = {}
+    checkTasks.forEach(t => { if (!grouped[t.area]) grouped[t.area] = { icon: t.area_icon, tasks: [] }; grouped[t.area].tasks.push(t) })
+    const total = checkTasks.length
+    const done = checkTasks.filter(t => t.status === 'done').length
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Checklist — ${ev.name}</title>
     <style>
       body { font-family: Arial, sans-serif; padding: 32px; max-width: 800px; margin: 0 auto; color: #111; }
@@ -359,15 +441,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       .box { width: 18px; height: 18px; border: 2px solid #999; border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
       .box.done { background: #10b981; border-color: #10b981; color: #fff; font-size: 12px; }
       .label { font-size: 14px; } .label.done { text-decoration: line-through; color: #999; }
+      .meta { color: #888; font-size: 12px; margin-left: auto; }
       .footer { margin-top: 32px; font-size: 12px; color: #999; text-align: center; }
       @media print { body { padding: 16px; } }
     </style></head><body>
     <h1>📋 ${ev.name}</h1>
-    <div class="sub">📅 ${new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} &nbsp;·&nbsp; ${done}/${total} itens concluídos</div>
+    <div class="sub">📅 ${new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} &nbsp;·&nbsp; ${done}/${total} tarefas concluídas</div>
     <div class="progress"><div class="progress-bar"></div></div>
-    ${Object.entries(grouped).map(([cat, items]) => `
-      <h2>${cat}</h2>
-      ${items.map(i => `<div class="item"><div class="box ${i.done ? 'done' : ''}">${i.done ? '✓' : ''}</div><span class="label ${i.done ? 'done' : ''}">${i.title}</span></div>`).join('')}
+    ${Object.entries(grouped).map(([area, g]) => `
+      <h2>${g.icon} ${area}</h2>
+      ${g.tasks.map(t => `<div class="item"><div class="box ${t.status === 'done' ? 'done' : ''}">${t.status === 'done' ? '✓' : ''}</div><span class="label ${t.status === 'done' ? 'done' : ''}">${t.title}</span>${t.assignee_name ? `<span class="meta">${t.assignee_name}</span>` : ''}</div>`).join('')}
     `).join('')}
     <div class="footer">Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
     <script>window.onload = () => window.print()</script>
@@ -391,11 +474,33 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             ;(cr.data ?? []).forEach(c => { if (c.event_id) ct[c.event_id] = (ct[c.event_id] ?? 0) + 1 })
             setEvents(prev => prev.map(e => ({ ...e, checkinCount: ct[e.id] ?? 0 })))
           })
-        supabase.from('reservations').select('event_id').in('event_id', ids)
+        supabase.from('reservations').select('event_id,people_count').in('event_id', ids)
           .then(rr => {
             const rc: Record<string, number> = {}
-            ;(rr.data ?? []).forEach(r => { if (r.event_id) rc[r.event_id] = (rc[r.event_id] ?? 0) + 1 })
-            setEvents(prev => prev.map(e => ({ ...e, resCount: rc[e.id] ?? 0 })))
+            const rp: Record<string, number> = {}
+            ;(rr.data ?? []).forEach(r => {
+              if (!r.event_id) return
+              rc[r.event_id] = (rc[r.event_id] ?? 0) + 1
+              rp[r.event_id] = (rp[r.event_id] ?? 0) + (r.people_count ?? 0)
+            })
+            setEvents(prev => prev.map(e => ({ ...e, resCount: rc[e.id] ?? 0, resPeople: rp[e.id] ?? 0 })))
+          })
+        supabase.from('promoter_list_guests').select('event_id').in('event_id', ids)
+          .then(gr => {
+            const gc: Record<string, number> = {}
+            ;(gr.data ?? []).forEach(g => { if (g.event_id) gc[g.event_id] = (gc[g.event_id] ?? 0) + 1 })
+            setEvents(prev => prev.map(e => ({ ...e, listGuests: gc[e.id] ?? 0 })))
+          })
+        supabase.from('event_tasks').select('event_id,status').in('event_id', ids)
+          .then(tr => {
+            const tt: Record<string, number> = {}
+            const td: Record<string, number> = {}
+            ;(tr.data ?? []).forEach(t => {
+              if (!t.event_id) return
+              tt[t.event_id] = (tt[t.event_id] ?? 0) + 1
+              if (t.status === 'done') td[t.event_id] = (td[t.event_id] ?? 0) + 1
+            })
+            setEvents(prev => prev.map(e => ({ ...e, tasksTotal: tt[e.id] ?? 0, tasksDone: td[e.id] ?? 0 })))
           })
       })
   }
@@ -405,6 +510,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   useEffect(() => {
     supabase.from('freelancers').select('*').eq('house_id', house.id).eq('status', 'ativo').order('full_name')
       .then(r => setAllFreelancers((r.data ?? []) as Freelancer[]))
+    supabase.from('work_areas').select('*').eq('house_id', house.id).order('sort_order').order('label')
+      .then(r => { if (r.data && r.data.length) setWorkAreas(r.data as WorkArea[]) })
   }, [house.id])
 
   function loadEvFreelancers(ev: EventWithCounts) {
@@ -415,8 +522,31 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       .then(r => setEvFreelancers((r.data ?? []) as EventFreelancer[]))
   }
 
+  function artistsBreakdown(ev: EventWithCounts) {
+    const arr = ev.artists ?? []
+    if (arr.length) {
+      return { fee: arr.reduce((s, a) => s + (a.fee_cents ?? 0), 0), cons: arr.reduce((s, a) => s + (a.consumption_cents ?? 0), 0), list: arr }
+    }
+    return { fee: ev.artist_fee_cents ?? 0, cons: ev.consumption_cents ?? 0, list: [] as typeof arr }
+  }
+
+  async function addExpense(ev: EventWithCounts) {
+    const amount = Math.round((parseFloat(expForm.amount.replace(',', '.')) || 0) * 100)
+    if (!expForm.description.trim() || amount <= 0) return
+    const { data } = await supabase.from('event_expenses').insert({ event_id: ev.id, house_id: house.id, description: expForm.description.trim(), amount_cents: amount }).select().single()
+    if (data) { setBudgetExpenses(pp => [...pp, data as EventExpense]); setExpForm({ description: '', amount: '' }); setExpAdding(false) }
+  }
+
+  async function deleteExpense(id: string) {
+    await supabase.from('event_expenses').delete().eq('id', id)
+    setBudgetExpenses(pp => pp.filter(e => e.id !== id))
+  }
+
   function openBudget(ev: EventWithCounts) {
-    setBudgetEv(ev); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([])
+    setBudgetEv(ev); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]); setBudgetRes([]); setBudgetTasks([]); setExpAdding(false)
+    supabase.from('event_expenses').select('*').eq('event_id', ev.id).order('created_at').then(r => setBudgetExpenses((r.data ?? []) as EventExpense[]))
+    supabase.from('reservations').select('id,name,location,people_count,amount_cents,status').eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled').then(r => setBudgetRes((r.data ?? []) as ProdReservation[]))
+    supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order').then(r => setBudgetTasks((r.data ?? []) as EventTask[]))
     supabase.from('event_freelancers').select('*,freelancers(full_name,work_types,daily_rate_cents)')
       .eq('event_id', ev.id).then(r => setBudgetFreelancers((r.data ?? []) as EventFreelancer[]))
     supabase.from('promoter_lists').select('id,name,fixed_fee_cents,min_entries,entry_fee_cents,consumacao_cents,promoters(full_name)')
@@ -484,31 +614,52 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
 
-  function toggleFreelancer(freelancerId: string) {
-    if (!frModal) return
-    const existing = evFreelancers.find(ef => ef.freelancer_id === freelancerId)
-    if (existing) {
-      supabase.from('event_freelancers').delete().eq('id', existing.id)
-        .then(() => loadEvFreelancers(frModal))
-    } else {
-      supabase.from('event_freelancers').insert({ event_id: frModal.id, freelancer_id: freelancerId, confirmed: false })
-        .then(() => loadEvFreelancers(frModal))
-    }
-  }
-
-  function toggleConfirmed(ef: EventFreelancer) {
-    if (!frModal) return
-    supabase.from('event_freelancers').update({ confirmed: !ef.confirmed }).eq('id', ef.id)
-      .then(() => loadEvFreelancers(frModal))
-  }
-
-  function loadGuests(ev: EventWithCounts) {
+  async function loadGuests(ev: EventWithCounts) {
     setGuestEv(ev)
     setGuests([])
     setGuestFilter('all')
+    setGuestListToken(null)
+    setGuestListId(null)
+    setGuestListPromoId(null)
+    setGuestAddForm({ name: '', phone: '', gender: '' })
+    setListaTab('lista')
+    setListaSearch('')
+    setListaClients([])
     supabase.from('promoter_list_guests').select('full_name,phone,gender,list_type,checked_in,promoter_id')
       .eq('event_id', ev.id).order('full_name')
       .then(r => setGuests((r.data ?? []) as Guest[]))
+    const [rec, cl] = await Promise.all([
+      ensureHouseListRecord(ev),
+      supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).order('full_name'),
+    ])
+    if (rec) {
+      setGuestListToken(rec.token)
+      setGuestListId(rec.listId)
+      setGuestListPromoId(rec.promoterId)
+    }
+    setListaClients((cl.data ?? []) as FlyerClient[])
+  }
+
+  async function addGuestManually() {
+    if (!guestAddForm.name.trim() || !guestEv || !guestListId || !guestListPromoId) return
+    setGuestAdding(true)
+    const { error } = await supabase.from('promoter_list_guests').insert({
+      list_id: guestListId,
+      house_id: house.id,
+      event_id: guestEv.id,
+      promoter_id: guestListPromoId,
+      full_name: guestAddForm.name.trim(),
+      phone: guestAddForm.phone.replace(/\D/g, '') || null,
+      gender: guestAddForm.gender || null,
+      promoter_confirmed: true,
+    })
+    setGuestAdding(false)
+    if (error) { st2('Erro ao adicionar convidado', 'error'); return }
+    setGuestAddForm({ name: '', phone: '', gender: '' })
+    supabase.from('promoter_list_guests').select('full_name,phone,gender,list_type,checked_in,promoter_id')
+      .eq('event_id', guestEv.id).order('full_name')
+      .then(r => setGuests((r.data ?? []) as Guest[]))
+    st2('Convidado adicionado!', 'success')
   }
 
   function doExport() {
@@ -526,18 +677,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   function openEdit(ev: EventWithCounts) {
     setEditing(ev.id)
-    // Auto-load production panel data
-    setProdTasks([]); setProdRes([]); setProdFr([]); setProdTab('tasks')
-    Promise.all([
-      supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
-      supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
-        .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled'),
-      supabase.from('event_freelancers').select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', ev.id),
-    ]).then(([tasksR, resR, frR]) => {
-      setProdTasks((tasksR.data ?? []) as EventTask[])
-      setProdRes((resR.data ?? []) as ProdReservation[])
-      setProdFr((frR.data ?? []) as EventFreelancer[])
-    })
+    setHouseListToken(null)
+    // Carrega o MESMO painel de Produção (tarefas, reservas, equipe e checklist) inline no cadastro
+    openProd(ev)
     setForm({
       ...ev,
       price_male_cents: ((ev.price_male_cents ?? 0) / 100) || 0,
@@ -548,6 +690,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       consumption_cents: ((ev.consumption_cents ?? 0) / 100) || 0,
       production_cost_cents: ((ev.production_cost_cents ?? 0) / 100) || 0,
     })
+    if (ev.house_list_enabled) {
+      ensureHouseListRecord(ev).then(rec => { if (rec) setHouseListToken(rec.token) })
+    }
     // Load artists: from new column or migrate from old single fields
     const saved = ev.artists ?? []
     if (saved.length > 0) {
@@ -579,9 +724,81 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     return out
   }
 
+  async function ensureHouseListRecord(ev: EventWithCounts): Promise<{ token: string; listId: string; promoterId: string } | null> {
+    let promoterId: string | undefined
+    const { data: pr } = await supabase.from('promoters').select('id').eq('house_id', house.id).eq('full_name', 'Lista da Casa').limit(1).maybeSingle()
+    promoterId = pr?.id
+    if (!promoterId) {
+      const { data: np } = await supabase.from('promoters').insert({ house_id: house.id, full_name: 'Lista da Casa', commission_pct: 0, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 }).select('id').single()
+      promoterId = np?.id
+    }
+    if (!promoterId) return null
+    const { data: list } = await supabase.from('promoter_lists').select('id,token').eq('house_id', house.id).eq('event_id', ev.id).eq('promoter_id', promoterId).limit(1).maybeSingle()
+    if (list) {
+      if (list.token) return { token: list.token, listId: list.id, promoterId }
+      const token = crypto.randomUUID()
+      await supabase.from('promoter_lists').update({ token }).eq('id', list.id)
+      return { token, listId: list.id, promoterId }
+    }
+    const token = crypto.randomUUID()
+    const { data: newList } = await supabase.from('promoter_lists').insert({ house_id: house.id, event_id: ev.id, promoter_id: promoterId, name: 'Lista da Casa', token, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 }).select('id').single()
+    return newList ? { token, listId: newList.id, promoterId } : null
+  }
+
+  async function ensureHouseListToken(ev: EventWithCounts): Promise<string | null> {
+    const rec = await ensureHouseListRecord(ev)
+    return rec?.token ?? null
+  }
+
+  async function openFlyer(ev: EventWithCounts) {
+    setFlyerEv(ev); setFlyerSel(new Set()); setFlyerSearch(''); setFlyerGender('all'); setFlyerProgress({ sent: 0, total: 0 }); setFlyerClients([])
+    const { data } = await supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).not('phone', 'is', null).order('full_name')
+    setFlyerClients((data ?? []) as FlyerClient[])
+    const token = await ensureHouseListToken(ev)
+    const link = token ? `${window.location.origin}/lista/${token}` : ''
+    setFlyerLink(link)
+    const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!` + (link ? `\n\n✅ Confirme sua presença na lista da casa: ${link}` : '') + `\n\nTe esperamos! 🔥`)
+  }
+
+  async function sendFlyer() {
+    if (!flyerEv) return
+    const { data: cfg } = await supabase.from('whatsapp_config').select('*').eq('house_id', house.id).limit(1).single()
+    if (!cfg?.active) { st2('Ative a integração WhatsApp em Configurações para enviar.', 'error'); return }
+    const sel = flyerClients.filter(c => flyerSel.has(c.id) && c.phone)
+    if (sel.length === 0) { st2('Selecione ao menos um contato.', 'warn'); return }
+    setFlyerSending(true); setFlyerProgress({ sent: 0, total: sel.length })
+    let ok = 0
+    for (const c of sel) {
+      const fph = fmtWAPhone(c.phone ?? '')
+      if (fph) {
+        const msg = flyerMsg.replace(/\{\{nome\}\}/g, (c.full_name || '').split(' ')[0])
+        const useMedia = !!flyerEv.flyer_url
+        const body = useMedia
+          ? { number: fph, mediatype: 'image', media: flyerEv.flyer_url, caption: msg }
+          : { number: fph, text: msg }
+        try {
+          const resp = await fetch(`${cfg.api_url}/message/${useMedia ? 'sendMedia' : 'sendText'}/${cfg.instance_name}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.api_key }, body: JSON.stringify(body),
+          })
+          const res = await resp.json()
+          const sent = !!(res?.key || res?.status === 'success' || res?.status === 'PENDING')
+          if (sent) ok++
+          await supabase.from('whatsapp_logs').insert({ house_id: house.id, recipient_phone: fph, recipient_name: c.full_name, message_type: 'event_flyer', message_body: msg, status: sent ? 'sent' : 'failed', error_msg: sent ? null : JSON.stringify(res), related_client_id: c.id, related_event_id: flyerEv.id, sent_at: new Date().toISOString() })
+        } catch (e: any) {
+          await supabase.from('whatsapp_logs').insert({ house_id: house.id, recipient_phone: fph, recipient_name: c.full_name, message_type: 'event_flyer', message_body: msg, status: 'failed', error_msg: e?.message ?? 'erro', related_client_id: c.id, related_event_id: flyerEv.id })
+        }
+      }
+      setFlyerProgress(pr => ({ ...pr, sent: pr.sent + 1 }))
+      await new Promise(r => setTimeout(r, 500))
+    }
+    setFlyerSending(false)
+    st2(`Flyer enviado para ${ok}/${sel.length} contato(s).`, ok > 0 ? 'success' : 'error')
+  }
+
   function save() {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { checkinCount, resCount, id, created_at, artist_fee_cents, artist_fee_type, artist_fee_percent, consumption_cents: _cc, ...formRest } = form as Record<string, unknown>
+    const { checkinCount, resCount, resPeople, listGuests, tasksTotal, tasksDone, id, created_at, artist_fee_cents, artist_fee_type, artist_fee_percent, consumption_cents: _cc, ...formRest } = form as Record<string, unknown>
     const d = {
       ...formRest,
       house_id: house.id,
@@ -606,9 +823,19 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const rule = String(form.repeat_rule ?? 'none')
     const extras = repeatDates(String(form.event_date ?? ''), rule).filter(dt => !eventDates.has(dt))
     const rows = [d, ...extras.map(dt => ({ ...d, event_date: dt, repeat_rule: 'none' }))]
-    supabase.from('events').insert(rows).then(r => {
-      if (r.error) st2('Erro: ' + r.error.message, 'error')
-      else { st2(extras.length > 0 ? `Criado! +${extras.length} eventos repetidos` : 'Criado!'); setModal(false); load() }
+    supabase.from('events').insert(rows).select().then(r => {
+      if (r.error) { st2('Erro: ' + r.error.message, 'error'); return }
+      st2(extras.length > 0 ? `Criado! +${extras.length} eventos repetidos` : 'Criado!')
+      load()
+      const created = (r.data ?? [])[0] as EventWithCounts | undefined
+      if (created) {
+        // Mantém o cadastro aberto em modo edição e já ativa a Produção do evento criado
+        setEditing(created.id)
+        setForm(f => ({ ...f, id: created.id, status: created.status ?? 'ativo' }))
+        openProd(created)
+      } else {
+        setModal(false)
+      }
     })
   }
 
@@ -619,10 +846,62 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       .then(r => { if (!r.error) load(); else _err(r.error.message) })
   }
 
+  async function closeEv(ev: EventWithCounts) {
+    if (!confirm(`Encerrar "${ev.name}"?\n\nO evento será marcado como encerrado e todas as suas reservas serão arquivadas (saem da view principal mas ficam no histórico).`)) return
+    const now = new Date().toISOString()
+    await supabase.from('events').update({ status: 'encerrado', updated_at: now }).eq('id', ev.id)
+    await supabase.from('reservations').update({ archived_at: now }).eq('house_id', house.id).eq('event_id', ev.id).is('archived_at', null)
+    load()
+  }
+
+  function deleteEv(ev: EventWithCounts) {
+    if (!confirm(`Excluir permanentemente "${ev.name}"?\n\nEsta ação não pode ser desfeita. Check-ins e reservas vinculados também serão excluídos.`)) return
+    supabase.from('events').delete().eq('id', ev.id)
+      .then(r => { if (!r.error) load(); else _err(r.error.message) })
+  }
+
   function openRes(ev: EventWithCounts) {
     setResEv(ev)
     supabase.from('reservations').select('*').eq('event_id', ev.id).order('expected_arrival')
       .then(r => setResList((r.data ?? []) as ResItem[]))
+  }
+
+  function openResView(ev: EventWithCounts) {
+    setResViewEv(ev); setResViewList([])
+    supabase.from('reservations').select('id,name,location,people_count,observations,status,expected_arrival')
+      .eq('house_id', house.id).or(`reservation_date.eq.${ev.event_date},event_id.eq.${ev.id}`).neq('status', 'cancelled')
+      .order('location', { nullsFirst: false }).order('name')
+      .then(r => setResViewList((r.data ?? []) as ResView[]))
+  }
+
+  function printResView(ev: EventWithCounts) {
+    const rows = resViewList
+    const totalPeople = rows.reduce((s, r) => s + (r.people_count ?? 0), 0)
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reservas — ${ev.name}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 32px; max-width: 900px; margin: 0 auto; color: #111; }
+      h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th { text-align: left; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 8px; border-bottom: 2px solid #333; }
+      td { padding: 9px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+      td.c, th.c { text-align: center; white-space: nowrap; }
+      .loc { font-weight: 700; }
+      .footer { margin-top: 28px; font-size: 12px; color: #999; text-align: center; }
+      @media print { body { padding: 14px; } }
+    </style></head><body>
+    <h1>🪑 Reservas — ${ev.name}</h1>
+    <div class="sub">📅 ${new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} &nbsp;·&nbsp; ${rows.length} reservas &nbsp;·&nbsp; ${totalPeople} pessoas</div>
+    <table>
+      <thead><tr><th class="c" style="width:70px">Local</th><th>Nome</th><th class="c" style="width:70px">Pessoas</th><th>Observação</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `<tr><td class="c loc">${r.location ?? '—'}</td><td>${r.name}</td><td class="c">${r.people_count ?? '-'}</td><td>${r.observations ?? ''}</td></tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="footer">Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — NightPass</div>
+    <script>window.onload = () => window.print()</script>
+    </body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
   }
 
   function saveRes() {
@@ -676,6 +955,382 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   if (ldg) return <div style={{ padding: 60, textAlign: 'center', color: C.mut }}>Carregando...</div>
 
+  const cbtn = (c: string) => ({ background: c + '1f', color: c, border: `1px solid ${c}40`, justifyContent: 'center' as const, fontWeight: 700 })
+
+  const renderExpenses = (list: EventExpense[], ev: EventWithCounts) => {
+    const tot = list.reduce((s, e) => s + e.amount_cents, 0)
+    return (
+      <div style={{ marginTop: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ fontSize: 11, color: C.mut, fontWeight: 700 }}>💸 Outras despesas{tot > 0 ? ` · ${fmtCurrency(tot)}` : ''}</span>
+          {!expAdding && <button onClick={() => { setExpAdding(true); setExpForm({ description: '', amount: '' }) }} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Despesa</button>}
+        </div>
+        {list.map(e => (
+          <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
+            <span style={{ color: C.txt }}>{e.description}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: '#f59e0b', fontWeight: 600 }}>{fmtCurrency(e.amount_cents)}</span>
+              <button onClick={() => deleteExpense(e.id)} title="Remover" style={{ background: 'none', border: 'none', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
+            </div>
+          </div>
+        ))}
+        {expAdding && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <input value={expForm.description} onChange={ev2 => setExpForm(pp => ({ ...pp, description: ev2.target.value }))} placeholder="Descrição (ex: gerador, gelo...)" autoFocus style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+            <input value={expForm.amount} onChange={ev2 => setExpForm(pp => ({ ...pp, amount: ev2.target.value }))} onKeyDown={ev2 => ev2.key === 'Enter' && addExpense(ev)} placeholder="R$" style={{ width: 90, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+            <button onClick={() => addExpense(ev)} style={{ background: '#f59e0b', border: 'none', borderRadius: 8, padding: '7px 12px', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
+            <button onClick={() => setExpAdding(false)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
+          </div>
+        )}
+        {list.length === 0 && !expAdding && <div style={{ fontSize: 12, color: C.mut }}>Nenhuma despesa avulsa.</div>}
+      </div>
+    )
+  }
+
+  // Executor da tarefa: puxa do cadastro de equipe (freelancers) e preenche nome+celular
+  const executorSelect = () => (
+    <select value="" onChange={e => { const f = allFreelancers.find(x => x.id === e.target.value); if (f) setTaskForm(p => ({ ...p, assignee_name: f.full_name, assignee_phone: f.phone ?? '' })) }}
+      style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.mut, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }}>
+      <option value="">👤 Vincular executor da equipe…</option>
+      {allFreelancers.map(f => <option key={f.id} value={f.id}>{f.full_name}{f.phone ? ` · ${f.phone}` : ''}</option>)}
+    </select>
+  )
+
+  const renderProdTabs = () => (
+              <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+                {(['tasks', 'freelancers'] as const).map(tab => {
+                  const labels = { tasks: '📋 Tarefas', freelancers: `👥 Equipe (${prodFr.length})`, budget: '💰 Budget' }
+                  return (
+                    <button key={tab} onClick={() => setProdTab(tab)} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${prodTab === tab ? '#f59e0b' : C.brd}`, background: prodTab === tab ? '#f59e0b22' : 'transparent', color: prodTab === tab ? '#f59e0b' : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      {labels[tab]}
+                    </button>
+                  )
+                })}
+                {prodEv && (
+                  <button onClick={() => openBudget(prodEv)} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid #10b98144`, background: '#10b98115', color: '#10b981', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    💰 Budget
+                  </button>
+                )}
+              </div>
+  )
+
+  const renderProdBody = () => (
+    <>
+
+              {/* ── TAB: TAREFAS ── */}
+              {prodTab === 'tasks' && (() => {
+                const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
+                prodTasks.forEach(t => {
+                  if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }
+                  areas[t.area].tasks.push(t)
+                })
+                return (
+                  <div>
+                    {/* Reservas do dia */}
+                    {prodRes.length > 0 && (
+                      <div style={{ marginBottom: 18 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>🪑 Reservas do dia ({prodRes.length})</span>
+                          <span style={{ color: C.mut, fontWeight: 400 }}>{prodRes.filter(r => r.status === 'arrived').length} chegaram</span>
+                        </div>
+                        {prodRes.map(r => (
+                          <div key={r.id} style={{ background: r.status === 'arrived' ? '#10b98110' : '#ffffff06', border: `1px solid ${r.status === 'arrived' ? '#10b98133' : C.brd}`, borderRadius: 10, padding: '8px 12px', marginBottom: 6 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <span style={{ fontWeight: 700, fontSize: 13, color: C.txt }}>{r.name}</span>
+                                {r.location && <span style={{ color: C.mut, fontSize: 12 }}> · 📍 {r.location}</span>}
+                                {r.people_count && <span style={{ color: C.mut, fontSize: 12 }}> · 👥 {r.people_count}px</span>}
+                              </div>
+                              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: r.status === 'arrived' ? '#10b98122' : '#f59e0b22', color: r.status === 'arrived' ? '#10b981' : '#f59e0b', fontWeight: 700 }}>
+                                {r.status === 'arrived' ? '✅ Chegou' : '⏳ Aguardando'}
+                              </span>
+                            </div>
+                            {(r.reservation_items ?? []).length > 0 && (
+                              <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.brd}22` }}>
+                                {(r.reservation_items ?? []).map((item, i) => (
+                                  <span key={i} style={{ display: 'inline-block', background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa33', borderRadius: 6, padding: '1px 8px', fontSize: 11, marginRight: 4, marginBottom: 2 }}>
+                                    {item.quantity > 1 ? `${item.quantity}× ` : ''}{item.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Areas with tasks */}
+                    {Object.entries(areas).map(([area, { icon, tasks }]) => {
+                      const done = tasks.filter(t => t.status === 'done').length
+                      const isAdding = taskFormArea === `${area}|||${icon}`
+                      return (
+                        <div key={area} style={{ marginBottom: 18 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${C.brd}` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: 16 }}>{icon}</span>
+                              <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{area}</span>
+                              <span style={{ color: C.brd, fontSize: 11 }}>({done}/{tasks.length})</span>
+                            </div>
+                            <button onClick={() => { setTaskFormArea(`${area}|||${icon}`); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }}
+                              style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Tarefa</button>
+                          </div>
+                          {tasks.sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0)).map(task => (
+                            <div key={task.id} style={{ background: task.status === 'done' ? '#10b98108' : '#ffffff06', border: `1px solid ${task.status === 'done' ? '#10b98122' : C.brd}`, borderRadius: 10, padding: '8px 10px', marginBottom: 5 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <button onClick={() => toggleProdTask(task)} style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${task.status === 'done' ? '#10b981' : C.brd}`, background: task.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 12, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {task.status === 'done' ? '✓' : ''}
+                                </button>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: task.status === 'done' ? C.mut : C.txt, textDecoration: task.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.title}</div>
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
+                                    {task.deadline && <span style={{ color: C.mut, fontSize: 11 }}>⏰ {new Date(task.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
+                                    {task.assignee_name && <span style={{ color: C.mut, fontSize: 11 }}>👤 {task.assignee_name}</span>}
+                                    {task.estimated_cost_cents && <span style={{ color: '#f59e0b', fontSize: 11 }}>R$ {(task.estimated_cost_cents / 100).toFixed(2)}</span>}
+                                    {task.actual_cost_cents && <span style={{ color: '#10b981', fontSize: 11, fontWeight: 700 }}>✅ R$ {(task.actual_cost_cents / 100).toFixed(2)}</span>}
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                  {task.assignee_phone && (
+                                    <button onClick={() => sendTaskWA(task)} title="Enviar por WhatsApp" style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 6, width: 28, height: 28, color: '#25d366', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📲</button>
+                                  )}
+                                  <button onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, width: 28, height: 28, color: C.mut, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>
+                                  <button onClick={() => deleteProdTask(task.id)} style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 6, width: 28, height: 28, color: C.red, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🗑</button>
+                                </div>
+                              </div>
+                              {expandedTask === task.id && (
+                                <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.brd}22`, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  {task.description && <div style={{ fontSize: 12, color: C.mut }}>{task.description}</div>}
+                                  {task.status === 'done' && (
+                                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                      <span style={{ fontSize: 11, color: C.mut }}>Custo real:</span>
+                                      {actualCostEdit?.id === task.id
+                                        ? <>
+                                            <input value={actualCostEdit.val} onChange={e => setActualCostEdit({ id: task.id, val: e.target.value })} placeholder="R$" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.txt, fontSize: 12, width: 80, fontFamily: 'inherit' }} autoFocus />
+                                            <button onClick={() => saveProdActualCost(task.id, actualCostEdit.val)} style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 8px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>✓</button>
+                                          </>
+                                        : <button onClick={() => setActualCostEdit({ id: task.id, val: task.actual_cost_cents ? String(task.actual_cost_cents / 100) : '' })} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                            {task.actual_cost_cents ? `R$ ${(task.actual_cost_cents / 100).toFixed(2)}` : '+ Informar'}
+                                          </button>
+                                      }
+                                    </div>
+                                  )}
+                                  <div style={{ fontSize: 11, color: C.mut }}>
+                                    🔗 Link: <span style={{ color: '#a78bfa', cursor: 'pointer' }} onClick={() => navigator.clipboard.writeText(`https://nightpass-app.vercel.app/tarefa.html?t=${task.token}`)}>Copiar</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          {isAdding && (
+                            <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '10px 12px', marginBottom: 5 }}>
+                              <input value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Título da tarefa *" autoFocus onKeyDown={e => e.key === 'Enter' && addProdTask(area, icon)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 6 }} />
+                              {executorSelect()}
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+                                <input type="datetime-local" value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                                <input value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Valor estimado (R$)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                                <input value={taskForm.assignee_name} onChange={e => setTaskForm(p => ({ ...p, assignee_name: e.target.value }))} placeholder="Responsável (nome)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                                <input value={taskForm.assignee_phone} onChange={e => setTaskForm(p => ({ ...p, assignee_phone: e.target.value }))} placeholder="Celular" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                              </div>
+                              <input value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição / obs (opcional)" style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }} />
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button onClick={() => addProdTask(area, icon)} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Salvar</button>
+                                <button onClick={() => setTaskFormArea(null)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    {/* Nova área recém-criada (ainda sem tarefas) → formulário da 1ª tarefa */}
+                    {(() => {
+                      const [formArea, formIcon] = (taskFormArea ?? '').split('|||')
+                      if (!formArea || areas[formArea]) return null
+                      return (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${C.brd}` }}>
+                            <span style={{ fontSize: 16 }}>{formIcon}</span>
+                            <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{formArea}</span>
+                            <span style={{ color: '#f59e0b', fontSize: 11, fontWeight: 700 }}>nova área</span>
+                          </div>
+                          <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '10px 12px' }}>
+                            <input value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Título da 1ª tarefa *" autoFocus onKeyDown={e => e.key === 'Enter' && addProdTask(formArea, formIcon)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 6 }} />
+                            {executorSelect()}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+                              <input type="datetime-local" value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                              <input value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Valor estimado (R$)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                              <input value={taskForm.assignee_name} onChange={e => setTaskForm(p => ({ ...p, assignee_name: e.target.value }))} placeholder="Responsável (nome)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                              <input value={taskForm.assignee_phone} onChange={e => setTaskForm(p => ({ ...p, assignee_phone: e.target.value }))} placeholder="Celular" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+                            </div>
+                            <input value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição / obs (opcional)" style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }} />
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button onClick={() => addProdTask(formArea, formIcon)} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Salvar tarefa</button>
+                              <button onClick={() => setTaskFormArea(null)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* Add new area */}
+                    {addingArea
+                      ? (
+                        <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '12px 14px', marginTop: 8 }}>
+                          <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700, marginBottom: 8 }}>Nova Área</div>
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                            <input value={newAreaIcon} onChange={e => setNewAreaIcon(e.target.value)} placeholder="Emoji" style={{ width: 60, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 18, fontFamily: 'inherit', textAlign: 'center' }} />
+                            <input value={newAreaName} onChange={e => setNewAreaName(e.target.value)} placeholder="Nome da área (ex: Decoração)" autoFocus onKeyDown={e => e.key === 'Enter' && addProdArea()} style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }} />
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button onClick={addProdArea} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Criar Área</button>
+                            <button onClick={() => setAddingArea(false)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
+                          </div>
+                        </div>
+                      )
+                      : (
+                        <button onClick={() => setAddingArea(true)} style={{ width: '100%', background: '#ffffff06', border: `1px dashed ${C.brd}`, borderRadius: 10, padding: '10px', color: C.mut, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: Object.keys(areas).length > 0 ? 0 : 8 }}>
+                          ➕ Nova Área
+                        </button>
+                      )
+                    }
+                    {prodTasks.length > 0 && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.brd}` }}>
+                        <button onClick={printProdCosts} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 0', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Planilha</button>
+                        <button onClick={exportProdCostsCsv} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 0', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>📥 CSV</button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* ── TAB: EQUIPE (por área → freelancer) ── */}
+              {prodTab === 'freelancers' && (() => {
+                const roleOf = (fr: EventFreelancer) => (fr.role || (fr as any).freelancers?.work_types?.[0] || 'outros')
+                const roleLabel = (r: string) => wlabel(r)
+                const groups: Record<string, EventFreelancer[]> = {}
+                prodFr.forEach(fr => { const r = roleOf(fr); (groups[r] ||= []).push(fr) })
+                const frTotal = prodFr.reduce((s, f) => s + (f.custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
+
+                const memberRow = (fr: EventFreelancer) => {
+                  const frData = (fr as any).freelancers
+                  const dailyRate = frData?.daily_rate_cents ?? 0
+                  const effectiveFee = fr.custom_fee_cents ?? dailyRate
+                  return (
+                    <div key={fr.id} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: C.txt }}>{frData?.full_name ?? '—'}</div>
+                          <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>{(frData?.work_types ?? []).map((wt: string) => wlabel(wt)).join(' · ')}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          {frFeeEdit?.id === fr.id
+                            ? <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                <input value={frFeeEdit.val} onChange={e => setFrFeeEdit({ id: fr.id, val: e.target.value })} placeholder="R$" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.txt, fontSize: 12, width: 80, fontFamily: 'inherit' }} autoFocus />
+                                <button onClick={() => saveFrFee(fr.id, frFeeEdit.val)} style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 8px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>✓</button>
+                              </div>
+                            : <div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>R$ {(effectiveFee / 100).toFixed(2)}</div>
+                                {fr.custom_fee_cents != null && fr.custom_fee_cents !== dailyRate && <div style={{ fontSize: 10, color: C.mut }}>Diária: R$ {(dailyRate / 100).toFixed(2)}</div>}
+                                <button onClick={() => setFrFeeEdit({ id: fr.id, val: String(effectiveFee / 100) })} style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>ajustar valor</button>
+                              </div>
+                          }
+                        </div>
+                        <button onClick={() => toggleProdFrConfirmed(fr)} title={fr.confirmed ? 'Confirmado' : 'Pendente'} style={{ background: fr.confirmed ? '#10b98122' : '#ffffff08', border: `1px solid ${fr.confirmed ? '#10b98144' : C.brd}`, borderRadius: 8, padding: '5px 8px', color: fr.confirmed ? '#10b981' : C.mut, fontSize: 13, cursor: 'pointer' }}>{fr.confirmed ? '✅' : '⏳'}</button>
+                        <button onClick={() => convocateFrWA(fr)} style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 8, padding: '5px 10px', color: '#25d366', fontSize: 13, cursor: 'pointer' }} title="Convocar via WhatsApp">📲</button>
+                        <button onClick={() => removeProdFreelancer(fr.id)} title="Remover da equipe" style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 8, padding: '5px 8px', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div>
+                    {/* Quota: necessário por área (planejamento) */}
+                    <div style={{ marginBottom: 16, padding: '10px 12px', background: '#ffffff04', border: `1px solid ${C.brd}`, borderRadius: 10 }}>
+                      <div style={{ fontSize: 11, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>📊 NECESSÁRIO POR ÁREA <span style={{ fontWeight: 400 }}>(quantos freelancers cada área precisa)</span></div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 6 }}>
+                        {workAreas.map(a => {
+                          const assigned = prodFr.filter(fr => roleOf(fr) === a.key).length
+                          const need = prodStaffing[a.key] ?? 0
+                          const ok = need > 0 && assigned >= need
+                          return (
+                            <div key={a.key} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#ffffff06', border: `1px solid ${ok ? '#10b98144' : C.brd}`, borderRadius: 8, padding: '5px 8px' }}>
+                              <span style={{ fontSize: 12, flex: 1, color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.icon} {a.label}</span>
+                              <span style={{ fontSize: 11, color: need > 0 ? (ok ? '#10b981' : '#f59e0b') : C.mut, fontWeight: 700 }}>{assigned}/{need || '–'}</span>
+                              <input type="number" min="0" value={need || ''} onChange={e => saveStaffingNeed(a.key, parseInt(e.target.value) || 0)} placeholder="0"
+                                style={{ width: 42, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 6px', color: C.txt, fontSize: 12, fontFamily: 'inherit', textAlign: 'center' }} />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {prodFr.length === 0 && !teamArea && (
+                      <div style={{ color: C.mut, textAlign: 'center', padding: '20px 0', fontSize: 13 }}>Monte a equipe por área: escolha uma área abaixo e adicione os freelancers.</div>
+                    )}
+
+                    {Object.entries(groups).map(([role, members]) => (
+                      <div key={role} style={{ marginBottom: 16 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${C.brd}` }}>
+                          <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{roleLabel(role)} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length})</span></span>
+                          <button onClick={() => setTeamArea(role)} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Freelancer</button>
+                        </div>
+                        {members.map(fr => memberRow(fr))}
+                      </div>
+                    ))}
+
+                    {prodFr.length > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0 12px', padding: '10px 12px', background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10 }}>
+                        <span style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>💰 Custo da equipe ({prodFr.length})</span>
+                        <span style={{ fontSize: 15, fontWeight: 900, color: '#f59e0b' }}>R$ {(frTotal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+
+                    {!teamArea ? (
+                      <div>
+                        <div style={{ fontSize: 11, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>➕ ADICIONAR POR ÁREA</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {workAreas.map(a => (
+                            <button key={a.key} onClick={() => setTeamArea(a.key)} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 12px', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{a.icon} {a.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (() => {
+                      const available = allFreelancers.filter(f => !prodFr.some(pf => pf.freelancer_id === f.id && roleOf(pf) === teamArea))
+                      const suggested = available.filter(f => (f.work_types ?? []).includes(teamArea as never))
+                      const others = available.filter(f => !(f.work_types ?? []).includes(teamArea as never))
+                      const ordered = [...suggested, ...others]
+                      return (
+                        <div style={{ padding: '12px 14px', background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700 }}>Adicionar em {roleLabel(teamArea)}</span>
+                            <button onClick={() => setTeamArea(null)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
+                          </div>
+                          {ordered.length === 0
+                            ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Freelancers.' : 'Todos os freelancers já estão nesta área.'}</div>
+                            : ordered.map(f => (
+                              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name} {(f.work_types ?? []).includes(teamArea as never) && <span style={{ fontSize: 10, color: '#10b981' }}>• da função</span>}</div>
+                                  <div style={{ fontSize: 11, color: C.mut }}>
+                                    {(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}
+                                    {f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}
+                                  </div>
+                                </div>
+                                <button onClick={() => { addProdFreelancer(f.id, teamArea) }} style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: 8, padding: '5px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
+                              </div>
+                            ))
+                          }
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )
+              })()}
+
+    </>
+  )
+
   return (
     <div style={{ paddingBottom: 40 }}>
       <Toast toast={toast} />
@@ -686,12 +1341,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 28px', borderBottom: `1px solid ${C.brd}`, flexShrink: 0 }}>
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: C.txt }}>{editing ? 'Editar Evento' : 'Novo Evento'}</h2>
-            <button onClick={() => { setModal(false); setEditing(null) }} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 26, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>
+            <button onClick={() => { setModal(false); setEditing(null); setProdEv(null) }} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 26, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>
           </div>
-          {/* Body: always 65/35 split */}
+          {/* Body: 55/45 split (form / produção) */}
           <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* LEFT: event form (65%) */}
-        <div style={{ flex: '0 0 65%', overflowY: 'auto', padding: '20px 28px', borderRight: `1px solid ${C.brd}` }}>
+        {/* LEFT: event form (55%) */}
+        <div style={{ flex: '0 0 55%', overflowY: 'auto', padding: '20px 28px', borderRight: `1px solid ${C.brd}` }}>
         {/* 2-column layout: left = info, right = prices + flyer */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
@@ -762,23 +1417,82 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cover Masc (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_male_cents ?? 0)} onChange={e => setF('price_male_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_male_cents as number)}`} onChange={e => setF('price_male_cents', parseMoneyInput(e.target.value))} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cover Fem (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_female_cents ?? 0)} onChange={e => setF('price_female_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_female_cents as number)}`} onChange={e => setF('price_female_cents', parseMoneyInput(e.target.value))} />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lista Masc (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_male_list_cents ?? 0)} onChange={e => setF('price_male_list_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_male_list_cents as number)}`} onChange={e => setF('price_male_list_cents', parseMoneyInput(e.target.value))} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lista Fem (R$)</label>
-                <input type="number" step="0.01" {...inp} value={String(form.price_female_list_cents ?? 0)} onChange={e => setF('price_female_list_cents', e.target.value)} />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_female_list_cents as number)}`} onChange={e => setF('price_female_list_cents', parseMoneyInput(e.target.value))} />
               </div>
             </div>
+            {/* Lista da Casa toggle */}
+            {(() => {
+              const hle = !!form.house_list_enabled
+              return (
+                <div
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '10px 12px', borderRadius: 8,
+                    background: hle ? '#10b98111' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${hle ? '#10b98144' : C.brd}`,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>🏠 Lista da Casa</div>
+                    <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Gera link para convidados confirmarem presença</div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const next = !hle
+                      setF('house_list_enabled', next)
+                      if (next && editing) {
+                        const ev = events.find(e => e.id === editing)
+                        if (ev) {
+                          const rec = await ensureHouseListRecord({ ...ev, house_list_enabled: true })
+                          if (rec) setHouseListToken(rec.token)
+                        }
+                      } else if (!next) {
+                        setHouseListToken(null)
+                      }
+                    }}
+                    style={{
+                      width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer',
+                      background: hle ? '#10b981' : C.brd,
+                      position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+                    }}
+                  >
+                    <span style={{
+                      position: 'absolute', top: 3, left: hle ? 26 : 4,
+                      width: 22, height: 22, borderRadius: '50%', background: '#fff',
+                      transition: 'left 0.2s', display: 'block',
+                    }} />
+                  </button>
+                </div>
+              )
+            })()}
+            {/* Link da lista (visível ao editar com toggle ON) */}
+            {editing && !!form.house_list_enabled && houseListToken && (
+              <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <i className="bi bi-link-45deg" style={{ color: '#10b981', fontSize: 16, flexShrink: 0 }} />
+                <span style={{ color: '#10b981', fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {`${window.location.origin}/lista/${houseListToken}`}
+                </span>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista/${houseListToken}`); st2('Link copiado!', 'success') }}
+                  style={{ background: '#10b98133', border: '1px solid #10b98166', borderRadius: 6, padding: '3px 10px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+                  Copiar
+                </button>
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Capacidade</label>
@@ -790,10 +1504,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   {REPT.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
                 </select>
               </div>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🔧 Produção (R$)</label>
-              <input type="number" step="0.01" min="0" {...inp} value={String(form.production_cost_cents ?? 0)} onChange={e => setF('production_cost_cents', e.target.value)} placeholder="0,00" />
             </div>
             {editing && (
               <div>
@@ -840,14 +1550,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               </select>
               {/* Fee value cell */}
               {ar.fee_type === 'fixed' && (
-                <input type="number" step="0.01" min="0" {...inp} value={ar.fee_cents} onChange={e => setArtist(i, { fee_cents: parseFloat(e.target.value) || 0 })} placeholder="R$ 0,00" />
+                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(ar.fee_cents)}`} onChange={e => setArtist(i, { fee_cents: parseMoneyInput(e.target.value) })} />
               )}
               {ar.fee_type === 'percent' && (
                 <input type="number" step="1" min="0" max="100" {...inp} value={ar.fee_percent} onChange={e => setArtist(i, { fee_percent: parseFloat(e.target.value) || 0 })} placeholder="%" />
               )}
               {ar.fee_type === 'mixed' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                  <input type="number" step="0.01" min="0" {...inp} value={ar.fee_cents} onChange={e => setArtist(i, { fee_cents: parseFloat(e.target.value) || 0 })} placeholder="R$ fixo" />
+                  <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(ar.fee_cents)}`} onChange={e => setArtist(i, { fee_cents: parseMoneyInput(e.target.value) })} placeholder="R$ fixo" />
                   <input type="number" step="1" min="0" max="100" {...inp} value={ar.fee_percent} onChange={e => setArtist(i, { fee_percent: parseFloat(e.target.value) || 0 })} placeholder="%" />
                 </div>
               )}
@@ -855,7 +1565,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <div style={{ ...inp.style, display: 'flex', alignItems: 'center', color: C.gold, fontSize: 11 }}>A combinar</div>
               )}
               {/* Consumação */}
-              <input type="number" step="0.01" min="0" {...inp} value={ar.consumption_cents} onChange={e => setArtist(i, { consumption_cents: parseFloat(e.target.value) || 0 })} placeholder="R$" />
+              <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(ar.consumption_cents)}`} onChange={e => setArtist(i, { consumption_cents: parseMoneyInput(e.target.value) })} />
               <button onClick={() => removeArtist(i)} style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 8, padding: '6px 8px', color: C.red, cursor: 'pointer', fontSize: 14 }}>✕</button>
             </div>
           ))}
@@ -864,291 +1574,209 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         {/* Save buttons */}
         <div style={{ marginTop: 12, display: 'flex', gap: 10 }}>
           <Btn onClick={save} style={{ flex: 1 }}>💾 Salvar</Btn>
-          <Btn onClick={() => { setModal(false); setEditing(null) }} variant="ghost">Cancelar</Btn>
+          <Btn onClick={() => { setModal(false); setEditing(null); setProdEv(null) }} variant="ghost">Cancelar</Btn>
         </div>
         </div>{/* end LEFT */}
 
-        {/* RIGHT: production panel (35%) */}
-        <div style={{ flex: '0 0 35%', overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column' }}>
+        {/* RIGHT: production panel (45%) — MESMO painel inline (renderProdTabs/renderProdBody) */}
+        <div style={{ flex: '0 0 45%', overflowY: 'hidden', padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
           {!editing
             ? <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: C.mut }}>
                 <div style={{ fontSize: 32 }}>🏭</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.sub }}>Produção</div>
-                <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 200 }}>Salve o evento para começar a organizar tarefas, freelancers e orçamento.</div>
+                <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 220 }}>Salve o evento para liberar o painel de Produção (tarefas, equipe e budget).</div>
               </div>
             : <>
-            {/* Header */}
-            <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.brd}`, flexShrink: 0 }}>
-              <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, letterSpacing: '0.08em', marginBottom: 2 }}>🏭 PRODUÇÃO</div>
-              {prodTasks.length > 0 && (() => {
-                const done = prodTasks.filter(t => t.status === 'done').length
-                const pct = Math.round(done / prodTasks.length * 100)
-                return (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.mut, marginBottom: 3 }}>
-                      <span>{done}/{prodTasks.length} tarefas</span>
-                      <span style={{ color: pct === 100 ? '#10b981' : '#f59e0b', fontWeight: 700 }}>{pct}%</span>
-                    </div>
-                    <div style={{ height: 4, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : '#f59e0b', borderRadius: 4 }} />
-                    </div>
-                  </div>
-                )
-              })()}
-              {/* Tabs */}
-              <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
-                {(['tasks', 'layout', 'budget'] as const).map(tab => {
-                  const labels = { tasks: `📋 Tarefas (${prodTasks.length})`, layout: `🪑 Layout (${prodRes.length})`, budget: '💰 Budget' }
+                <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, letterSpacing: '0.08em', flexShrink: 0 }}>🏭 PRODUÇÃO</div>
+                {prodTasks.length > 0 && (() => {
+                  const done = prodTasks.filter(t => t.status === 'done').length
+                  const pct = Math.round(done / prodTasks.length * 100)
                   return (
-                    <button key={tab} onClick={() => setProdTab(tab as typeof prodTab)} style={{ padding: '4px 10px', borderRadius: 6, border: `1px solid ${prodTab === tab ? '#f59e0b' : C.brd}`, background: prodTab === tab ? '#f59e0b22' : 'transparent', color: prodTab === tab ? '#f59e0b' : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      {labels[tab]}
-                    </button>
+                    <div style={{ marginTop: 8, height: 5, background: C.brd, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : 'linear-gradient(90deg,#f59e0b,#fbbf24)', borderRadius: 4 }} />
+                    </div>
                   )
-                })}
-              </div>
-            </div>
-
-            {/* Tab: Tarefas */}
-            {prodTab === 'tasks' && (() => {
-              const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
-              prodTasks.forEach(t => { if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }; areas[t.area].tasks.push(t) })
-              const [formArea, formIcon] = (taskFormArea ?? '').split('|||')
-              const totEst = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-              const totReal = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-              const sInp = { ...inp.style, minHeight: 34, padding: '6px 10px' }
-              const resetTaskForm = () => { setTaskFormArea(null); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }
-
-              const taskFormBlock = (area: string, icon: string) => (
-                <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: 10, marginTop: 6, marginBottom: 8, display: 'grid', gap: 6 }}>
-                  <input style={sInp} value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Tarefa (ex: Locar PA + técnico)" autoFocus />
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    <input style={sInp} value={taskForm.assignee_name} onChange={e => setTaskForm(p => ({ ...p, assignee_name: e.target.value }))} placeholder="Responsável" />
-                    <input style={sInp} value={taskForm.assignee_phone} onChange={e => setTaskForm(p => ({ ...p, assignee_phone: e.target.value }))} placeholder="WhatsApp" />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                    <input type="datetime-local" style={sInp} value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} />
-                    <input type="number" step="0.01" min="0" style={sInp} value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Custo est. R$" />
-                  </div>
-                  <textarea style={{ ...sInp, height: 40, resize: 'vertical' as const }} value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Observação (opcional)" />
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => addProdTask(area, icon)} style={{ flex: 1, background: '#f59e0b', border: 'none', borderRadius: 6, padding: '7px 0', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Adicionar tarefa</button>
-                    <button onClick={resetTaskForm} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
-                  </div>
-                </div>
-              )
-
-              return (
-                <div style={{ flex: 1 }}>
-                  {/* Add area */}
-                  {!addingArea ? (
-                    <button onClick={() => { setAddingArea(true); setNewAreaName(''); setNewAreaIcon('📋') }} style={{ width: '100%', background: '#f59e0b15', border: '1px dashed #f59e0b55', borderRadius: 8, padding: '8px 0', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginBottom: 12 }}>+ Adicionar área</button>
-                  ) : (
-                    <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: 10, marginBottom: 12 }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                        {AREA_ICONS.map(ic => (
-                          <button key={ic} onClick={() => setNewAreaIcon(ic)} style={{ width: 30, height: 30, borderRadius: 6, border: `1px solid ${newAreaIcon === ic ? '#f59e0b' : C.brd}`, background: newAreaIcon === ic ? '#f59e0b22' : 'transparent', fontSize: 15, cursor: 'pointer' }}>{ic}</button>
-                        ))}
-                      </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input style={sInp} value={newAreaName} onChange={e => setNewAreaName(e.target.value)} placeholder="Nome da área (ex: Som & Luz)" autoFocus onKeyDown={e => { if (e.key === 'Enter') addProdArea() }} />
-                        <button onClick={addProdArea} style={{ background: '#f59e0b', border: 'none', borderRadius: 6, padding: '0 14px', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
-                        <button onClick={() => setAddingArea(false)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '0 10px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* New area (created but no tasks yet) → show its task form */}
-                  {taskFormArea && formArea && !areas[formArea] && (
-                    <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{formIcon} {formArea}</div>
-                      {taskFormBlock(formArea, formIcon)}
-                    </div>
-                  )}
-
-                  {Object.entries(areas).map(([area, { icon, tasks }]) => {
-                    const aEst = tasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-                    return (
-                      <div key={area} style={{ marginBottom: 14 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{icon} {area}</span>
-                          <span style={{ color: C.mut, fontSize: 10, fontWeight: 600 }}>{tasks.filter(t => t.status === 'done').length}/{tasks.length}{aEst > 0 ? ` · R$ ${(aEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}</span>
-                        </div>
-                        {tasks.map(t => (
-                          <div key={t.id} style={{ borderBottom: `1px solid ${C.brd}22` }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
-                              <button onClick={() => toggleProdTask(t)} style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${t.status === 'done' ? '#10b981' : C.brd}`, background: t.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 10, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {t.status === 'done' ? '✓' : ''}
-                              </button>
-                              <span onClick={() => setExpandedTask(expandedTask === t.id ? null : t.id)} style={{ flex: 1, fontSize: 12, color: t.status === 'done' ? C.mut : C.txt, textDecoration: t.status === 'done' ? 'line-through' : 'none', cursor: 'pointer' }}>{t.title}</span>
-                              {(t.estimated_cost_cents ?? 0) > 0 && <span style={{ fontSize: 10, color: C.mut }}>R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(0)}</span>}
-                              {t.deadline && <span style={{ fontSize: 10, color: C.mut }}>{new Date(t.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
-                              {t.assignee_phone && <button onClick={() => sendTaskWA(t)} style={{ background: 'none', border: 'none', fontSize: 14, cursor: 'pointer', padding: 0 }}>📲</button>}
-                            </div>
-                            {expandedTask === t.id && (
-                              <div style={{ padding: '2px 0 8px 26px', display: 'grid', gap: 5, fontSize: 11, color: C.mut }}>
-                                {t.assignee_name && <div>👤 {t.assignee_name}{t.assignee_phone ? ` · ${t.assignee_phone}` : ''}</div>}
-                                {t.description && <div>📝 {t.description}</div>}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                  <span>💰 Est: R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(2)}</span>
-                                  {actualCostEdit?.id === t.id ? (
-                                    <>
-                                      <input type="number" step="0.01" autoFocus value={actualCostEdit.val} onChange={e => setActualCostEdit({ id: t.id, val: e.target.value })} style={{ width: 80, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 6px', color: C.txt, fontSize: 11, fontFamily: 'inherit' }} placeholder="Real R$" />
-                                      <button onClick={() => saveProdActualCost(t.id, actualCostEdit.val)} style={{ background: '#10b981', border: 'none', borderRadius: 5, padding: '3px 8px', color: '#052e1a', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓</button>
-                                      <button onClick={() => setActualCostEdit(null)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 6px', color: C.mut, fontSize: 11, cursor: 'pointer' }}>✕</button>
-                                    </>
-                                  ) : (
-                                    <button onClick={() => setActualCostEdit({ id: t.id, val: t.actual_cost_cents ? String(t.actual_cost_cents / 100) : '' })} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 5, padding: '3px 8px', color: (t.actual_cost_cents ?? 0) > 0 ? '#10b981' : C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
-                                      {(t.actual_cost_cents ?? 0) > 0 ? `Real: R$ ${((t.actual_cost_cents ?? 0) / 100).toFixed(2)}` : '+ custo real'}
-                                    </button>
-                                  )}
-                                  <button onClick={() => deleteProdTask(t.id)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer' }}>🗑</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {taskFormArea && formArea === area ? taskFormBlock(area, icon) : (
-                          <button onClick={() => { setTaskFormArea(area + '|||' + icon); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }} style={{ marginTop: 4, background: 'transparent', border: 'none', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Tarefa</button>
-                        )}
-                      </div>
-                    )
-                  })}
-
-                  {prodTasks.length === 0 && !addingArea && !taskFormArea && <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Nenhuma área criada ainda. Clique em "+ Adicionar área" para montar a produção do evento.</div>}
-
-                  {/* Cost summary + export */}
-                  {prodTasks.length > 0 && (
-                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.brd}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                        <span style={{ color: C.mut }}>Custo estimado</span>
-                        <span style={{ color: '#f59e0b', fontWeight: 700 }}>R$ {(totEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                      {totReal > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                          <span style={{ color: C.mut }}>Custo real</span>
-                          <span style={{ color: '#10b981', fontWeight: 700 }}>R$ {(totReal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                        <button onClick={printProdCosts} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 0', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Planilha</button>
-                        <button onClick={exportProdCostsCsv} style={{ flex: 1, background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 0', color: C.sub, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>📥 CSV</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-
-            {/* Tab: Layout (Reservas) */}
-            {prodTab === 'layout' && (
-              <div style={{ flex: 1 }}>
-                {/* Summary */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
-                  <div style={{ background: '#3b82f610', border: '1px solid #3b82f633', borderRadius: 8, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: '#3b82f6' }}>{prodRes.length}</div>
-                    <div style={{ fontSize: 10, color: C.mut }}>Reservas</div>
-                  </div>
-                  <div style={{ background: '#a78bfa10', border: '1px solid #a78bfa33', borderRadius: 8, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: '#a78bfa' }}>{prodRes.reduce((s, r) => s + (r.people_count ?? 0), 0)}</div>
-                    <div style={{ fontSize: 10, color: C.mut }}>Pessoas esperadas</div>
-                  </div>
-                </div>
-                {/* Reservations list */}
-                {prodRes.length === 0
-                  ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Nenhuma reserva para esta data.</div>
-                  : prodRes.map(r => (
-                    <div key={r.id} style={{ background: r.status === 'arrived' ? '#10b98108' : '#ffffff05', border: `1px solid ${r.status === 'arrived' ? '#10b98122' : C.brd}`, borderRadius: 8, padding: '7px 10px', marginBottom: 5 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-                          <div style={{ fontSize: 11, color: C.mut, display: 'flex', gap: 8, marginTop: 1 }}>
-                            {r.location && <span>📍 {r.location}</span>}
-                            {r.people_count && <span>👥 {r.people_count}px</span>}
-                          </div>
-                          {/* Special items */}
-                          {(r.reservation_items ?? []).length > 0 && (
-                            <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                              {(r.reservation_items ?? []).map((item, i) => (
-                                <span key={i} style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b33', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>
-                                  {item.quantity > 1 ? `${item.quantity}× ` : ''}{item.name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: r.status === 'arrived' ? '#10b98122' : '#f59e0b22', color: r.status === 'arrived' ? '#10b981' : '#f59e0b', fontWeight: 700, flexShrink: 0 }}>
-                          {r.status === 'arrived' ? '✅' : '⏳'}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                }
-              </div>
-            )}
-
-            {/* Tab: Budget */}
-            {prodTab === 'budget' && (() => {
-              const totalRevenue = prodRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
-              const tasksEst = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-              const tasksReal = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-              const frTotal = prodFr.reduce((s, f) => s + ((f as any).custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
-              const totalEst = tasksEst + frTotal
-              const margin = totalRevenue - totalEst
-              return (
-                <div style={{ flex: 1 }}>
-                  {[
-                    { label: '📥 Receita (reservas)', val: totalRevenue, color: '#10b981' },
-                    { label: '📤 Despesas estimadas', val: totalEst, color: '#f59e0b' },
-                    { label: '📊 Margem', val: margin, color: margin >= 0 ? '#10b981' : '#f87171' },
-                  ].map(({ label, val, color }) => (
-                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                      <span style={{ color: C.mut }}>{label}</span>
-                      <span style={{ color, fontWeight: 700 }}>R$ {(val / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  ))}
-                  {tasksReal > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                      <span style={{ color: C.mut }}>💸 Margem real</span>
-                      <span style={{ color: totalRevenue - tasksReal - frTotal >= 0 ? '#3b82f6' : '#f87171', fontWeight: 700 }}>R$ {((totalRevenue - tasksReal - frTotal) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                  {prodFr.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ fontSize: 10, color: C.mut, marginBottom: 4 }}>👷 Freelancers: R$ {(frTotal / 100).toFixed(2)}</div>
-                      <div style={{ fontSize: 10, color: C.mut }}>📋 Tarefas: R$ {(tasksEst / 100).toFixed(2)}</div>
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-            </>
+                })()}
+                <div style={{ flexShrink: 0 }}>{renderProdTabs()}</div>
+                <div style={{ flex: 1, overflowY: 'auto', marginTop: 12 }}>{renderProdBody()}</div>
+              </>
           }
         </div>{/* end RIGHT */}
           </div>{/* end flex body */}
         </div>
       )}{/* end overlay */}
 
-      {/* Guest list modal */}
-      <Modal open={!!guestEv} title={`👥 Lista — ${guestEv?.name ?? ''}`} onClose={() => { setGuestEv(null); setGuests([]) }}>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-          {['all', 'present', 'pending'].map(f => (
-            <Btn key={f} onClick={() => setGuestFilter(f)} variant={guestFilter === f ? 'primary' : 'ghost'} small>
-              {f === 'all' ? `Todos (${guests.length})` : f === 'present' ? `✅ Presentes (${guests.filter(g => g.checked_in).length})` : `⏳ Pendentes (${guests.filter(g => !g.checked_in).length})`}
-            </Btn>
+      {/* Guest list modal — large, two-tab layout */}
+      <Modal open={!!guestEv} title={`👥 Lista da Casa — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListaClients([]) }}>
+
+        {/* Link compartilhável */}
+        {guestListToken && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
+            <i className="bi bi-link-45deg" style={{ color: '#10b981', fontSize: 18, flexShrink: 0 }} />
+            <span style={{ color: '#10b981', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {`${window.location.origin}/lista/${guestListToken}`}
+            </span>
+            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista/${guestListToken}`); st2('Link copiado!', 'success') }}
+              style={{ background: '#10b98133', border: '1px solid #10b98166', borderRadius: 7, padding: '5px 14px', color: '#10b981', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+              Copiar Link
+            </button>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+          {(['lista', 'convidar'] as const).map(t => (
+            <button key={t} onClick={() => setListaTab(t)} style={{
+              padding: '8px 18px', borderRadius: 8, border: `1px solid ${listaTab === t ? C.acc : C.brd}`,
+              background: listaTab === t ? C.acc + '22' : 'transparent',
+              color: listaTab === t ? C.acc : C.mut, fontSize: 13, fontWeight: 700,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              {t === 'lista' ? `📋 Lista (${guests.length})` : `📨 Convidar Clientes`}
+            </button>
           ))}
-          <Btn onClick={doExport} small variant="secondary">📥 CSV</Btn>
         </div>
-        {guests.length === 0
-          ? <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>Nenhum convidado na lista</div>
-          : guests.filter(g => guestFilter === 'all' ? true : guestFilter === 'present' ? g.checked_in : !g.checked_in).map((g, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}` }}>
-              <span style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, flex: 1, fontWeight: g.checked_in ? 700 : 400 }}>{g.full_name}</span>
-              <span style={{ color: C.mut, fontSize: 12, width: 20, textAlign: 'center' }}>{g.gender === 'M' ? '♂' : g.gender === 'F' ? '♀' : ''}</span>
-              {g.phone && <span style={{ color: C.mut, fontSize: 12 }}>{g.phone}</span>}
-              <span style={{ color: g.checked_in ? C.grn : C.mut, fontSize: 13, width: 20, textAlign: 'center' }}>{g.checked_in ? '✓' : '—'}</span>
+
+        {/* ── ABA LISTA ── */}
+        {listaTab === 'lista' && (
+          <>
+            {/* Adicionar manualmente */}
+            <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 8, letterSpacing: '0.06em' }}>➕ ADICIONAR MANUALMENTE</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input placeholder="Nome *" value={guestAddForm.name} onChange={e => setGuestAddForm(p => ({ ...p, name: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && addGuestManually()}
+                  style={{ flex: '2 1 160px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                <input placeholder="Telefone" value={guestAddForm.phone} onChange={e => setGuestAddForm(p => ({ ...p, phone: e.target.value }))}
+                  style={{ flex: '1 1 130px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                <select value={guestAddForm.gender} onChange={e => setGuestAddForm(p => ({ ...p, gender: e.target.value }))}
+                  style={{ flex: '0 0 100px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
+                  <option value="">Gênero</option>
+                  <option value="M">♂ Masc</option>
+                  <option value="F">♀ Fem</option>
+                </select>
+                <Btn onClick={addGuestManually} disabled={!guestAddForm.name.trim() || guestAdding} small>
+                  {guestAdding ? '...' : 'Adicionar'}
+                </Btn>
+              </div>
             </div>
-          ))
-        }
+
+            {/* Filtros */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              {(['all', 'present', 'pending'] as const).map(f => (
+                <Btn key={f} onClick={() => setGuestFilter(f)} variant={guestFilter === f ? 'primary' : 'ghost'} small>
+                  {f === 'all' ? `Todos (${guests.length})` : f === 'present' ? `✅ Presentes (${guests.filter(g => g.checked_in).length})` : `⏳ Pendentes (${guests.filter(g => !g.checked_in).length})`}
+                </Btn>
+              ))}
+              <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV</Btn>
+            </div>
+
+            {/* Lista de convidados — grid de 2 colunas se houver espaço */}
+            {guests.length === 0
+              ? <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhum convidado na lista ainda</div>
+              : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0 24px' }}>
+                  {guests
+                    .filter(g => guestFilter === 'all' ? true : guestFilter === 'present' ? g.checked_in : !g.checked_in)
+                    .map((g, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
+                        <span style={{ fontSize: 16, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: g.checked_in ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.full_name}</div>
+                          {g.phone && <div style={{ color: C.mut, fontSize: 11 }}>{g.phone}</div>}
+                        </div>
+                        {g.checked_in && <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✓ Entrou</span>}
+                      </div>
+                    ))
+                  }
+                </div>
+              )
+            }
+          </>
+        )}
+
+        {/* ── ABA CONVIDAR CLIENTES ── */}
+        {listaTab === 'convidar' && (() => {
+          const baseLink = guestListToken ? `${window.location.origin}/lista/${guestListToken}` : ''
+          const q = listaSearch.toLowerCase()
+          const filtered = listaClients.filter(c =>
+            c.full_name.toLowerCase().includes(q) || (c.phone ?? '').includes(q)
+          )
+
+          function makePersonalLink(c: FlyerClient) {
+            return `${baseLink}?nome=${encodeURIComponent(c.full_name)}${c.phone ? `&tel=${c.phone.replace(/\D/g, '')}` : ''}`
+          }
+
+          function openWhatsApp(c: FlyerClient) {
+            if (!c.phone) { st2('Cliente sem telefone cadastrado', 'warn'); return }
+            const ev = guestEv!
+            const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+            const link = makePersonalLink(c)
+            const msg = `Olá ${c.full_name.split(' ')[0]}! 🎉 Você está convidado(a) para *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}.\n\n✅ Confirme sua presença na lista da casa:\n${link}\n\nTe esperamos! 🔥`
+            const phone = '55' + c.phone.replace(/\D/g, '')
+            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+          }
+
+          return (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <input
+                  placeholder="🔍 Buscar cliente por nome ou telefone..."
+                  value={listaSearch}
+                  onChange={e => setListaSearch(e.target.value)}
+                  style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' as const }}
+                />
+              </div>
+
+              {!baseLink && (
+                <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>
+                  Ative a Lista da Casa no cadastro do evento para gerar o link de convite.
+                </div>
+              )}
+
+              {baseLink && filtered.length === 0 && (
+                <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>
+                  {listaSearch ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado'}
+                </div>
+              )}
+
+              {baseLink && filtered.length > 0 && (
+                <>
+                  <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 10, letterSpacing: '0.06em' }}>
+                    {filtered.length} CLIENTE{filtered.length !== 1 ? 'S' : ''} — clique para enviar convite via WhatsApp
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                    {filtered.map(c => (
+                      <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
+                        <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.acc + '22', border: `1px solid ${C.acc}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0, color: C.acc, fontWeight: 800 }}>
+                          {c.full_name.charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: C.txt, fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.full_name}</div>
+                          <div style={{ color: C.mut, fontSize: 11 }}>{c.phone ?? 'Sem telefone'}</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                          <button
+                            onClick={() => { navigator.clipboard.writeText(makePersonalLink(c)); st2('Link copiado!', 'success') }}
+                            title="Copiar link personalizado"
+                            style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 7, padding: '5px 8px', color: C.acc, fontSize: 13, cursor: 'pointer' }}>
+                            <i className="bi bi-link-45deg" />
+                          </button>
+                          <button
+                            onClick={() => openWhatsApp(c)}
+                            title="Enviar via WhatsApp"
+                            style={{ background: '#25D36622', border: '1px solid #25D36644', borderRadius: 7, padding: '5px 8px', color: '#25D366', fontSize: 13, cursor: 'pointer' }}>
+                            <i className="bi bi-whatsapp" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )
+        })()}
       </Modal>
 
       {/* Reservations modal */}
@@ -1208,74 +1836,159 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       </Modal>
 
       {/* Freelancers modal */}
-      <Modal open={!!frModal} title={`👷 Freelancers — ${frModal?.name ?? ''}`} onClose={() => { setFrModal(null); setEvFreelancers([]) }}>
-        {/* Budget summary */}
+      <Modal open={!!frModal} title={`👷 Equipe — ${frModal?.name ?? ''}`} onClose={() => { setFrModal(null); setEvFreelancers([]); setFrModalArea(null) }}>
         {(() => {
-          const artistFee = frModal?.artist_fee_cents ?? 0
-          const freelancerTotal = evFreelancers.reduce((sum, ef) => sum + (ef.freelancers?.daily_rate_cents ?? 0), 0)
-          const total = artistFee + freelancerTotal
+          const roleOf = (ef: EventFreelancer) => (ef.role || ef.freelancers?.work_types?.[0] || 'outros')
+          const groups: Record<string, EventFreelancer[]> = {}
+          evFreelancers.forEach(ef => { const r = roleOf(ef); (groups[r] ||= []).push(ef) })
+          const confirmed = evFreelancers.filter(ef => ef.confirmed).length
+          const needs = frModal?.staffing_needs ?? {}
           return (
-            <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '12px 16px', marginBottom: 16, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-              <div>
-                <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🎤 CACHÊ</div>
-                <div style={{ color: C.gold, fontWeight: 700, fontSize: 15 }}>{fmtCurrency(artistFee)}</div>
+            <div>
+              <div style={{ fontSize: 12, color: C.mut, marginBottom: 12 }}>Escale a equipe por área. As metas (necessário por área) vêm de <strong style={{ color: C.sub }}>Produção › Equipe</strong>.</div>
+
+              {/* Stats */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                {[
+                  { label: 'Escalados', val: evFreelancers.length, color: C.acc },
+                  { label: 'Confirmados', val: confirmed, color: C.grn },
+                  { label: 'Áreas', val: Object.keys(groups).length, color: C.gold },
+                ].map((b, i) => (
+                  <div key={i} style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: b.color }}>{b.val}</div>
+                    <div style={{ fontSize: 10, color: C.mut, marginTop: 2 }}>{b.label}</div>
+                  </div>
+                ))}
               </div>
-              <div>
-                <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>👷 FREELANCERS</div>
-                <div style={{ color: C.acc, fontWeight: 700, fontSize: 15 }}>{fmtCurrency(freelancerTotal)}</div>
-              </div>
-              <div style={{ borderLeft: `1px solid ${C.brd}`, paddingLeft: 10 }}>
-                <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>💰 TOTAL</div>
-                <div style={{ color: C.grn, fontWeight: 900, fontSize: 16 }}>{fmtCurrency(total)}</div>
-              </div>
+
+              {/* Progresso das metas */}
+              {Object.keys(needs).length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                  {Object.entries(needs).map(([key, need]) => {
+                    const assigned = evFreelancers.filter(ef => roleOf(ef) === key).length
+                    const ok = assigned >= (need as number)
+                    return (
+                      <span key={key} style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 8, background: ok ? '#10b98118' : '#f59e0b18', color: ok ? '#10b981' : '#f59e0b', border: `1px solid ${ok ? '#10b98144' : '#f59e0b44'}` }}>
+                        {wlabel(key)} {assigned}/{need as number}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Membros por área */}
+              {Object.entries(groups).map(([role, members]) => (
+                <div key={role} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
+                    <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{wlabel(role)} <span style={{ color: C.brd, fontWeight: 400 }}>({members.length}{needs[role] ? `/${needs[role]}` : ''})</span></span>
+                    <button onClick={() => setFrModalArea(role)} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Freelancer</button>
+                  </div>
+                  {members.map(ef => (
+                    <div key={ef.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{ef.freelancers?.full_name ?? '—'}</div>
+                        <div style={{ color: C.mut, fontSize: 11 }}>{(ef.freelancers?.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}</div>
+                      </div>
+                      <button onClick={() => toggleEvFrConfirmed(ef)} title={ef.confirmed ? 'Confirmado' : 'Pendente'} style={{ background: ef.confirmed ? C.grn + '22' : '#ffffff08', border: `1px solid ${ef.confirmed ? C.grn + '44' : C.brd}`, borderRadius: 8, padding: '4px 8px', color: ef.confirmed ? C.grn : C.mut, fontSize: 12, cursor: 'pointer' }}>{ef.confirmed ? '✅' : '⏳'}</button>
+                      <button onClick={() => removeEvFreelancer(ef.id)} title="Remover" style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 8, padding: '4px 8px', color: C.red, fontSize: 12, cursor: 'pointer' }}>🗑</button>
+                    </div>
+                  ))}
+                </div>
+              ))}
+
+              {/* Escalar por área */}
+              {!frModalArea ? (
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>➕ ESCALAR POR ÁREA</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {workAreas.map(a => {
+                      const assigned = evFreelancers.filter(ef => roleOf(ef) === a.key).length
+                      const need = needs[a.key] ?? 0
+                      return (
+                        <button key={a.key} onClick={() => setFrModalArea(a.key)} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 12px', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                          {a.icon} {a.label}{need ? <span style={{ color: assigned >= need ? '#10b981' : '#f59e0b', marginLeft: 4, fontWeight: 700 }}>{assigned}/{need}</span> : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : (() => {
+                const available = allFreelancers.filter(f => !evFreelancers.some(ef => ef.freelancer_id === f.id && roleOf(ef) === frModalArea))
+                const suggested = available.filter(f => (f.work_types ?? []).includes(frModalArea as never))
+                const others = available.filter(f => !(f.work_types ?? []).includes(frModalArea as never))
+                const ordered = [...suggested, ...others]
+                return (
+                  <div style={{ padding: '12px 14px', background: '#ffffff06', border: `1px solid ${C.acc}44`, borderRadius: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, color: C.acc, fontWeight: 700 }}>Escalar em {wlabel(frModalArea)}</span>
+                      <button onClick={() => setFrModalArea(null)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
+                    </div>
+                    {ordered.length === 0
+                      ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Equipe.' : 'Todos já estão nesta área.'}</div>
+                      : ordered.map(f => (
+                        <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name} {(f.work_types ?? []).includes(frModalArea as never) && <span style={{ fontSize: 10, color: '#10b981' }}>• da função</span>}</div>
+                            <div style={{ fontSize: 11, color: C.mut }}>{(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}{f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}</div>
+                          </div>
+                          <button onClick={() => addEvFreelancer(f.id, frModalArea)} style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 8, padding: '5px 12px', color: C.acc, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
+                        </div>
+                      ))
+                    }
+                  </div>
+                )
+              })()}
             </div>
           )
         })()}
+      </Modal>
 
-        {/* Already linked */}
-        {evFreelancers.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: C.mut, fontWeight: 600, marginBottom: 8 }}>VINCULADOS ({evFreelancers.length})</div>
-            {evFreelancers.map(ef => {
-              const fr = ef.freelancers
-              return (
-                <div key={ef.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{fr?.full_name ?? '—'}</div>
-                    <div style={{ color: C.mut, fontSize: 11 }}>
-                      {(fr?.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
-                      {fr?.daily_rate_cents ? ` · ${fmtCurrency(fr.daily_rate_cents)}/dia` : ''}
+      {/* Checklist do card — checagem das tarefas de produção */}
+      <Modal open={!!checkEv} title={`📋 Checklist — ${checkEv?.name ?? ''}`} onClose={() => { setCheckEv(null); setCheckTasks([]) }}>
+        {(() => {
+          const total = checkTasks.length
+          const done = checkTasks.filter(t => t.status === 'done').length
+          const pct = total ? Math.round(done / total * 100) : 0
+          const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
+          checkTasks.forEach(t => { if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }; areas[t.area].tasks.push(t) })
+          return (
+            <div>
+              <div style={{ fontSize: 12, color: C.mut, marginBottom: 12 }}>Marque as tarefas conforme forem concluídas. As tarefas são cadastradas em Produção › Tarefas.</div>
+              {total === 0
+                ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 24 }}>Nenhuma tarefa cadastrada na Produção deste evento.</div>
+                : <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                      <div style={{ flex: 1, height: 8, background: C.brd, borderRadius: 6, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? '#10b981' : 'linear-gradient(90deg,#f59e0b,#fbbf24)', borderRadius: 6, transition: 'width .3s' }} />
+                      </div>
+                      <span style={{ fontSize: 12, color: pct === 100 ? '#10b981' : C.sub, fontWeight: 700 }}>{done}/{total} ({pct}%)</span>
+                      <button onClick={() => checkEv && printCheck(checkEv)} style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${C.brd}`, background: 'transparent', color: C.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Imprimir</button>
                     </div>
-                  </div>
-                  <Btn onClick={() => toggleConfirmed(ef)} small
-                    style={{ background: ef.confirmed ? C.grn + '22' : C.mut + '22', color: ef.confirmed ? C.grn : C.mut, border: `1px solid ${ef.confirmed ? C.grn : C.brd}44` }}>
-                    {ef.confirmed ? '✅ Confirmado' : '⏳ Pendente'}
-                  </Btn>
-                  <Btn onClick={() => toggleFreelancer(ef.freelancer_id)} small variant="danger">✕</Btn>
-                </div>
-              )
-            })}
-          </div>
-        )}
-        {/* Available to add */}
-        <div style={{ fontSize: 12, color: C.mut, fontWeight: 600, marginBottom: 8 }}>DISPONÍVEIS PARA ADICIONAR</div>
-        {allFreelancers.filter(fr => !evFreelancers.find(ef => ef.freelancer_id === fr.id)).length === 0
-          ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 16 }}>
-              {allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Freelancers.' : 'Todos os freelancers já estão vinculados.'}
+                    {Object.entries(areas).map(([area, g]) => (
+                      <div key={area} style={{ marginBottom: 16 }}>
+                        <div style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
+                          {g.icon} {area} <span style={{ color: C.brd, fontWeight: 400 }}>({g.tasks.filter(t => t.status === 'done').length}/{g.tasks.length})</span>
+                        </div>
+                        {g.tasks.map(t => (
+                          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                            <button onClick={() => toggleCheckTask(t)} style={{ width: 24, height: 24, borderRadius: 6, border: `2px solid ${t.status === 'done' ? '#10b981' : C.brd}`, background: t.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 13, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{t.status === 'done' ? '✓' : ''}</button>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ color: t.status === 'done' ? C.mut : C.txt, fontSize: 14, fontWeight: 500, textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>{t.title}</div>
+                              {(t.assignee_name || t.deadline) && (
+                                <div style={{ fontSize: 11, color: C.mut, marginTop: 1 }}>
+                                  {t.assignee_name ? `👤 ${t.assignee_name}` : ''}{t.assignee_name && t.deadline ? ' · ' : ''}{t.deadline ? `⏰ ${new Date(t.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}` : ''}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </>
+              }
             </div>
-          : allFreelancers.filter(fr => !evFreelancers.find(ef => ef.freelancer_id === fr.id)).map(fr => (
-            <div key={fr.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{fr.full_name}</div>
-                <div style={{ color: C.mut, fontSize: 11 }}>
-                  {(fr.work_types ?? []).map(wt => WORK_LABELS[wt] ?? wt).join(' · ')}
-                  {fr.daily_rate_cents ? ` · ${fmtCurrency(fr.daily_rate_cents)}/dia` : ''}
-                </div>
-              </div>
-              <Btn onClick={() => toggleFreelancer(fr.id)} small>➕ Adicionar</Btn>
-            </div>
-          ))
-        }
+          )
+        })()}
       </Modal>
 
       {/* Tickets modal */}
@@ -1396,19 +2109,116 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         )}
       </Modal>
 
+      {/* Reservas — consulta (somente leitura + impressão p/ montagem) */}
+      <Modal open={!!resViewEv} title={`🪑 Reservas — ${resViewEv?.name ?? ''}`} onClose={() => { setResViewEv(null); setResViewList([]) }} wide>
+        {resViewEv && (() => {
+          const totalPeople = resViewList.reduce((s, r) => s + (r.people_count ?? 0), 0)
+          return (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 12, color: C.mut }}>{resViewList.length} reservas · {totalPeople} pessoas previstas</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {onGoToReservas && <Btn onClick={() => { onGoToReservas(resViewEv.event_date, resViewEv.id); setResViewEv(null) }} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Gerenciar</Btn>}
+                  <Btn onClick={() => printResView(resViewEv)} small variant="secondary" style={cbtn('#3b82f6')}>🖨️ Imprimir (montagem)</Btn>
+                </div>
+              </div>
+              {resViewList.length === 0
+                ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 24 }}>Nenhuma reserva para este evento.</div>
+                : resViewList.map(r => (
+                  <div key={r.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0', borderBottom: `1px solid ${C.brd}` }}>
+                    <div style={{ minWidth: 60, flexShrink: 0 }}>
+                      <div style={{ background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', borderRadius: 8, padding: '4px 6px', fontSize: 13, fontWeight: 800, textAlign: 'center' }}>{r.location || '—'}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: C.txt, fontSize: 14, fontWeight: 700 }}>{r.name}</div>
+                      {r.observations && <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>📝 {r.observations}</div>}
+                    </div>
+                    <div style={{ flexShrink: 0, textAlign: 'right', color: C.sub, fontSize: 13, fontWeight: 700 }}>👥 {r.people_count ?? '-'}</div>
+                  </div>
+                ))
+              }
+            </div>
+          )
+        })()}
+      </Modal>
+
+      {/* Enviar flyer */}
+      <Modal open={!!flyerEv} title={`📤 Enviar flyer — ${flyerEv?.name ?? ''}`} onClose={() => { if (!flyerSending) { setFlyerEv(null); setFlyerClients([]) } }} wide>
+        {flyerEv && (() => {
+          const filtered = flyerClients.filter(c => {
+            const mg = flyerGender === 'all' || (c.gender ?? '') === flyerGender
+            const ms = !flyerSearch || c.full_name.toLowerCase().includes(flyerSearch.toLowerCase()) || (c.phone ?? '').includes(flyerSearch)
+            return mg && ms
+          })
+          const allSel = filtered.length > 0 && filtered.every(c => flyerSel.has(c.id))
+          const toggle = (id: string) => setFlyerSel(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+          const toggleAll = () => setFlyerSel(prev => { const n = new Set(prev); if (allSel) filtered.forEach(c => n.delete(c.id)); else filtered.forEach(c => n.add(c.id)); return n })
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                {flyerEv.flyer_url
+                  ? <img src={flyerEv.flyer_url} alt="flyer" style={{ width: '100%', borderRadius: 10, marginBottom: 10, maxHeight: 280, objectFit: 'cover' }} />
+                  : <div style={{ background: C.bg, border: `1px dashed ${C.brd}`, borderRadius: 10, padding: 20, textAlign: 'center', color: C.mut, fontSize: 13, marginBottom: 10 }}>Sem flyer cadastrado — será enviado só o texto.</div>}
+                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Mensagem (use {'{{nome}}'} para o primeiro nome)</label>
+                <textarea value={flyerMsg} onChange={e => setFlyerMsg(e.target.value)} style={{ width: '100%', minHeight: 150, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginTop: 4, boxSizing: 'border-box' }} />
+                {flyerLink && <div style={{ fontSize: 11, color: C.mut, marginTop: 6, wordBreak: 'break-all' }}>🔗 Confirmação de presença: <span style={{ color: '#a78bfa' }}>{flyerLink}</span></div>}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <input value={flyerSearch} onChange={e => setFlyerSearch(e.target.value)} placeholder="🔍 Buscar contato" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 8 }} />
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+                  {([['all', 'Todos'], ['masculino', '♂'], ['feminino', '♀']] as const).map(([v, l]) => (
+                    <button key={v} onClick={() => setFlyerGender(v)} style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${flyerGender === v ? C.acc : C.brd}`, background: flyerGender === v ? C.acc + '22' : 'transparent', color: flyerGender === v ? C.acc : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>{l}</button>
+                  ))}
+                  <button onClick={toggleAll} style={{ marginLeft: 'auto', padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.brd}`, background: 'transparent', color: C.sub, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{allSel ? 'Limpar' : 'Todos'}</button>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', maxHeight: 320, border: `1px solid ${C.brd}`, borderRadius: 8 }}>
+                  {filtered.length === 0
+                    ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: 20 }}>Nenhum contato com telefone.</div>
+                    : filtered.map(c => {
+                      const on = flyerSel.has(c.id)
+                      return (
+                        <div key={c.id} onClick={() => toggle(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderBottom: `1px solid ${C.brd}22`, cursor: 'pointer', background: on ? C.acc + '11' : 'transparent' }}>
+                          <span style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${on ? C.acc : C.brd}`, background: on ? C.acc : 'transparent', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{on ? '✓' : ''}</span>
+                          <span style={{ flex: 1, color: C.txt, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.full_name}{c.gender ? <span style={{ color: c.gender === 'feminino' ? '#f472b6' : C.acc, marginLeft: 5 }}>{c.gender === 'feminino' ? '♀' : '♂'}</span> : ''}</span>
+                          <span style={{ color: C.mut, fontSize: 11, flexShrink: 0 }}>{c.phone}</span>
+                        </div>
+                      )
+                    })}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  {flyerSending
+                    ? <div style={{ textAlign: 'center', color: C.sub, fontSize: 13, fontWeight: 700 }}>Enviando… {flyerProgress.sent}/{flyerProgress.total}</div>
+                    : <Btn onClick={sendFlyer} style={{ width: '100%' }} disabled={flyerSel.size === 0}>📤 Enviar para {flyerSel.size} contato(s)</Btn>}
+                  <div style={{ fontSize: 11, color: C.mut, textAlign: 'center', marginTop: 6 }}>Envio automático pelo WhatsApp da casa (Evolution API).</div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+      </Modal>
+
       {/* Budget modal */}
-      <Modal open={!!budgetEv} title={`💰 Budget — ${budgetEv?.name ?? ''}`} onClose={() => { setBudgetEv(null); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]) }} wide>
+      <Modal open={!!budgetEv} title={`💰 Budget — ${budgetEv?.name ?? ''}`} onClose={() => { setBudgetEv(null); setBudgetFreelancers([]); setBudgetPromoters([]); setBudgetResItems([]); setBudgetExpenses([]); setBudgetRes([]); setBudgetTasks([]) }} wide>
         {budgetEv && (() => {
-          const cache = budgetEv.artist_fee_cents ?? 0
-          const consumacao = budgetEv.consumption_cents ?? 0
+          const ab = artistsBreakdown(budgetEv)
+          const cache = ab.fee
+          const consumacao = ab.cons
           const producao = budgetEv.production_cost_cents ?? 0
-          const freelancerTotal = budgetFreelancers.reduce((s, ef) => s + (ef.freelancers?.daily_rate_cents ?? 0), 0)
+          const freelancerTotal = budgetFreelancers.reduce((s, ef) => s + ((ef as any).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0), 0)
           const promoterTotal = budgetPromoters.reduce((s, l) => {
             const ent = Math.max(l.guest_count, l.min_entries)
             return s + l.fixed_fee_cents + ent * l.entry_fee_cents + ent * l.consumacao_cents
           }, 0)
           const resItemsTotal = budgetResItems.reduce((s, i) => s + (i.quantity || 1) * (i.unit_cost_cents || 0), 0)
-          const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal
+          const expensesTotal = budgetExpenses.reduce((s, e) => s + e.amount_cents, 0)
+          const tasksEst = budgetTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+          const tasksReal = budgetTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
+          const tasksTotal = tasksReal > 0 ? tasksReal : tasksEst
+          const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
+          const revenue = budgetRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
+          const margin = revenue - total
+          const taskAreas: Record<string, { icon: string; tasks: EventTask[] }> = {}
+          budgetTasks.forEach(t => { if (!taskAreas[t.area]) taskAreas[t.area] = { icon: t.area_icon, tasks: [] }; taskAreas[t.area].tasks.push(t) })
 
           const row = (icon: string, label: string, value: number, color: string, sub?: string) => (
             <div style={{ display: 'flex', alignItems: 'center', padding: '11px 0', borderBottom: `1px solid ${C.brd}` }}>
@@ -1423,14 +2233,30 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
           return (
             <div>
-              {/* Artista */}
-              {(budgetEv as any)?.artist_fee_type === 'percent'
-                ? row('🎤', `Cachê Variável — ${(budgetEv as any).artist_fee_percent}% da portaria`, cache, C.gold, cache > 0 ? `Mínimo garantido: ${fmtCurrency(cache)}` : 'A calcular após o evento')
-                : (budgetEv as any)?.artist_fee_type === 'tbd'
-                  ? row('🎤', 'Cachê — A combinar', 0, C.gold, 'Valor não definido')
-                  : row('🎤', 'Cachê do Artista', cache, C.gold)}
+              {/* Resumo */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
+                <div style={{ background: '#10b98110', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#10b981', fontWeight: 700, textTransform: 'uppercase' }}>Receita</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: '#10b981' }}>{fmtCurrency(revenue)}</div>
+                  <div style={{ fontSize: 10, color: C.mut }}>{budgetRes.length} reservas</div>
+                </div>
+                <div style={{ background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, textTransform: 'uppercase' }}>Despesas</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: '#f59e0b' }}>{fmtCurrency(total)}</div>
+                </div>
+                <div style={{ background: margin >= 0 ? '#10b98110' : '#f8717110', border: `1px solid ${margin >= 0 ? '#10b98133' : '#f8717133'}`, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: margin >= 0 ? '#10b981' : '#f87171', fontWeight: 700, textTransform: 'uppercase' }}>Margem</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: margin >= 0 ? '#10b981' : '#f87171' }}>{fmtCurrency(margin)}</div>
+                </div>
+              </div>
+              {/* Artistas */}
+              {ab.list.length > 0
+                ? ab.list.map((a, i) => (
+                  <Fragment key={i}>{row('🎤', a.name || `Artista ${i + 1}`, (a.fee_cents ?? 0), C.gold, a.fee_type === 'percent' ? `${a.fee_percent}% da portaria${(a.fee_cents ?? 0) > 0 ? ` · mín. ${fmtCurrency(a.fee_cents ?? 0)}` : ''}` : (a.fee_type === 'tbd' ? 'A combinar' : undefined))}</Fragment>
+                ))
+                : row('🎤', 'Cachê do Artista', cache, C.gold)}
 
-              {row('🍺', 'Consumação', consumacao, '#f59e0b')}
+              {consumacao > 0 && row('🍺', 'Consumação (artistas)', consumacao, '#f59e0b')}
               {row('🔧', 'Gastos de Produção', producao, '#8b5cf6')}
 
               {/* Freelancers */}
@@ -1444,7 +2270,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <div key={ef.id} style={{ display: 'flex', alignItems: 'center', padding: '3px 0 3px 34px' }}>
                     <div style={{ flex: 1, color: C.mut, fontSize: 12 }}>
                       {ef.freelancers?.full_name}
-                      {ef.freelancers?.work_types?.length ? ` · ${(ef.freelancers.work_types).map(w => WORK_LABELS[w] ?? w).join(', ')}` : ''}
+                      {ef.freelancers?.work_types?.length ? ` · ${(ef.freelancers.work_types).map(w => wlabel(w)).join(', ')}` : ''}
                     </div>
                     <div style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>{fmtCurrency(ef.freelancers?.daily_rate_cents ?? 0)}</div>
                   </div>
@@ -1498,12 +2324,42 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 </div>
               )}
 
-              {/* Total */}
-              <div style={{ display: 'flex', alignItems: 'center', padding: '16px 0 4px', background: `linear-gradient(135deg,${C.grn}08,transparent)`, borderRadius: 8, marginTop: 4 }}>
-                <div style={{ fontSize: 22, width: 34 }}>💰</div>
-                <div style={{ flex: 1, color: C.txt, fontSize: 16, fontWeight: 900 }}>TOTAL DO EVENTO</div>
-                <div style={{ color: C.grn, fontWeight: 900, fontSize: 22 }}>{fmtCurrency(total)}</div>
+              {/* Tarefas de produção */}
+              {budgetTasks.length > 0 && (
+                <div style={{ borderBottom: `1px solid ${C.brd}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '11px 0 6px' }}>
+                    <div style={{ fontSize: 20, width: 34 }}>📋</div>
+                    <div style={{ flex: 1, color: C.txt, fontSize: 14, fontWeight: 600 }}>Tarefas de produção</div>
+                    <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 15 }}>{fmtCurrency(tasksTotal)}</div>
+                  </div>
+                  {Object.entries(taskAreas).map(([area, g]) => {
+                    const at = g.tasks.reduce((s, t) => s + (t.actual_cost_cents ?? t.estimated_cost_cents ?? 0), 0)
+                    if (at === 0) return null
+                    return (
+                      <div key={area} style={{ display: 'flex', padding: '3px 0 3px 34px' }}>
+                        <div style={{ flex: 1, color: C.mut, fontSize: 12 }}>{g.icon} {area}</div>
+                        <div style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>{fmtCurrency(at)}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Outras despesas */}
+              {budgetEv && renderExpenses(budgetExpenses, budgetEv)}
+
+              {/* Total de despesas + Margem */}
+              <div style={{ display: 'flex', alignItems: 'center', padding: '14px 0 4px', borderTop: `2px solid ${C.brd}`, marginTop: 6 }}>
+                <div style={{ fontSize: 20, width: 34 }}>📤</div>
+                <div style={{ flex: 1, color: C.txt, fontSize: 15, fontWeight: 800 }}>Total de despesas</div>
+                <div style={{ color: '#f59e0b', fontWeight: 900, fontSize: 18 }}>{fmtCurrency(total)}</div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0 4px', background: `linear-gradient(135deg,${(margin >= 0 ? C.grn : C.red)}10,transparent)`, borderRadius: 8 }}>
+                <div style={{ fontSize: 22, width: 34 }}>{margin >= 0 ? '🟢' : '🔴'}</div>
+                <div style={{ flex: 1, color: C.txt, fontSize: 16, fontWeight: 900 }}>{margin >= 0 ? 'MARGEM' : 'PREJUÍZO'}</div>
+                <div style={{ color: margin >= 0 ? C.grn : C.red, fontWeight: 900, fontSize: 22 }}>{fmtCurrency(margin)}</div>
+              </div>
+              <div style={{ fontSize: 11, color: C.mut, marginTop: 8 }}>Receita = reservas do dia. Custos de tarefas usam o valor real quando informado, senão o estimado.</div>
             </div>
           )
         })()}
@@ -1555,64 +2411,132 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         </div>
       </Card>
 
-      {/* Event cards — full width */}
+      {/* Event cards */}
       {filteredEvents.length === 0
         ? <Card><div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>{selDate ? 'Nenhum evento nesta data' : showArchive ? 'Nenhum evento no arquivo' : 'Nenhum evento futuro cadastrado'}</div></Card>
-        : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-          {filteredEvents.map(ev => (
-            <Card key={ev.id}>
-              {/* Flyer */}
-              {ev.flyer_url && (
-                <div style={{ position: 'relative', width: '100%', paddingBottom: '56%', borderRadius: 10, overflow: 'hidden', marginBottom: 12 }}>
-                  <img src={ev.flyer_url} alt={ev.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                </div>
-              )}
-              {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: C.txt, fontWeight: 700, fontSize: 15, marginBottom: 2 }}>{ev.name}</div>
-                  <div style={{ color: C.mut, fontSize: 12 }}>{fd(ev.event_date)} · {(ev.start_time ?? '').slice(0, 5)}</div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0, marginLeft: 8 }}>
-                  <Pill color={evStatusColor(ev.status ?? 'ativo')} small>{ev.status ?? 'ativo'}</Pill>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {!!ev.checkinCount && <span style={{ background: C.grn + '22', color: C.grn, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.checkinCount} ✓</span>}
-                    {!!ev.resCount && <span style={{ background: '#a78bfa22', color: '#a78bfa', borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.resCount} 🪑</span>}
+        : showArchive
+          /* ── ARQUIVO: cards compactos em lista ── */
+          ? <Card style={{ padding: 0 }}>
+              {filteredEvents.map((ev, idx) => (
+                <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: idx < filteredEvents.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+                  {/* Thumb */}
+                  {ev.flyer_url
+                    ? <img src={ev.flyer_url} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover', flexShrink: 0, border: `1px solid ${C.brd}` }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    : <div style={{ width: 40, height: 40, borderRadius: 6, background: C.card, border: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🎉</div>
+                  }
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
+                    <div style={{ color: C.mut, fontSize: 12, display: 'flex', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
+                      <span>📅 {fd(ev.event_date)}</span>
+                      {!!ev.checkinCount && <span style={{ color: C.grn }}>✓ {ev.checkinCount}</span>}
+                      {!!ev.resCount && <span style={{ color: '#a78bfa' }}>🪑 {ev.resCount}</span>}
+                      {!!((ev.resPeople ?? 0) + (ev.listGuests ?? 0)) && <span style={{ color: C.acc }}>👥 {(ev.resPeople ?? 0) + (ev.listGuests ?? 0)}</span>}
+                    </div>
+                  </div>
+                  {/* Status + ações */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <Pill color={evStatusColor(ev.status ?? 'ativo')} small>{ev.status ?? 'ativo'}</Pill>
+                    <Btn onClick={() => openEdit(ev)} small variant="ghost" title="Editar">✏️</Btn>
+                    <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')} title="Budget">💰</Btn>
+                    {ev.status !== 'encerrado' && (
+                      <Btn onClick={() => closeEv(ev)} small variant="secondary" style={cbtn('#6366f1')} title="Encerrar evento e arquivar reservas">
+                        <i className="bi bi-archive-fill" /> Encerrar
+                      </Btn>
+                    )}
+                    {ev.status === 'encerrado' && (
+                      <Btn onClick={() => cancelEv(ev)} small variant="secondary" style={cbtn('#10b981')} title="Reativar evento">
+                        ↩ Reativar
+                      </Btn>
+                    )}
+                    <Btn onClick={() => deleteEv(ev)} small variant="danger" title="Excluir permanentemente">
+                      <i className="bi bi-trash3-fill" />
+                    </Btn>
                   </div>
                 </div>
-              </div>
-              {ev.genre && <div style={{ color: C.acc, fontSize: 11, fontWeight: 600, marginBottom: 6 }}>🎵 {ev.genre}</div>}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, color: C.mut, marginBottom: 10 }}>
-                {ev.price_male_cents ? <span>♂ {fmtCurrency(ev.price_male_cents)}</span> : null}
-                {ev.price_female_cents ? <span>♀ {fmtCurrency(ev.price_female_cents)}</span> : null}
-                {ev.capacity ? <span>👥 Cap. {ev.capacity}</span> : null}
-                {(ev as any).artist_fee_type === 'percent'
-                  ? <span style={{ color: C.gold }}>🎤 {(ev as any).artist_fee_percent}% portaria</span>
-                  : (ev as any).artist_fee_type === 'tbd'
-                    ? <span style={{ color: C.gold }}>🎤 A combinar</span>
-                    : ev.artist_fee_cents ? <span style={{ color: C.gold }}>🎤 {fmtCurrency(ev.artist_fee_cents)}</span> : null}
-              </div>
-              {/* Botões — 2 linhas organizadas */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-                <Btn onClick={() => openEdit(ev)} small variant="ghost" style={{ justifyContent: 'center' }}>✏️ Editar</Btn>
-                <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>👥 Lista</Btn>
-                <Btn onClick={() => onGoToReservas ? onGoToReservas(ev.event_date, ev.id) : openRes(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>🪑 Reservas</Btn>
-                <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={{ justifyContent: 'center' }}>👷 Freelancers</Btn>
-                <Btn onClick={() => openTickets(ev)} small style={{ background: C.acc + '22', color: C.acc, border: `1px solid ${C.acc}44`, justifyContent: 'center' }}>🎟️ Ingressos</Btn>
-                <Btn onClick={() => openBudget(ev)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44`, justifyContent: 'center' }}>💰 Budget</Btn>
-                <Btn onClick={() => openProd(ev)} small style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', justifyContent: 'center' }}>🏭 Produção</Btn>
-                <Btn onClick={() => openChecklist(ev)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44', justifyContent: 'center' }}>📋 Checklist</Btn>
-                <Btn onClick={() => cancelEv(ev)} small variant={ev.status === 'cancelado' ? 'secondary' : 'danger'} style={{ justifyContent: 'center' }}>
-                  {ev.status === 'cancelado' ? '✅ Reativar' : '❌ Cancelar'}
-                </Btn>
-              </div>
+              ))}
             </Card>
-          ))}
-        </div>
+          /* ── PRÓXIMOS: cards completos em grid ── */
+          : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
+            {filteredEvents.map(ev => (
+              <Card key={ev.id}>
+                {/* Flyer */}
+                {ev.flyer_url && (
+                  <div style={{ position: 'relative', width: '100%', paddingBottom: '56%', borderRadius: 10, overflow: 'hidden', marginBottom: 12 }}>
+                    <img src={ev.flyer_url} alt={ev.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                )}
+                {/* Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <div style={{ color: C.txt, fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
+                      <button onClick={() => openFlyer(ev)} title="Enviar flyer para contatos" style={{ flexShrink: 0, background: '#25d36622', border: '1px solid #25d36644', borderRadius: 7, padding: '3px 9px', color: '#25d366', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>📤 Flyer</button>
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 12 }}>{fd(ev.event_date)} · {(ev.start_time ?? '').slice(0, 5)}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0, marginLeft: 8 }}>
+                    <Pill color={evStatusColor(ev.status ?? 'ativo')} small>{ev.status ?? 'ativo'}</Pill>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {!!ev.checkinCount && <span style={{ background: C.grn + '22', color: C.grn, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.checkinCount} ✓</span>}
+                      {!!ev.resCount && <span style={{ background: '#a78bfa22', color: '#a78bfa', borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ev.resCount} 🪑</span>}
+                      {!!((ev.resPeople ?? 0) + (ev.listGuests ?? 0)) && (
+                        <span title={`Previstas: ${ev.resPeople ?? 0} em reservas + ${ev.listGuests ?? 0} em listas`} style={{ background: C.acc + '22', color: C.acc, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>👥 {(ev.resPeople ?? 0) + (ev.listGuests ?? 0)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {ev.genre && <div style={{ color: C.acc, fontSize: 11, fontWeight: 600, marginBottom: 6 }}>🎵 {ev.genre}</div>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, color: C.mut, marginBottom: 10 }}>
+                  {ev.price_male_cents ? <span>♂ {fmtCurrency(ev.price_male_cents)}</span> : null}
+                  {ev.price_female_cents ? <span>♀ {fmtCurrency(ev.price_female_cents)}</span> : null}
+                  {ev.capacity ? <span>👥 Cap. {ev.capacity}</span> : null}
+                  {(ev as any).artist_fee_type === 'percent'
+                    ? <span style={{ color: C.gold }}>🎤 {(ev as any).artist_fee_percent}% portaria</span>
+                    : (ev as any).artist_fee_type === 'tbd'
+                      ? <span style={{ color: C.gold }}>🎤 A combinar</span>
+                      : ev.artist_fee_cents ? <span style={{ color: C.gold }}>🎤 {fmtCurrency(ev.artist_fee_cents)}</span> : null}
+                </div>
+                {/* Checklist */}
+                {(() => {
+                  const total = ev.tasksTotal ?? 0
+                  const done = ev.tasksDone ?? 0
+                  const pct = total > 0 ? Math.round(done / total * 100) : 0
+                  const complete = total > 0 && done === total
+                  return (
+                    <button onClick={() => openCheck(ev)} title="Abrir checklist de produção" style={{ width: '100%', textAlign: 'left', background: complete ? '#10b98112' : '#7c3aed12', border: `1px solid ${complete ? '#10b98140' : '#7c3aed33'}`, borderRadius: 10, padding: '8px 12px', marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: total > 0 ? 6 : 0 }}>
+                        <span style={{ color: complete ? C.grn : '#a78bfa', fontSize: 12, fontWeight: 700 }}>📋 Checklist</span>
+                        <span style={{ color: complete ? C.grn : C.mut, fontSize: 11, fontWeight: 700 }}>{total > 0 ? `${done}/${total} · ${pct}%` : 'sem tarefas'}</span>
+                      </div>
+                      {total > 0 && (
+                        <div style={{ height: 6, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: complete ? '#10b981' : 'linear-gradient(90deg,#7c3aed,#a78bfa)', borderRadius: 4, transition: 'width .3s' }} />
+                        </div>
+                      )}
+                    </button>
+                  )
+                })()}
+                {/* Botões */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <Btn onClick={() => openEdit(ev)} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Editar</Btn>
+                  <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={cbtn('#3b82f6')}>👥 Lista</Btn>
+                  <Btn onClick={() => openResView(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
+                  <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={cbtn('#22d3ee')}>👷 Equipe</Btn>
+                  <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎟️ Ingressos</Btn>
+                  <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>
+                  <Btn onClick={() => openProd(ev)} small variant="secondary" style={cbtn('#f59e0b')}>🏭 Produção</Btn>
+                  <Btn onClick={() => cancelEv(ev)} small variant="secondary" style={cbtn(ev.status === 'cancelado' ? '#10b981' : '#ef4444')}>
+                    {ev.status === 'cancelado' ? '✅ Reativar' : '❌ Cancelar'}
+                  </Btn>
+                </div>
+              </Card>
+            ))}
+          </div>
       }
 
-      {/* ── Production panel ── */}
-      {prodEv && (
+      {/* ── Production panel (drawer standalone — só fora do cadastro) ── */}
+      {prodEv && !modal && (
         <>
           <div onClick={() => setProdEv(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000 }} />
           <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: 680, background: C.card, borderLeft: `1px solid ${C.brd}`, zIndex: 1001, display: 'flex', flexDirection: 'column' }}>
@@ -1647,392 +2571,15 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 )
               })()}
               {/* Tabs */}
-              <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
-                {(['tasks', 'freelancers', 'budget'] as const).map(tab => {
-                  const labels = { tasks: '📋 Tarefas', freelancers: `👷 Freelancers (${prodFr.length})`, budget: '💰 Budget' }
-                  return (
-                    <button key={tab} onClick={() => setProdTab(tab)} style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${prodTab === tab ? '#f59e0b' : C.brd}`, background: prodTab === tab ? '#f59e0b22' : 'transparent', color: prodTab === tab ? '#f59e0b' : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      {labels[tab]}
-                    </button>
-                  )
-                })}
-              </div>
+              {renderProdTabs()}
             </div>
 
             {/* Content */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-
-              {/* ── TAB: TAREFAS ── */}
-              {prodTab === 'tasks' && (() => {
-                const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
-                prodTasks.forEach(t => {
-                  if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }
-                  areas[t.area].tasks.push(t)
-                })
-                return (
-                  <div>
-                    {/* Reservas do dia */}
-                    {prodRes.length > 0 && (
-                      <div style={{ marginBottom: 18 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span>🪑 Reservas do dia ({prodRes.length})</span>
-                          <span style={{ color: C.mut, fontWeight: 400 }}>{prodRes.filter(r => r.status === 'arrived').length} chegaram</span>
-                        </div>
-                        {prodRes.map(r => (
-                          <div key={r.id} style={{ background: r.status === 'arrived' ? '#10b98110' : '#ffffff06', border: `1px solid ${r.status === 'arrived' ? '#10b98133' : C.brd}`, borderRadius: 10, padding: '8px 12px', marginBottom: 6 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div>
-                                <span style={{ fontWeight: 700, fontSize: 13, color: C.txt }}>{r.name}</span>
-                                {r.location && <span style={{ color: C.mut, fontSize: 12 }}> · 📍 {r.location}</span>}
-                                {r.people_count && <span style={{ color: C.mut, fontSize: 12 }}> · 👥 {r.people_count}px</span>}
-                              </div>
-                              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: r.status === 'arrived' ? '#10b98122' : '#f59e0b22', color: r.status === 'arrived' ? '#10b981' : '#f59e0b', fontWeight: 700 }}>
-                                {r.status === 'arrived' ? '✅ Chegou' : '⏳ Aguardando'}
-                              </span>
-                            </div>
-                            {(r.reservation_items ?? []).length > 0 && (
-                              <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.brd}22` }}>
-                                {(r.reservation_items ?? []).map((item, i) => (
-                                  <span key={i} style={{ display: 'inline-block', background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa33', borderRadius: 6, padding: '1px 8px', fontSize: 11, marginRight: 4, marginBottom: 2 }}>
-                                    {item.quantity > 1 ? `${item.quantity}× ` : ''}{item.name}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Areas with tasks */}
-                    {Object.entries(areas).map(([area, { icon, tasks }]) => {
-                      const done = tasks.filter(t => t.status === 'done').length
-                      const isAdding = taskFormArea === `${area}|||${icon}`
-                      return (
-                        <div key={area} style={{ marginBottom: 18 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${C.brd}` }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <span style={{ fontSize: 16 }}>{icon}</span>
-                              <span style={{ color: C.sub, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{area}</span>
-                              <span style={{ color: C.brd, fontSize: 11 }}>({done}/{tasks.length})</span>
-                            </div>
-                            <button onClick={() => { setTaskFormArea(`${area}|||${icon}`); setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' }) }}
-                              style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Tarefa</button>
-                          </div>
-                          {tasks.sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0)).map(task => (
-                            <div key={task.id} style={{ background: task.status === 'done' ? '#10b98108' : '#ffffff06', border: `1px solid ${task.status === 'done' ? '#10b98122' : C.brd}`, borderRadius: 10, padding: '8px 10px', marginBottom: 5 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <button onClick={() => toggleProdTask(task)} style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${task.status === 'done' ? '#10b981' : C.brd}`, background: task.status === 'done' ? '#10b981' : 'transparent', color: '#fff', fontSize: 12, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  {task.status === 'done' ? '✓' : ''}
-                                </button>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: task.status === 'done' ? C.mut : C.txt, textDecoration: task.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.title}</div>
-                                  <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
-                                    {task.deadline && <span style={{ color: C.mut, fontSize: 11 }}>⏰ {new Date(task.deadline).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
-                                    {task.assignee_name && <span style={{ color: C.mut, fontSize: 11 }}>👤 {task.assignee_name}</span>}
-                                    {task.estimated_cost_cents && <span style={{ color: '#f59e0b', fontSize: 11 }}>R$ {(task.estimated_cost_cents / 100).toFixed(2)}</span>}
-                                    {task.actual_cost_cents && <span style={{ color: '#10b981', fontSize: 11, fontWeight: 700 }}>✅ R$ {(task.actual_cost_cents / 100).toFixed(2)}</span>}
-                                  </div>
-                                </div>
-                                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                                  {task.assignee_phone && (
-                                    <button onClick={() => sendTaskWA(task)} title="Enviar por WhatsApp" style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 6, width: 28, height: 28, color: '#25d366', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📲</button>
-                                  )}
-                                  <button onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, width: 28, height: 28, color: C.mut, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>
-                                  <button onClick={() => deleteProdTask(task.id)} style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 6, width: 28, height: 28, color: C.red, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🗑</button>
-                                </div>
-                              </div>
-                              {expandedTask === task.id && (
-                                <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.brd}22`, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                  {task.description && <div style={{ fontSize: 12, color: C.mut }}>{task.description}</div>}
-                                  {task.status === 'done' && (
-                                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                      <span style={{ fontSize: 11, color: C.mut }}>Custo real:</span>
-                                      {actualCostEdit?.id === task.id
-                                        ? <>
-                                            <input value={actualCostEdit.val} onChange={e => setActualCostEdit({ id: task.id, val: e.target.value })} placeholder="R$" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.txt, fontSize: 12, width: 80, fontFamily: 'inherit' }} autoFocus />
-                                            <button onClick={() => saveProdActualCost(task.id, actualCostEdit.val)} style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 8px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>✓</button>
-                                          </>
-                                        : <button onClick={() => setActualCostEdit({ id: task.id, val: task.actual_cost_cents ? String(task.actual_cost_cents / 100) : '' })} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
-                                            {task.actual_cost_cents ? `R$ ${(task.actual_cost_cents / 100).toFixed(2)}` : '+ Informar'}
-                                          </button>
-                                      }
-                                    </div>
-                                  )}
-                                  <div style={{ fontSize: 11, color: C.mut }}>
-                                    🔗 Link: <span style={{ color: '#a78bfa', cursor: 'pointer' }} onClick={() => navigator.clipboard.writeText(`https://nightpass-app.vercel.app/tarefa.html?t=${task.token}`)}>Copiar</span>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                          {isAdding && (
-                            <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '10px 12px', marginBottom: 5 }}>
-                              <input value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Título da tarefa *" autoFocus onKeyDown={e => e.key === 'Enter' && addProdTask(area, icon)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 6 }} />
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
-                                <input type="datetime-local" value={taskForm.deadline} onChange={e => setTaskForm(p => ({ ...p, deadline: e.target.value }))} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
-                                <input value={taskForm.estimated_cost_cents} onChange={e => setTaskForm(p => ({ ...p, estimated_cost_cents: e.target.value }))} placeholder="Valor estimado (R$)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
-                                <input value={taskForm.assignee_name} onChange={e => setTaskForm(p => ({ ...p, assignee_name: e.target.value }))} placeholder="Responsável (nome)" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
-                                <input value={taskForm.assignee_phone} onChange={e => setTaskForm(p => ({ ...p, assignee_phone: e.target.value }))} placeholder="Celular" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
-                              </div>
-                              <input value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição / obs (opcional)" style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }} />
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                <button onClick={() => addProdTask(area, icon)} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Salvar</button>
-                                <button onClick={() => setTaskFormArea(null)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-
-                    {/* Add new area */}
-                    {addingArea
-                      ? (
-                        <div style={{ background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10, padding: '12px 14px', marginTop: 8 }}>
-                          <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700, marginBottom: 8 }}>Nova Área</div>
-                          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                            <input value={newAreaIcon} onChange={e => setNewAreaIcon(e.target.value)} placeholder="Emoji" style={{ width: 60, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 18, fontFamily: 'inherit', textAlign: 'center' }} />
-                            <input value={newAreaName} onChange={e => setNewAreaName(e.target.value)} placeholder="Nome da área (ex: Decoração)" autoFocus onKeyDown={e => e.key === 'Enter' && addProdArea()} style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }} />
-                          </div>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button onClick={addProdArea} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Criar Área</button>
-                            <button onClick={() => setAddingArea(false)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
-                          </div>
-                        </div>
-                      )
-                      : (
-                        <button onClick={() => setAddingArea(true)} style={{ width: '100%', background: '#ffffff06', border: `1px dashed ${C.brd}`, borderRadius: 10, padding: '10px', color: C.mut, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: Object.keys(areas).length > 0 ? 0 : 8 }}>
-                          ➕ Nova Área
-                        </button>
-                      )
-                    }
-                  </div>
-                )
-              })()}
-
-              {/* ── TAB: FREELANCERS ── */}
-              {prodTab === 'freelancers' && (
-                <div>
-                  {prodFr.length === 0
-                    ? <div style={{ color: C.mut, textAlign: 'center', padding: '40px 0', fontSize: 13 }}>Nenhum freelancer escalado para este evento.</div>
-                    : prodFr.map(fr => {
-                      const frData = (fr as any).freelancers
-                      const dailyRate = frData?.daily_rate_cents ?? 0
-                      const effectiveFee = (fr as any).custom_fee_cents ?? dailyRate
-                      return (
-                        <div key={fr.id} style={{ background: '#ffffff06', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontWeight: 700, fontSize: 13, color: C.txt }}>{frData?.full_name ?? '—'}</div>
-                              <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>
-                                {Object.entries(WORK_LABELS).filter(([k]) => (frData?.work_types ?? []).includes(k)).map(([, v]) => v).join(' · ')}
-                              </div>
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                              {frFeeEdit?.id === fr.id
-                                ? <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                                    <input value={frFeeEdit.val} onChange={e => setFrFeeEdit({ id: fr.id, val: e.target.value })} placeholder="R$" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.txt, fontSize: 12, width: 80, fontFamily: 'inherit' }} autoFocus />
-                                    <button onClick={() => saveFrFee(fr.id, frFeeEdit.val)} style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 8px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>✓</button>
-                                  </div>
-                                : <div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>R$ {(effectiveFee / 100).toFixed(2)}</div>
-                                    {(fr as any).custom_fee_cents && (fr as any).custom_fee_cents !== dailyRate && <div style={{ fontSize: 10, color: C.mut }}>Diária: R$ {(dailyRate / 100).toFixed(2)}</div>}
-                                    <button onClick={() => setFrFeeEdit({ id: fr.id, val: String(effectiveFee / 100) })} style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>ajustar</button>
-                                  </div>
-                              }
-                            </div>
-                            <button onClick={() => convocateFrWA(fr)} style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 8, padding: '5px 10px', color: '#25d366', fontSize: 13, cursor: 'pointer' }} title="Convocar via WhatsApp">📲</button>
-                          </div>
-                        </div>
-                      )
-                    })
-                  }
-                  <div style={{ marginTop: 12, padding: '10px 0', borderTop: `1px solid ${C.brd}`, fontSize: 12, color: C.mut }}>
-                    Gerencie a escala completa no botão <strong style={{ color: C.txt }}>👷 Freelancers</strong> do evento.
-                  </div>
-                </div>
-              )}
-
-              {/* ── TAB: BUDGET ── */}
-              {prodTab === 'budget' && (() => {
-                const totalRevenue = prodRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
-                const tasksEstimated = prodTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-                const tasksActual = prodTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-                const frTotal = prodFr.reduce((s, f) => s + ((f as any).custom_fee_cents ?? (f as any).freelancers?.daily_rate_cents ?? 0), 0)
-                const totalCostEst = tasksEstimated + frTotal
-                const totalCostReal = tasksActual + frTotal
-                const marginEst = totalRevenue - totalCostEst
-                const marginReal = totalRevenue - totalCostReal
-                const areas: Record<string, { icon: string; tasks: EventTask[] }> = {}
-                prodTasks.forEach(t => { if (!areas[t.area]) areas[t.area] = { icon: t.area_icon, tasks: [] }; areas[t.area].tasks.push(t) })
-
-                return (
-                  <div>
-                    {/* Summary cards */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-                      <div style={{ background: '#10b98110', border: '1px solid #10b98133', borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, color: '#10b981', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Receita</div>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: '#10b981' }}>R$ {(totalRevenue / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        <div style={{ fontSize: 11, color: C.mut }}>{prodRes.length} reservas</div>
-                      </div>
-                      <div style={{ background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Despesas Estimadas</div>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: '#f59e0b' }}>R$ {(totalCostEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        <div style={{ fontSize: 11, color: C.mut }}>{prodTasks.length} tarefas + {prodFr.length} freelancers</div>
-                      </div>
-                      <div style={{ background: marginEst >= 0 ? '#10b98110' : '#f8717110', border: `1px solid ${marginEst >= 0 ? '#10b98133' : '#f8717133'}`, borderRadius: 10, padding: '12px 14px' }}>
-                        <div style={{ fontSize: 10, color: marginEst >= 0 ? '#10b981' : '#f87171', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Margem Estimada</div>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: marginEst >= 0 ? '#10b981' : '#f87171' }}>R$ {(marginEst / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                      </div>
-                      {tasksActual > 0 && (
-                        <div style={{ background: marginReal >= 0 ? '#3b82f610' : '#f8717110', border: `1px solid ${marginReal >= 0 ? '#3b82f633' : '#f8717133'}`, borderRadius: 10, padding: '12px 14px' }}>
-                          <div style={{ fontSize: 10, color: marginReal >= 0 ? '#3b82f6' : '#f87171', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Margem Real</div>
-                          <div style={{ fontSize: 20, fontWeight: 900, color: marginReal >= 0 ? '#3b82f6' : '#f87171' }}>R$ {(marginReal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                          <div style={{ fontSize: 11, color: C.mut }}>Custo real: R$ {(totalCostReal / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Receita breakdown */}
-                    <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>📥 Receita — Reservas</div>
-                      {prodRes.length === 0
-                        ? <div style={{ color: C.mut, fontSize: 12 }}>Nenhuma reserva para este evento.</div>
-                        : prodRes.map(r => (
-                          <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                            <span style={{ color: C.txt }}>{r.name}{r.location ? ` · ${r.location}` : ''}</span>
-                            <span style={{ color: '#10b981', fontWeight: 600 }}>R$ {((r.amount_cents ?? 0) / 100).toFixed(2)}</span>
-                          </div>
-                        ))
-                      }
-                    </div>
-
-                    {/* Despesas breakdown */}
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>📤 Despesas</div>
-                      {/* Freelancers */}
-                      {prodFr.length > 0 && (
-                        <div style={{ marginBottom: 8 }}>
-                          <div style={{ fontSize: 11, color: C.mut, marginBottom: 4 }}>👷 Freelancers</div>
-                          {prodFr.map(fr => {
-                            const frData = (fr as any).freelancers
-                            const fee = (fr as any).custom_fee_cents ?? frData?.daily_rate_cents ?? 0
-                            return (
-                              <div key={fr.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                                <span style={{ color: C.txt }}>{frData?.full_name ?? '—'}</span>
-                                <span style={{ color: '#f59e0b' }}>R$ {(fee / 100).toFixed(2)}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                      {/* Tasks by area */}
-                      {Object.entries(areas).map(([area, { icon, tasks }]) => {
-                        const areaEst = tasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
-                        const areaReal = tasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
-                        if (areaEst === 0 && areaReal === 0) return null
-                        return (
-                          <div key={area} style={{ marginBottom: 6 }}>
-                            <div style={{ fontSize: 11, color: C.mut, marginBottom: 4 }}>{icon} {area}</div>
-                            {tasks.filter(t => t.estimated_cost_cents || t.actual_cost_cents).map(t => (
-                              <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-                                <span style={{ color: t.status === 'done' ? C.mut : C.txt }}>{t.title}</span>
-                                <div style={{ textAlign: 'right' }}>
-                                  {t.actual_cost_cents ? <span style={{ color: '#10b981', fontWeight: 700 }}>R$ {(t.actual_cost_cents / 100).toFixed(2)}</span> : <span style={{ color: '#f59e0b' }}>R$ {((t.estimated_cost_cents ?? 0) / 100).toFixed(2)}</span>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })()}
-
+              {renderProdBody()}
             </div>
           </div>
         </>
-      )}
-
-      {/* ── Checklist modal ── */}
-      {checklistEv && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 20, width: '100%', maxWidth: 620, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 16px', borderBottom: `1px solid ${C.brd}` }}>
-              <div>
-                <h2 style={{ color: C.txt, fontWeight: 900, fontSize: 18, margin: 0 }}>📋 Checklist — {checklistEv.name}</h2>
-                <div style={{ color: C.mut, fontSize: 12, marginTop: 4 }}>
-                  {checklist.filter(i => i.done).length}/{checklist.length} itens concluídos
-                  {checklist.length > 0 && (
-                    <span style={{ marginLeft: 10 }}>
-                      <span style={{ display: 'inline-block', width: 80, height: 6, background: C.brd, borderRadius: 4, verticalAlign: 'middle', overflow: 'hidden' }}>
-                        <span style={{ display: 'block', height: '100%', background: '#10b981', borderRadius: 4, width: `${Math.round(checklist.filter(i => i.done).length / checklist.length * 100)}%` }} />
-                      </span>
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => printChecklist(checklistEv)}
-                  style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid #7c3aed44`, background: '#7c3aed22', color: '#a78bfa', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  🖨️ Imprimir
-                </button>
-                <button onClick={() => { setChecklistEv(null); setChecklist([]) }}
-                  style={{ background: 'none', border: 'none', color: C.mut, fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>✕</button>
-              </div>
-            </div>
-
-            {/* Add item form */}
-            <div style={{ padding: '14px 24px', borderBottom: `1px solid ${C.brd}`, display: 'flex', gap: 8 }}>
-              <select value={clForm.category} onChange={e => setClForm(p => ({ ...p, category: e.target.value }))}
-                style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', flexShrink: 0 }}>
-                {CHECKLIST_CATS.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <input value={clForm.title} onChange={e => setClForm(p => ({ ...p, title: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && addClItem()}
-                placeholder="Adicionar item... (Enter para confirmar)"
-                style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }} />
-              <button onClick={addClItem}
-                style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: C.acc, color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                ➕
-              </button>
-            </div>
-
-            {/* Items list */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px 24px 20px' }}>
-              {checklist.length === 0
-                ? <div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>Nenhum item. Adicione itens acima.</div>
-                : (() => {
-                  const grouped: Record<string, typeof checklist> = {}
-                  checklist.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i) })
-                  return Object.entries(grouped).map(([cat, items]) => (
-                    <div key={cat} style={{ marginBottom: 18 }}>
-                      <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8, paddingBottom: 4, borderBottom: `1px solid ${C.brd}` }}>
-                        {cat} <span style={{ color: C.brd, fontWeight: 400 }}>({items.filter(i => i.done).length}/{items.length})</span>
-                      </div>
-                      {items.map(item => (
-                        <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                          <button onClick={() => toggleClItem(item.id, !item.done)}
-                            style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${item.done ? '#10b981' : C.brd}`, background: item.done ? '#10b981' : 'transparent', color: '#fff', fontSize: 13, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {item.done ? '✓' : ''}
-                          </button>
-                          <span style={{ flex: 1, color: item.done ? C.mut : C.txt, fontSize: 14, textDecoration: item.done ? 'line-through' : 'none' }}>
-                            {item.title}
-                          </span>
-                          <button onClick={() => deleteClItem(item.id)}
-                            style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer', padding: '2px 6px', opacity: 0.5 }}>✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  ))
-                })()
-              }
-            </div>
-          </div>
-        </div>
       )}
 
       <FAB onClick={openNew} icon="➕" title="Novo evento" />
