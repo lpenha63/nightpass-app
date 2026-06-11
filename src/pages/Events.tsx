@@ -121,6 +121,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [evFreelancers, setEvFreelancers] = useState<EventFreelancer[]>([])
   const [frModal, setFrModal] = useState<EventWithCounts | null>(null)
 
+  // ── Montagem: envia todas as reservas do dia a um montador ──
+  const [montagemEv, setMontagemEv] = useState<EventWithCounts | null>(null)
+  const [montagemFr, setMontagemFr] = useState('')
+  const [montagemMsg, setMontagemMsg] = useState('')
+
   // Budget modal
   const [budgetEv, setBudgetEv] = useState<EventWithCounts | null>(null)
   const [budgetFreelancers, setBudgetFreelancers] = useState<EventFreelancer[]>([])
@@ -520,6 +525,38 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     supabase.from('event_freelancers').select('*,freelancers(full_name,work_types,daily_rate_cents,phone)')
       .eq('event_id', ev.id)
       .then(r => setEvFreelancers((r.data ?? []) as EventFreelancer[]))
+  }
+
+  // Monta a tarefa de montagem consolidando TODAS as reservas do dia do evento
+  async function openMontagem(ev: EventWithCounts) {
+    setMontagemEv(ev); setMontagemFr('')
+    const { data } = await supabase.from('reservations')
+      .select('name, location, people_count, expected_arrival, observations, reservation_items(name, quantity)')
+      .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled')
+      .order('location')
+    const res = (data ?? []) as Array<{ name: string; location?: string; people_count?: number; expected_arrival?: string; observations?: string; reservation_items?: Array<{ name: string; quantity: number }> }>
+    const totalPeople = res.reduce((s, r) => s + (r.people_count ?? 0), 0)
+    const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    const lines = res.map(r => {
+      const items = (r.reservation_items ?? []).map(i => `${i.quantity > 1 ? i.quantity + '× ' : ''}${i.name}`).join(', ')
+      return `• *${r.location || r.name}*${r.people_count ? ` — ${r.people_count}p` : ''}${r.name && r.location ? ` (${r.name})` : ''}${items ? `\n   ↳ ${items}` : ''}`
+    })
+    setMontagemMsg([
+      `📐 *Montagem — ${ev.name}*`,
+      `📅 ${dateStr}`,
+      `🪑 ${res.length} reserva(s) · 👥 ${totalPeople} pessoas`,
+      '',
+      lines.length ? lines.join('\n') : '(nenhuma reserva cadastrada para o dia)',
+      '',
+      'Favor montar conforme acima e confirmar. 🙌',
+    ].join('\n'))
+  }
+
+  function sendMontagem() {
+    const fr = allFreelancers.find(f => f.id === montagemFr)
+    const ph = (fr?.phone ?? '').replace(/\D/g, '')
+    window.open(`https://wa.me/${ph ? '55' + ph : ''}?text=${encodeURIComponent(montagemMsg)}`, '_blank')
+    setMontagemEv(null)
   }
 
   function artistsBreakdown(ev: EventWithCounts) {
@@ -1779,6 +1816,28 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         })()}
       </Modal>
 
+      {/* Montagem modal — todas as reservas do dia para um montador */}
+      <Modal open={!!montagemEv} title={`📐 Montagem — ${montagemEv?.name ?? ''}`} onClose={() => setMontagemEv(null)}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Montador (equipe / freelancer)</label>
+            <select value={montagemFr} onChange={e => setMontagemFr(e.target.value)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }}>
+              <option value="">— Selecionar montador —</option>
+              {allFreelancers.map(f => <option key={f.id} value={f.id}>{f.full_name}{f.phone ? ` · ${f.phone}` : ' · sem telefone'}</option>)}
+            </select>
+            {allFreelancers.length === 0 && <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>Nenhum freelancer cadastrado. Cadastre na aba Equipe.</div>}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Tarefa de montagem (todas as reservas do dia)</label>
+            <textarea value={montagemMsg} onChange={e => setMontagemMsg(e.target.value)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box', minHeight: 220, resize: 'vertical' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Btn onClick={sendMontagem} disabled={!montagemFr} style={{ flex: 1, background: '#25d36622', color: '#25d366', border: '1px solid #25d36644' }}>📲 Enviar pelo WhatsApp</Btn>
+            <Btn onClick={() => setMontagemEv(null)} variant="ghost">Cancelar</Btn>
+          </div>
+        </div>
+      </Modal>
+
       {/* Reservations modal */}
       <Modal open={!!resEv} title={`🪑 Reservas — ${resEv?.name ?? ''}`} onClose={() => { setResEv(null); setResList([]) }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -2522,6 +2581,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <Btn onClick={() => openEdit(ev)} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Editar</Btn>
                   <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={cbtn('#3b82f6')}>👥 Lista</Btn>
                   <Btn onClick={() => openResView(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
+                  <Btn onClick={() => openMontagem(ev)} small variant="secondary" style={cbtn('#f59e0b')}>📐 Montagem</Btn>
                   <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={cbtn('#22d3ee')}>👷 Equipe</Btn>
                   <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎟️ Ingressos</Btn>
                   <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>

@@ -83,12 +83,6 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   const [newGuest, setNewGuest] = useState({ name: '', phone: '', birth_date: '' })
   const [savingGuest, setSavingGuest] = useState(false)
 
-  // ── Tarefa de montagem (executor por reserva) ──
-  const [frList, setFrList] = useState<Array<{ id: string; full_name: string; phone?: string }>>([])
-  const [montagemRes, setMontagemRes] = useState<Reservation | null>(null)
-  const [montagemFr, setMontagemFr] = useState('')
-  const [montagemMsg, setMontagemMsg] = useState('')
-
   // ── Espaços da casa ──
   interface HouseSpace { id: string; name: string; capacity?: number; price_cents: number; active: boolean; sort_order: number }
   const [spaces, setSpaces] = useState<HouseSpace[]>([])
@@ -240,33 +234,6 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     setForm(p => ({ ...p, reservation_date: date, location: '' }))
     loadOccupied(date)
     pullEventsForDate(date)
-  }
-
-  useEffect(() => {
-    supabase.from('freelancers').select('id,full_name,phone').eq('house_id', house.id).eq('status', 'ativo').order('full_name')
-      .then(r => setFrList((r.data ?? []) as Array<{ id: string; full_name: string; phone?: string }>))
-  }, [house.id])
-
-  function openMontagem(r: Reservation) {
-    setMontagemRes(r); setMontagemFr('')
-    const items = (r.reservation_items ?? []).map(i => `• ${i.quantity > 1 ? i.quantity + '× ' : ''}${i.name}`).join('\n')
-    const dateStr = r.reservation_date ? new Date(r.reservation_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }) : ''
-    setMontagemMsg([
-      `📐 *Tarefa de Montagem* — ${r.name}`,
-      dateStr ? `📅 ${dateStr}` : '',
-      r.location ? `📍 Local: ${r.location}` : '',
-      r.people_count ? `👥 ${r.people_count} pessoas` : '',
-      items ? `\n📦 Itens / estrutura:\n${items}` : '',
-      r.observations ? `\n📝 ${r.observations}` : '',
-      '\nPor favor, confirme a montagem. 🙌',
-    ].filter(Boolean).join('\n'))
-  }
-
-  function sendMontagem() {
-    const fr = frList.find(f => f.id === montagemFr)
-    const ph = (fr?.phone ?? '').replace(/\D/g, '')
-    window.open(`https://wa.me/${ph ? '55' + ph : ''}?text=${encodeURIComponent(montagemMsg)}`, '_blank')
-    setMontagemRes(null)
   }
 
   useEffect(() => { loadTypes() }, [house.id])
@@ -946,30 +913,6 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
         </div>
       </Modal>
 
-      {/* ── Modal Tarefa de Montagem ── */}
-      <Modal open={!!montagemRes} title={`📐 Montagem — ${montagemRes?.name ?? ''}`} onClose={() => setMontagemRes(null)}>
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div>
-            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Executor (equipe / freelancer)</label>
-            <select value={montagemFr} onChange={e => setMontagemFr(e.target.value)} style={SL}>
-              <option value="">— Selecionar executor —</option>
-              {frList.map(f => <option key={f.id} value={f.id}>{f.full_name}{f.phone ? ` · ${ftel(f.phone)}` : ' · sem telefone'}</option>)}
-            </select>
-            {frList.length === 0 && <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>Nenhum freelancer cadastrado. Cadastre na aba Equipe.</div>}
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Tarefa de montagem</label>
-            <textarea value={montagemMsg} onChange={e => setMontagemMsg(e.target.value)} style={{ ...SL, minHeight: 170, resize: 'vertical' }} />
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <Btn onClick={sendMontagem} disabled={!montagemFr} style={{ flex: 1, background: '#25d36622', color: '#25d366', border: '1px solid #25d36644' }}>
-              <i className="bi bi-whatsapp" /> Enviar pelo WhatsApp
-            </Btn>
-            <Btn onClick={() => setMontagemRes(null)} variant="ghost">Cancelar</Btn>
-          </div>
-        </div>
-      </Modal>
-
       {/* ── Header ── */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
@@ -1182,9 +1125,6 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       )}
                       <Btn onClick={() => openGuestPanel(r)} small style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44' }}>
                         <i className="bi bi-people-fill" /> Lista
-                      </Btn>
-                      <Btn onClick={() => openMontagem(r)} small style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44' }}>
-                        <i className="bi bi-tools" /> Montagem
                       </Btn>
                       <Btn onClick={() => editRes(r)} small variant="ghost">
                         <i className="bi bi-pencil-fill" /> Editar
