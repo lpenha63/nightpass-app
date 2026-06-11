@@ -28,9 +28,11 @@ interface EventWithCounts extends Event {
 }
 
 interface Guest {
+  id?: string
   full_name: string
   phone?: string
   gender?: string
+  birth_date?: string
   list_type?: string
   checked_in?: boolean
   promoter_id?: string
@@ -57,7 +59,7 @@ interface EventTask {
 }
 interface ProdReservation {
   id: string; name: string; location?: string; people_count?: number
-  amount_cents?: number; status: string
+  amount_cents?: number; status: string; observations?: string
   reservation_items?: Array<{ name: string; quantity: number; unit_cost_cents: number }>
 }
 
@@ -105,7 +107,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [guestListToken, setGuestListToken] = useState<string | null>(null)
   const [guestListId, setGuestListId] = useState<string | null>(null)
   const [guestListPromoId, setGuestListPromoId] = useState<string | null>(null)
-  const [guestAddForm, setGuestAddForm] = useState({ name: '', phone: '', gender: '' })
+  const [guestAddForm, setGuestAddForm] = useState({ name: '', phone: '', gender: '', birth_date: '' })
   const [guestAdding, setGuestAdding] = useState(false)
   const [listaTab, setListaTab] = useState<'lista' | 'convidar'>('lista')
   const [listaClients, setListaClients] = useState<FlyerClient[]>([])
@@ -784,13 +786,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setGuestListToken(null)
     setGuestListId(null)
     setGuestListPromoId(null)
-    setGuestAddForm({ name: '', phone: '', gender: '' })
+    setGuestAddForm({ name: '', phone: '', gender: '', birth_date: '' })
     setListaTab('lista')
     setListaSearch('')
     setListaClients([])
-    supabase.from('promoter_list_guests').select('full_name,phone,gender,list_type,checked_in,promoter_id')
-      .eq('event_id', ev.id).order('full_name')
-      .then(r => setGuests((r.data ?? []) as Guest[]))
+    reloadGuests(ev.id)
     const [rec, cl] = await Promise.all([
       ensureHouseListRecord(ev),
       supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).order('full_name'),
@@ -803,26 +803,46 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setListaClients((cl.data ?? []) as FlyerClient[])
   }
 
+  function reloadGuests(eventId: string) {
+    supabase.from('promoter_list_guests').select('id,full_name,phone,gender,birth_date,list_type,checked_in,promoter_id')
+      .eq('event_id', eventId).order('full_name')
+      .then(r => setGuests((r.data ?? []) as Guest[]))
+  }
+
   async function addGuestManually() {
-    if (!guestAddForm.name.trim() || !guestEv || !guestListId || !guestListPromoId) return
+    if (!guestAddForm.name.trim() || !guestEv) return
     setGuestAdding(true)
+    // Garante que a lista da casa exista (corrige caso o registro ainda não tenha carregado)
+    let listId = guestListId, promoId = guestListPromoId
+    if (!listId || !promoId) {
+      const rec = await ensureHouseListRecord(guestEv)
+      if (rec) { listId = rec.listId; promoId = rec.promoterId; setGuestListId(rec.listId); setGuestListPromoId(rec.promoterId); setGuestListToken(rec.token) }
+    }
+    if (!listId || !promoId) { setGuestAdding(false); st2('Erro: lista da casa não pôde ser criada', 'error'); return }
     const { error } = await supabase.from('promoter_list_guests').insert({
-      list_id: guestListId,
+      list_id: listId,
       house_id: house.id,
       event_id: guestEv.id,
-      promoter_id: guestListPromoId,
+      promoter_id: promoId,
       full_name: guestAddForm.name.trim(),
       phone: guestAddForm.phone.replace(/\D/g, '') || null,
       gender: guestAddForm.gender || null,
+      birth_date: guestAddForm.birth_date || null,
+      list_type: 'normal',
       promoter_confirmed: true,
     })
     setGuestAdding(false)
-    if (error) { st2('Erro ao adicionar convidado', 'error'); return }
-    setGuestAddForm({ name: '', phone: '', gender: '' })
-    supabase.from('promoter_list_guests').select('full_name,phone,gender,list_type,checked_in,promoter_id')
-      .eq('event_id', guestEv.id).order('full_name')
-      .then(r => setGuests((r.data ?? []) as Guest[]))
+    if (error) { st2('Erro ao adicionar: ' + error.message, 'error'); return }
+    setGuestAddForm({ name: '', phone: '', gender: '', birth_date: '' })
+    reloadGuests(guestEv.id)
     st2('Convidado adicionado!', 'success')
+  }
+
+  async function toggleGuestVip(g: Guest) {
+    if (!g.id || !guestEv) return
+    const next = g.list_type === 'vip' ? 'normal' : 'vip'
+    await supabase.from('promoter_list_guests').update({ list_type: next }).eq('id', g.id)
+    reloadGuests(guestEv.id)
   }
 
   function doExport() {
@@ -1118,7 +1138,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   if (ldg) return <div style={{ padding: 60, textAlign: 'center', color: C.mut }}>Carregando...</div>
 
-  const cbtn = (c: string) => ({ background: c + '1f', color: c, border: `1px solid ${c}40`, justifyContent: 'center' as const, fontWeight: 700 })
+  const cbtn = (c: string) => ({ background: c, color: '#fff', border: 'none', justifyContent: 'center' as const, fontWeight: 700 })
 
   const AREA_GERAL = '__geral__'
   const renderExpenses = (all: EventExpense[], ev: EventWithCounts) => {
@@ -1260,11 +1280,17 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                             </div>
                             {(r.reservation_items ?? []).length > 0 && (
                               <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.brd}22` }}>
+                                <span style={{ fontSize: 10, color: C.mut, fontWeight: 700, marginRight: 4 }}>OPCIONAIS:</span>
                                 {(r.reservation_items ?? []).map((item, i) => (
                                   <span key={i} style={{ display: 'inline-block', background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa33', borderRadius: 6, padding: '1px 8px', fontSize: 11, marginRight: 4, marginBottom: 2 }}>
                                     {item.quantity > 1 ? `${item.quantity}× ` : ''}{item.name}
                                   </span>
                                 ))}
+                              </div>
+                            )}
+                            {r.observations && (
+                              <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.brd}22`, fontSize: 12, color: C.gold, display: 'flex', gap: 5, alignItems: 'flex-start' }}>
+                                <span style={{ flexShrink: 0 }}>📝</span><span style={{ fontStyle: 'italic', lineHeight: 1.4 }}>{r.observations}</span>
                               </div>
                             )}
                           </div>
@@ -1853,6 +1879,20 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         {/* ── ABA LISTA ── */}
         {listaTab === 'lista' && (
           <>
+            {/* Valor da lista (cadastrado no evento) */}
+            {guestEv && ((guestEv.price_male_list_cents ?? 0) > 0 || (guestEv.price_female_list_cents ?? 0) > 0) && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 130, background: '#3b82f610', border: '1px solid #3b82f633', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>♂</span>
+                  <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA MASC</div><div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>{fmtCurrency(guestEv.price_male_list_cents ?? 0)}</div></div>
+                </div>
+                <div style={{ flex: 1, minWidth: 130, background: '#ec489910', border: '1px solid #ec489933', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>♀</span>
+                  <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA FEM</div><div style={{ fontSize: 15, fontWeight: 800, color: '#f472b6' }}>{fmtCurrency(guestEv.price_female_list_cents ?? 0)}</div></div>
+                </div>
+              </div>
+            )}
+
             {/* Adicionar manualmente */}
             <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
               <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 8, letterSpacing: '0.06em' }}>➕ ADICIONAR MANUALMENTE</div>
@@ -1868,6 +1908,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <option value="M">♂ Masc</option>
                   <option value="F">♀ Fem</option>
                 </select>
+                <input type="date" placeholder="Nascimento" value={guestAddForm.birth_date} onChange={e => setGuestAddForm(p => ({ ...p, birth_date: e.target.value }))}
+                  title="Data de nascimento (cadastra o cliente automaticamente no check-in)"
+                  style={{ flex: '0 0 140px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: guestAddForm.birth_date ? C.txt : C.mut, fontSize: 13, fontFamily: 'inherit' }} />
                 <Btn onClick={addGuestManually} disabled={!guestAddForm.name.trim() || guestAdding} small>
                   {guestAdding ? '...' : 'Adicionar'}
                 </Btn>
@@ -1895,9 +1938,18 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
                         <span style={{ fontSize: 16, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: g.checked_in ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.full_name}</div>
-                          {g.phone && <div style={{ color: C.mut, fontSize: 11 }}>{g.phone}</div>}
+                          <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: g.checked_in ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {g.full_name}{g.list_type === 'vip' && <span style={{ color: C.gold, marginLeft: 6, fontSize: 11, fontWeight: 800 }}>⭐ VIP</span>}
+                          </div>
+                          <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8 }}>
+                            {g.phone && <span>{g.phone}</span>}
+                            {g.birth_date && <span style={{ color: C.acc }}>🎂 {new Date(g.birth_date + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
+                          </div>
                         </div>
+                        <button onClick={() => toggleGuestVip(g)} title="Entrada VIP (gratuita)"
+                          style={{ flexShrink: 0, background: g.list_type === 'vip' ? C.gold + '22' : 'transparent', border: `1px solid ${g.list_type === 'vip' ? C.gold : C.brd}`, borderRadius: 8, padding: '4px 8px', color: g.list_type === 'vip' ? C.gold : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                          {g.list_type === 'vip' ? '⭐ VIP' : 'VIP'}
+                        </button>
                         {g.checked_in && <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✓ Entrou</span>}
                       </div>
                     ))
@@ -2744,6 +2796,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   </div>
                 </div>
                 {ev.genre && <div style={{ color: C.acc, fontSize: 11, fontWeight: 600, marginBottom: 6 }}>🎵 {ev.genre}</div>}
+                {ev.promotions && <div style={{ color: C.gold, fontSize: 12, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'flex-start', gap: 5 }}><span>🎉</span><span>{ev.promotions}</span></div>}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, color: C.mut, marginBottom: 10 }}>
                   {ev.price_male_cents ? <span>♂ {fmtCurrency(ev.price_male_cents)}</span> : null}
                   {ev.price_female_cents ? <span>♀ {fmtCurrency(ev.price_female_cents)}</span> : null}

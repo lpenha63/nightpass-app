@@ -39,7 +39,7 @@ interface Reservation {
   reservation_items?: ResItem[]
 }
 
-const RDEF = (date: string) => ({ name: '', phone: '', people_count: '', location: '', amount_cents: '', expected_arrival: '', event_id: '', reservation_type: '', flyer_url: '', invite_message: '', reservation_date: date, payment_status: 'unpaid', deposit_cents: '', observations: '', list_type: 'normal', list_custom_value_cents: '', list_male_value_cents: '', list_female_value_cents: '' })
+const RDEF = (date: string) => ({ name: '', phone: '', people_count: '', location: '', amount_cents: '', expected_arrival: '', event_id: '', reservation_type: '', flyer_url: '', invite_message: '', reservation_date: date, payment_status: 'free', deposit_cents: '', observations: '', list_type: 'normal', list_custom_value_cents: '', list_male_value_cents: '', list_female_value_cents: '' })
 const EMPTY_TYPE = { name: '', icon: '🎉', color: '#3b82f6', sort_order: '0' }
 const ICON_OPTS = ['🎉','🎂','🍖','🏢','👶','💍','🎓','🎊','🥂','🍽️','🎭','🎪','🎡','🏆','🌟','🎵','🏖️','🏡','🌺','🎈']
 const STATUS_COLOR: Record<string, string> = { pending: '#f59e0b', confirmed: '#10b981', arrived: '#3b82f6', cancelled: '#f87171' }
@@ -71,7 +71,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   const [eventsForDate, setEventsForDate] = useState<Array<{ id: string; name: string }>>([])
   const [toast, setToast] = useState<ToastState | null>(null)
   const [form, setForm] = useState(() => RDEF(selDate))
-  const [formItems, setFormItems] = useState<Array<{ name: string; quantity: string; unit_cost_cents: string }>>([])
+  const [formItems, setFormItems] = useState<Array<{ name: string; quantity: string; unit_cost_cents: string; mode: 'unit' | 'total' }>>([])
   const [viewPeriod, setViewPeriod] = useState<'day' | 'week' | 'month'>('week')
   const [eventFilter, setEventFilter] = useState<{ id: string; name: string } | null>(null)
   const [periodCounts, setPeriodCounts] = useState<{ day: { res: number; people: number }; week: { res: number; people: number }; month: { res: number; people: number } }>({ day: { res: 0, people: 0 }, week: { res: 0, people: 0 }, month: { res: 0, people: 0 } })
@@ -283,15 +283,19 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   }
 
   function addFormItem() {
-    setFormItems(p => [...p, { name: '', quantity: '', unit_cost_cents: '' }])
+    setFormItems(p => [...p, { name: '', quantity: '', unit_cost_cents: '', mode: 'total' }])
   }
 
   function removeFormItem(i: number) {
     setFormItems(p => p.filter((_, idx) => idx !== i))
   }
 
-  function itemsTotal(items: Array<{ quantity: string; unit_cost_cents: string }>) {
-    return items.reduce((s, it) => s + (parseFloat(it.quantity) || 0) * Math.round((parseFloat(it.unit_cost_cents) || 0) * 100), 0)
+  function itemsTotal(items: Array<{ quantity: string; unit_cost_cents: string; mode?: 'unit' | 'total' }>) {
+    return items.reduce((s, it) => {
+      const val = Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
+      const qty = parseFloat(it.quantity) || 0
+      return s + (it.mode === 'total' ? val : qty * val)
+    }, 0)
   }
 
   function resItemsTotal(items: ResItem[]) {
@@ -302,7 +306,9 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     if (!form.name.trim()) { sT(setToast, 'Nome do responsável obrigatório', 'error'); return }
     if ((form.phone || '').replace(/\D/g, '').length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
     const isFree = form.payment_status === 'free'
-    const totalCents = isFree ? 0 : Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
+    const baseCents = Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
+    const optCents = itemsTotal(formItems)
+    const totalCents = isFree ? 0 : baseCents + optCents
     const depositCents = form.payment_status === 'partial'
       ? Math.round((parseFloat(String(form.deposit_cents)) || 0) * 100)
       : form.payment_status === 'paid' ? totalCents : 0
@@ -337,11 +343,15 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       if (editing) await supabase.from('reservation_items').delete().eq('reservation_id', resId)
       const validItems = formItems.filter(it => it.name.trim())
       if (validItems.length > 0) {
-        await supabase.from('reservation_items').insert(validItems.map(it => ({
-          reservation_id: resId, house_id: house.id,
-          name: it.name.trim(), quantity: parseFloat(it.quantity) || 1,
-          unit_cost_cents: Math.round((parseFloat(it.unit_cost_cents) || 0) * 100),
-        })))
+        await supabase.from('reservation_items').insert(validItems.map(it => {
+          const qty = parseFloat(it.quantity) || 1
+          const valCents = Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
+          return {
+            reservation_id: resId, house_id: house.id,
+            name: it.name.trim(), quantity: qty,
+            unit_cost_cents: it.mode === 'total' ? Math.round(valCents / qty) : valCents,
+          }
+        }))
       }
     } else if (editing && formItems.length === 0) {
       await supabase.from('reservation_items').delete().eq('reservation_id', editing.id)
@@ -372,8 +382,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
   function editRes(r: Reservation) {
     setEditing(r)
-    setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: r.amount_cents ? String(r.amount_cents / 100) : '', expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ? String(r.deposit_cents / 100) : '', observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ? String(r.list_custom_value_cents / 100) : '', list_male_value_cents: r.list_male_value_cents ? String(r.list_male_value_cents / 100) : '', list_female_value_cents: r.list_female_value_cents ? String(r.list_female_value_cents / 100) : '' })
-    setFormItems((r.reservation_items ?? []).map(it => ({ name: it.name, quantity: String(it.quantity), unit_cost_cents: String((it.unit_cost_cents ?? 0) / 100) })))
+    // amount_cents salvo = base + opcionais; ao editar, isolamos a base
+    const itemsCents = (r.reservation_items ?? []).reduce((s, it) => s + (it.quantity || 0) * (it.unit_cost_cents || 0), 0)
+    const baseCents = Math.max(0, (r.amount_cents ?? 0) - itemsCents)
+    setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: baseCents ? String(baseCents / 100) : '', expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ? String(r.deposit_cents / 100) : '', observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ? String(r.list_custom_value_cents / 100) : '', list_male_value_cents: r.list_male_value_cents ? String(r.list_male_value_cents / 100) : '', list_female_value_cents: r.list_female_value_cents ? String(r.list_female_value_cents / 100) : '' })
+    setFormItems((r.reservation_items ?? []).map(it => ({ name: it.name, quantity: String(it.quantity), unit_cost_cents: String((it.unit_cost_cents ?? 0) / 100), mode: 'unit' as const })))
     loadOccupied(r.reservation_date ?? selDate, r.id)
     supabase.from('events').select('id,name,event_date').eq('house_id', house.id).eq('event_date', r.reservation_date ?? selDate)
       .then(res => setEventsForDate(res.data ?? []))
@@ -771,12 +784,19 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             </label>
           </div>
 
-          {/* ── Pagamento — full width ── */}
-          <div style={{ gridColumn: 'span 3', background: 'rgba(59,130,246,0.05)', border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 16px' }}>
-            <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 12 }}>💳 PAGAMENTO</div>
+          {/* ── Pagamento — última linha (finaliza o total) ── */}
+          <div style={{ order: 90, gridColumn: 'span 3', background: 'rgba(59,130,246,0.05)', border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+              <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em' }}>💳 PAGAMENTO (FINALIZAR)</div>
+              {itemsTotal(formItems) > 0 && form.payment_status !== 'free' && (
+                <div style={{ fontSize: 12, color: C.gold, fontWeight: 700 }}>
+                  Total c/ opcionais: {fmtCurrency(Math.round((parseFloat(String(form.amount_cents)) || 0) * 100) + itemsTotal(formItems))}
+                </div>
+              )}
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor Total (R$)</label>
+                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor base da reserva (R$)</label>
                 <input type="number" step="0.01" min="0" style={SL} value={form.amount_cents}
                   onChange={e => setForm(p => ({ ...p, amount_cents: e.target.value }))} placeholder="Ex: 500,00" />
               </div>
@@ -794,7 +814,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                 </div>
               </div>
               {form.payment_status === 'partial' && (() => {
-                const total = parseFloat(String(form.amount_cents)) || 0
+                const total = (parseFloat(String(form.amount_cents)) || 0) + itemsTotal(formItems) / 100
                 const deposit = parseFloat(String(form.deposit_cents)) || 0
                 const remaining = total - deposit
                 return (
@@ -824,11 +844,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   </div>
                 </div>
               )}
-              {form.payment_status === 'paid' && parseFloat(String(form.amount_cents)) > 0 && (
+              {form.payment_status === 'paid' && (Math.round((parseFloat(String(form.amount_cents)) || 0) * 100) + itemsTotal(formItems)) > 0 && (
                 <div style={{ gridColumn: 'span 2' }}>
                   <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 20 }}>✅</span>
-                    <span style={{ color: '#10b981', fontWeight: 700, fontSize: 14 }}>Pagamento confirmado · {fmtCurrency(Math.round((parseFloat(String(form.amount_cents)) || 0) * 100))}</span>
+                    <span style={{ color: '#10b981', fontWeight: 700, fontSize: 14 }}>Pagamento confirmado · {fmtCurrency(Math.round((parseFloat(String(form.amount_cents)) || 0) * 100) + itemsTotal(formItems))}</span>
                   </div>
                 </div>
               )}
@@ -863,23 +883,33 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
               : (
                 <>
                   {/* Header */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 110px 32px', gap: 6, marginBottom: 6 }}>
-                    {['Item / Descrição', 'Qtd', 'Custo unit. (R$)', ''].map((h, i) => (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 96px 78px 32px', gap: 6, marginBottom: 6 }}>
+                    {['Item / Descrição', 'Qtd', 'Valor (R$)', 'Tipo', ''].map((h, i) => (
                       <div key={i} style={{ fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', paddingLeft: 4 }}>{h}</div>
                     ))}
                   </div>
-                  {formItems.map((it, i) => (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 110px 32px', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                  {formItems.map((it, i) => {
+                    const lineTotal = it.mode === 'total'
+                      ? Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
+                      : (parseFloat(it.quantity) || 0) * Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
+                    return (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 56px 96px 78px 32px', gap: 6, marginBottom: 6, alignItems: 'center' }}>
                       <input value={it.name} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x))}
-                        placeholder="Ex: Feijoada, Cerveja..." style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13 }} />
-                      <input type="number" min="0" step="0.5" value={it.quantity} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
-                        placeholder="Ex: 2" style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13, textAlign: 'center' }} />
+                        placeholder="Ex: Comida p/ 30 pessoas" style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13 }} />
+                      <input type="number" min="0" step="1" value={it.quantity} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
+                        placeholder="30" style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13, textAlign: 'center' }} />
                       <input type="number" min="0" step="0.01" value={it.unit_cost_cents} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, unit_cost_cents: e.target.value } : x))}
-                        placeholder="Ex: 50,00" style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13 }} />
+                        placeholder={it.mode === 'total' ? 'total' : 'unit.'} style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13 }} />
+                      <button type="button" onClick={() => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, mode: x.mode === 'total' ? 'unit' : 'total' } : x))}
+                        title={it.mode === 'total' ? 'Valor é o total do item' : 'Valor multiplicado pela quantidade'}
+                        style={{ height: 38, borderRadius: 8, border: `1px solid ${it.mode === 'total' ? C.gold : C.acc}66`, background: (it.mode === 'total' ? C.gold : C.acc) + '22', color: it.mode === 'total' ? C.gold : C.acc, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        {it.mode === 'total' ? 'Total' : '× un'}
+                      </button>
                       <button onClick={() => removeFormItem(i)}
-                        style={{ width: 32, height: 38, borderRadius: 8, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, fontSize: 14, cursor: 'pointer' }}>✕</button>
+                        style={{ width: 32, height: 38, borderRadius: 8, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, fontSize: 14, cursor: 'pointer' }} title={`Subtotal: ${fmtCurrency(lineTotal)}`}>✕</button>
                     </div>
-                  ))}
+                    )
+                  })}
                   {/* Totais */}
                   <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginTop: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: C.mut, marginBottom: 4 }}>
@@ -900,7 +930,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             }
           </div>
 
-          <div style={{ gridColumn: 'span 3', display: 'flex', gap: 10 }}>
+          <div style={{ order: 100, gridColumn: 'span 3', display: 'flex', gap: 10 }}>
             <Btn onClick={saveRes} style={{ flex: 1 }}>💾 Salvar</Btn>
             {editing?.token && (
               <Btn onClick={() => sendListLink(editing)} variant="secondary"

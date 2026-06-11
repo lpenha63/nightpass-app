@@ -188,7 +188,7 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
         {isAdmin && (
           <Btn onClick={() => { setShowInvite(true); setInvStatus('idle') }}>
             <i className="bi bi-person-plus-fill" style={{ marginRight: 6 }} />
-            Convidar
+            Adicionar
           </Btn>
         )}
       </div>
@@ -389,8 +389,20 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
       </Modal>
 
       {/* ─── Invite modal ─── */}
-      <Modal open={showInvite} title="Convidar Colaborador" onClose={() => { setShowInvite(false); setInvStatus('idle') }}>
+      <Modal open={showInvite} title="Adicionar Colaborador" onClose={() => { setShowInvite(false); setInvStatus('idle') }}>
         <div style={{ display: 'grid', gap: 16 }}>
+
+          {/* Buscar integrante da equipe (primeiro passo) */}
+          <div>
+            <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>
+              👷 BUSCAR INTEGRANTE DA EQUIPE
+            </label>
+            <select value={invFreelancer} onChange={e => setInvFreelancer(e.target.value)} style={SEL}>
+              <option value="">— Selecione o integrante —</option>
+              {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+            </select>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 4 }}>Somente quem está cadastrado na aba Equipe pode receber acesso.</div>
+          </div>
 
           {/* Email */}
           <div>
@@ -428,15 +440,6 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
           {/* Staff + Role (show after email checked) */}
           {(invStatus === 'found' || invStatus === 'notfound') && (
             <>
-              <div>
-                <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>
-                  COLABORADOR DA EQUIPE
-                </label>
-                <select value={invFreelancer} onChange={e => setInvFreelancer(e.target.value)} style={SEL}>
-                  <option value="">— Não vinculado —</option>
-                  {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                </select>
-              </div>
               <div>
                 <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>
                   NÍVEL DE ACESSO

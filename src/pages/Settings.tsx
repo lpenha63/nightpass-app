@@ -92,6 +92,21 @@ export function SettingsPage({ house }: Props) {
   const [mpStatus, setMpStatus] = useState<'idle' | 'ok' | 'error'>('idle')
   const [waStatus, setWaStatus] = useState<'idle' | 'ok' | 'error'>('idle')
   const logoRef = useRef<HTMLInputElement>(null)
+  const [newPass, setNewPass] = useState('')
+  const [confirmPass, setConfirmPass] = useState('')
+  const [changingPass, setChangingPass] = useState(false)
+  const [showNewPass, setShowNewPass] = useState(false)
+
+  async function changePassword() {
+    if (newPass.length < 6) { sT(setToast, 'A senha deve ter ao menos 6 caracteres', 'error'); return }
+    if (newPass !== confirmPass) { sT(setToast, 'As senhas não conferem', 'error'); return }
+    setChangingPass(true)
+    const { error } = await supabase.auth.updateUser({ password: newPass })
+    setChangingPass(false)
+    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    setNewPass(''); setConfirmPass('')
+    sT(setToast, '✅ Senha alterada com sucesso!', 'success')
+  }
 
   useEffect(() => {
     Promise.all([
@@ -400,6 +415,31 @@ export function SettingsPage({ house }: Props) {
         <div style={{ color: C.mut, fontSize: 11, marginTop: 6 }}>
           Disponível no botão 🎟️ Ingressos de cada evento.
         </div>
+      </Section>
+
+      {/* ── TROCA DE SENHA ── */}
+      <Section title="Troca de Senha" icon="🔒">
+        <div style={{ color: C.sub, fontSize: 13, marginBottom: 14 }}>
+          Defina uma nova senha de acesso para o seu usuário.
+        </div>
+        <Field label="NOVA SENHA">
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input style={{ ...INP, flex: 1 }} type={showNewPass ? 'text' : 'password'} value={newPass}
+              onChange={e => setNewPass(e.target.value)} placeholder="Mínimo 6 caracteres" autoComplete="new-password" />
+            <button onClick={() => setShowNewPass(s => !s)} type="button"
+              style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '0 14px', color: C.mut, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+              {showNewPass ? '🙈' : '👁️'}
+            </button>
+          </div>
+        </Field>
+        <Field label="CONFIRMAR NOVA SENHA">
+          <input style={INP} type={showNewPass ? 'text' : 'password'} value={confirmPass}
+            onChange={e => setConfirmPass(e.target.value)} placeholder="Repita a senha"
+            onKeyDown={e => e.key === 'Enter' && changePassword()} autoComplete="new-password" />
+        </Field>
+        <Btn onClick={changePassword} disabled={changingPass || !newPass || !confirmPass} variant="ghost" style={{ fontSize: 13 }}>
+          {changingPass ? 'Alterando...' : '🔒 Alterar Senha'}
+        </Btn>
       </Section>
 
       <Btn onClick={saveHouse} disabled={saving} style={{ width: '100%', padding: 14, fontSize: 15 }}>
