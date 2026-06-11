@@ -182,6 +182,7 @@ export interface EventFreelancer {
   confirmed: boolean
   role?: string
   custom_fee_cents?: number | null
+  entry_time?: string | null
   created_at: string
   freelancers?: Pick<Freelancer, 'full_name' | 'work_types' | 'daily_rate_cents' | 'phone'>
 }

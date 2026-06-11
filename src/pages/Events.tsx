@@ -262,6 +262,50 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     await supabase.from('event_freelancers').update({ confirmed: !ef.confirmed }).eq('id', ef.id)
     loadEvFreelancers(frModal)
   }
+  async function saveEvFrEntryTime(id: string, val: string) {
+    await supabase.from('event_freelancers').update({ entry_time: val || null }).eq('id', id)
+    setEvFreelancers(p => p.map(f => f.id === id ? { ...f, entry_time: val || null } : f))
+  }
+
+  // Impressão da escala do dia + folha de ponto (assinatura)
+  function printEscala(ev: EventWithCounts) {
+    const roleOf = (ef: EventFreelancer) => (ef.role || ef.freelancers?.work_types?.[0] || 'outros')
+    const sorted = [...evFreelancers].sort((a, b) => {
+      const ra = wlabel(roleOf(a)), rb = wlabel(roleOf(b))
+      if (ra !== rb) return ra.localeCompare(rb)
+      return (a.entry_time || '').localeCompare(b.entry_time || '')
+    })
+    const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+    const rows = sorted.map(ef => `<tr>
+      <td>${wlabel(roleOf(ef))}</td>
+      <td><strong>${ef.freelancers?.full_name ?? '—'}</strong></td>
+      <td class="c">${ef.entry_time ? ef.entry_time.slice(0, 5) : '—'}</td>
+      <td></td><td></td><td></td>
+    </tr>`).join('')
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Escala — ${ev.name}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 28px; max-width: 900px; margin: 0 auto; color: #111; }
+      h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: #666; font-size: 13px; margin-bottom: 20px; text-transform: capitalize; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th { text-align: left; color: #555; font-size: 11px; text-transform: uppercase; padding: 8px; border-bottom: 2px solid #333; }
+      td { padding: 12px 8px; border-bottom: 1px solid #ddd; }
+      td.c, th.c { text-align: center; }
+      .sig { min-width: 150px; }
+      .footer { margin-top: 28px; font-size: 12px; color: #999; text-align: center; }
+      @media print { body { padding: 12px; } }
+    </style></head><body>
+    <h1>👷 Escala do Dia — ${ev.name}</h1>
+    <div class="sub">📅 ${dateStr} &nbsp;·&nbsp; ${sorted.length} profissionais</div>
+    <table>
+      <thead><tr><th style="width:110px">Área</th><th>Nome</th><th class="c" style="width:70px">Entrada</th><th class="sig">Assin. Entrada</th><th class="sig">Assin. Saída</th><th class="c" style="width:70px">Saída</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px">Nenhum profissional escalado</td></tr>'}</tbody>
+    </table>
+    <div class="footer">Folha de ponto — assinaturas confirmam presença · Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+    <script>window.onload = () => window.print()</script>
+    </body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
+  }
 
   async function toggleProdFrConfirmed(fr: EventFreelancer) {
     await supabase.from('event_freelancers').update({ confirmed: !fr.confirmed }).eq('id', fr.id)
@@ -1895,7 +1939,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       </Modal>
 
       {/* Freelancers modal */}
-      <Modal open={!!frModal} title={`👷 Equipe — ${frModal?.name ?? ''}`} onClose={() => { setFrModal(null); setEvFreelancers([]); setFrModalArea(null) }}>
+      <Modal open={!!frModal} title={`👷 Equipe — ${frModal?.name ?? ''}`} maxWidth={900} onClose={() => { setFrModal(null); setEvFreelancers([]); setFrModalArea(null) }}>
         {(() => {
           const roleOf = (ef: EventFreelancer) => (ef.role || ef.freelancers?.work_types?.[0] || 'outros')
           const groups: Record<string, EventFreelancer[]> = {}
@@ -1904,7 +1948,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           const needs = frModal?.staffing_needs ?? {}
           return (
             <div>
-              <div style={{ fontSize: 12, color: C.mut, marginBottom: 12 }}>Escale a equipe por área. As metas (necessário por área) vêm de <strong style={{ color: C.sub }}>Produção › Equipe</strong>.</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: C.mut }}>Escale a equipe por área e defina o <strong style={{ color: C.sub }}>horário de entrada</strong> de cada um. Metas vêm de <strong style={{ color: C.sub }}>Produção › Equipe</strong>.</div>
+                {evFreelancers.length > 0 && frModal && (
+                  <button onClick={() => printEscala(frModal)} style={{ flexShrink: 0, background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.sub, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>🖨️ Escala / Ponto</button>
+                )}
+              </div>
 
               {/* Stats */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
@@ -1947,6 +1996,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{ef.freelancers?.full_name ?? '—'}</div>
                         <div style={{ color: C.mut, fontSize: 11 }}>{(ef.freelancers?.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}</div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                        <span style={{ fontSize: 9, color: C.mut, fontWeight: 600 }}>ENTRADA</span>
+                        <input type="time" value={ef.entry_time ?? ''} onChange={e => saveEvFrEntryTime(ef.id, e.target.value)}
+                          style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '4px 6px', color: ef.entry_time ? C.txt : C.mut, fontSize: 12, fontFamily: 'inherit', width: 96 }} />
                       </div>
                       <button onClick={() => toggleEvFrConfirmed(ef)} title={ef.confirmed ? 'Confirmado' : 'Pendente'} style={{ background: ef.confirmed ? C.grn + '22' : '#ffffff08', border: `1px solid ${ef.confirmed ? C.grn + '44' : C.brd}`, borderRadius: 8, padding: '4px 8px', color: ef.confirmed ? C.grn : C.mut, fontSize: 12, cursor: 'pointer' }}>{ef.confirmed ? '✅' : '⏳'}</button>
                       <button onClick={() => removeEvFreelancer(ef.id)} title="Remover" style={{ background: 'none', border: `1px solid ${C.red}33`, borderRadius: 8, padding: '4px 8px', color: C.red, fontSize: 12, cursor: 'pointer' }}>🗑</button>
