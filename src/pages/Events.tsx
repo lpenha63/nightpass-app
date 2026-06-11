@@ -912,7 +912,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const { data: pr } = await supabase.from('promoters').select('id').eq('house_id', house.id).eq('full_name', 'Lista da Casa').limit(1).maybeSingle()
     promoterId = pr?.id
     if (!promoterId) {
-      const { data: np } = await supabase.from('promoters').insert({ house_id: house.id, full_name: 'Lista da Casa', commission_pct: 0, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 }).select('id').single()
+      const { data: np } = await supabase.from('promoters').insert({ house_id: house.id, full_name: 'Lista da Casa', phone: '', commission_pct: 0, fixed_fee_cents: 0, min_entries: 0, entry_fee_cents: 0, consumacao_cents: 0 }).select('id').single()
       promoterId = np?.id
     }
     if (!promoterId) return null
