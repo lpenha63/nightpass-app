@@ -2365,6 +2365,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <div style={{ display: 'flex', gap: 8 }}>
                   {onGoToReservas && <Btn onClick={() => { onGoToReservas(resViewEv.event_date, resViewEv.id); setResViewEv(null) }} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Gerenciar</Btn>}
                   <Btn onClick={() => printResView(resViewEv)} small variant="secondary" style={cbtn('#3b82f6')}>🖨️ Imprimir (montagem)</Btn>
+                  <Btn onClick={() => openMontagem(resViewEv)} small variant="secondary" style={cbtn('#f59e0b')}>📐 Enviar montagem</Btn>
                 </div>
               </div>
               {resViewList.length === 0
@@ -2778,7 +2779,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <Btn onClick={() => openEdit(ev)} small variant="secondary" style={cbtn('#94a3b8')}>✏️ Editar</Btn>
                   <Btn onClick={() => loadGuests(ev)} small variant="secondary" style={cbtn('#3b82f6')}>👥 Lista</Btn>
                   <Btn onClick={() => openResView(ev)} small variant="secondary" style={cbtn('#a78bfa')}>🪑 Reservas</Btn>
-                  <Btn onClick={() => openMontagem(ev)} small variant="secondary" style={cbtn('#f59e0b')}>📐 Montagem</Btn>
                   <Btn onClick={() => loadEvFreelancers(ev)} small variant="secondary" style={cbtn('#22d3ee')}>👷 Equipe</Btn>
                   <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎟️ Ingressos</Btn>
                   <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>
