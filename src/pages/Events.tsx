@@ -34,6 +34,7 @@ interface Guest {
   gender?: string
   birth_date?: string
   list_type?: string
+  is_vip?: boolean
   checked_in?: boolean
   promoter_id?: string
 }
@@ -804,7 +805,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   }
 
   function reloadGuests(eventId: string) {
-    supabase.from('promoter_list_guests').select('id,full_name,phone,gender,birth_date,list_type,checked_in,promoter_id')
+    supabase.from('promoter_list_guests').select('id,full_name,phone,gender,birth_date,list_type,is_vip,checked_in,promoter_id')
       .eq('event_id', eventId).order('full_name')
       .then(r => setGuests((r.data ?? []) as Guest[]))
   }
@@ -828,7 +829,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       phone: guestAddForm.phone.replace(/\D/g, '') || null,
       gender: guestAddForm.gender || null,
       birth_date: guestAddForm.birth_date || null,
-      list_type: 'normal',
+      list_type: 'promoter',
+      is_vip: false,
       promoter_confirmed: true,
     })
     setGuestAdding(false)
@@ -840,8 +842,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   async function toggleGuestVip(g: Guest) {
     if (!g.id || !guestEv) return
-    const next = g.list_type === 'vip' ? 'normal' : 'vip'
-    await supabase.from('promoter_list_guests').update({ list_type: next }).eq('id', g.id)
+    await supabase.from('promoter_list_guests').update({ is_vip: !g.is_vip }).eq('id', g.id)
     reloadGuests(guestEv.id)
   }
 
@@ -1939,7 +1940,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                         <span style={{ fontSize: 16, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: g.checked_in ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {g.full_name}{g.list_type === 'vip' && <span style={{ color: C.gold, marginLeft: 6, fontSize: 11, fontWeight: 800 }}>⭐ VIP</span>}
+                            {g.full_name}{g.is_vip && <span style={{ color: C.gold, marginLeft: 6, fontSize: 11, fontWeight: 800 }}>⭐ VIP</span>}
                           </div>
                           <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8 }}>
                             {g.phone && <span>{g.phone}</span>}
@@ -1947,8 +1948,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                           </div>
                         </div>
                         <button onClick={() => toggleGuestVip(g)} title="Entrada VIP (gratuita)"
-                          style={{ flexShrink: 0, background: g.list_type === 'vip' ? C.gold + '22' : 'transparent', border: `1px solid ${g.list_type === 'vip' ? C.gold : C.brd}`, borderRadius: 8, padding: '4px 8px', color: g.list_type === 'vip' ? C.gold : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                          {g.list_type === 'vip' ? '⭐ VIP' : 'VIP'}
+                          style={{ flexShrink: 0, background: g.is_vip ? C.gold + '22' : 'transparent', border: `1px solid ${g.is_vip ? C.gold : C.brd}`, borderRadius: 8, padding: '4px 8px', color: g.is_vip ? C.gold : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                          {g.is_vip ? '⭐ VIP' : 'VIP'}
                         </button>
                         {g.checked_in && <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✓ Entrou</span>}
                       </div>
