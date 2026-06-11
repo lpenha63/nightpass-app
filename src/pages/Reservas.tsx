@@ -19,7 +19,7 @@ interface ResType {
 }
 
 interface ResItem {
-  id?: string; name: string; quantity: number; unit_cost_cents: number
+  id?: string; name: string; quantity: number; unit_cost_cents: number; unit_price_cents?: number
 }
 
 interface ReservationGuest {
@@ -71,7 +71,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   const [eventsForDate, setEventsForDate] = useState<Array<{ id: string; name: string }>>([])
   const [toast, setToast] = useState<ToastState | null>(null)
   const [form, setForm] = useState(() => RDEF(selDate))
-  const [formItems, setFormItems] = useState<Array<{ name: string; quantity: string; unit_cost_cents: string; mode: 'unit' | 'total' }>>([])
+  const [formItems, setFormItems] = useState<Array<{ name: string; quantity: string; sale_cents: string; cost_cents: string; mode: 'unit' | 'total' }>>([])
   const [viewPeriod, setViewPeriod] = useState<'day' | 'week' | 'month'>('week')
   const [eventFilter, setEventFilter] = useState<{ id: string; name: string } | null>(null)
   const [periodCounts, setPeriodCounts] = useState<{ day: { res: number; people: number }; week: { res: number; people: number }; month: { res: number; people: number } }>({ day: { res: 0, people: 0 }, week: { res: 0, people: 0 }, month: { res: 0, people: 0 } })
@@ -283,16 +283,26 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   }
 
   function addFormItem() {
-    setFormItems(p => [...p, { name: '', quantity: '', unit_cost_cents: '', mode: 'total' }])
+    setFormItems(p => [...p, { name: '', quantity: '', sale_cents: '', cost_cents: '', mode: 'total' }])
+  }
+
+  // Custo total dos opcionais (para o budget)
+  function itemsCostTotal(items: Array<{ quantity: string; cost_cents: string; mode?: 'unit' | 'total' }>) {
+    return items.reduce((s, it) => {
+      const val = Math.round((parseFloat(it.cost_cents) || 0) * 100)
+      const qty = parseFloat(it.quantity) || 0
+      return s + (it.mode === 'total' ? val : qty * val)
+    }, 0)
   }
 
   function removeFormItem(i: number) {
     setFormItems(p => p.filter((_, idx) => idx !== i))
   }
 
-  function itemsTotal(items: Array<{ quantity: string; unit_cost_cents: string; mode?: 'unit' | 'total' }>) {
+  // Valor de venda total dos opcionais (entra no valor da reserva)
+  function itemsTotal(items: Array<{ quantity: string; sale_cents: string; mode?: 'unit' | 'total' }>) {
     return items.reduce((s, it) => {
-      const val = Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
+      const val = Math.round((parseFloat(it.sale_cents) || 0) * 100)
       const qty = parseFloat(it.quantity) || 0
       return s + (it.mode === 'total' ? val : qty * val)
     }, 0)
@@ -345,11 +355,13 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       if (validItems.length > 0) {
         await supabase.from('reservation_items').insert(validItems.map(it => {
           const qty = parseFloat(it.quantity) || 1
-          const valCents = Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
+          const saleCents = Math.round((parseFloat(it.sale_cents) || 0) * 100)
+          const costCents = Math.round((parseFloat(it.cost_cents) || 0) * 100)
           return {
             reservation_id: resId, house_id: house.id,
             name: it.name.trim(), quantity: qty,
-            unit_cost_cents: it.mode === 'total' ? Math.round(valCents / qty) : valCents,
+            unit_price_cents: it.mode === 'total' ? Math.round(saleCents / qty) : saleCents,
+            unit_cost_cents: it.mode === 'total' ? Math.round(costCents / qty) : costCents,
           }
         }))
       }
@@ -382,11 +394,16 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
   function editRes(r: Reservation) {
     setEditing(r)
-    // amount_cents salvo = base + opcionais; ao editar, isolamos a base
-    const itemsCents = (r.reservation_items ?? []).reduce((s, it) => s + (it.quantity || 0) * (it.unit_cost_cents || 0), 0)
-    const baseCents = Math.max(0, (r.amount_cents ?? 0) - itemsCents)
+    // amount_cents salvo = base + venda dos opcionais; ao editar, isolamos a base
+    const saleItemsCents = (r.reservation_items ?? []).reduce((s, it) => s + (it.quantity || 0) * (it.unit_price_cents ?? it.unit_cost_cents ?? 0), 0)
+    const baseCents = Math.max(0, (r.amount_cents ?? 0) - saleItemsCents)
     setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: baseCents ? String(baseCents / 100) : '', expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ? String(r.deposit_cents / 100) : '', observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ? String(r.list_custom_value_cents / 100) : '', list_male_value_cents: r.list_male_value_cents ? String(r.list_male_value_cents / 100) : '', list_female_value_cents: r.list_female_value_cents ? String(r.list_female_value_cents / 100) : '' })
-    setFormItems((r.reservation_items ?? []).map(it => ({ name: it.name, quantity: String(it.quantity), unit_cost_cents: String((it.unit_cost_cents ?? 0) / 100), mode: 'unit' as const })))
+    setFormItems((r.reservation_items ?? []).map(it => ({
+      name: it.name, quantity: String(it.quantity),
+      sale_cents: String((it.unit_price_cents ?? it.unit_cost_cents ?? 0) / 100),
+      cost_cents: it.unit_price_cents != null ? String((it.unit_cost_cents ?? 0) / 100) : '',
+      mode: 'unit' as const,
+    })))
     loadOccupied(r.reservation_date ?? selDate, r.id)
     supabase.from('events').select('id,name,event_date').eq('house_id', house.id).eq('event_date', r.reservation_date ?? selDate)
       .then(res => setEventsForDate(res.data ?? []))
@@ -883,30 +900,32 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
               : (
                 <>
                   {/* Header */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 96px 78px 32px', gap: 6, marginBottom: 6 }}>
-                    {['Item / Descrição', 'Qtd', 'Valor (R$)', 'Tipo', ''].map((h, i) => (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 48px 84px 84px 64px 30px', gap: 6, marginBottom: 6 }}>
+                    {['Item / Descrição', 'Qtd', '💲 Valor', '🧾 Custo', 'Tipo', ''].map((h, i) => (
                       <div key={i} style={{ fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', paddingLeft: 4 }}>{h}</div>
                     ))}
                   </div>
                   {formItems.map((it, i) => {
-                    const lineTotal = it.mode === 'total'
-                      ? Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
-                      : (parseFloat(it.quantity) || 0) * Math.round((parseFloat(it.unit_cost_cents) || 0) * 100)
+                    const f = it.mode === 'total' ? 1 : (parseFloat(it.quantity) || 0)
+                    const lineSale = (it.mode === 'total' ? 1 : f) * Math.round((parseFloat(it.sale_cents) || 0) * 100)
+                    const lineCost = (it.mode === 'total' ? 1 : f) * Math.round((parseFloat(it.cost_cents) || 0) * 100)
                     return (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 56px 96px 78px 32px', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 48px 84px 84px 64px 30px', gap: 6, marginBottom: 6, alignItems: 'center' }}>
                       <input value={it.name} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x))}
                         placeholder="Ex: Comida p/ 30 pessoas" style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13 }} />
                       <input type="number" min="0" step="1" value={it.quantity} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
-                        placeholder="30" style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13, textAlign: 'center' }} />
-                      <input type="number" min="0" step="0.01" value={it.unit_cost_cents} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, unit_cost_cents: e.target.value } : x))}
-                        placeholder={it.mode === 'total' ? 'total' : 'unit.'} style={{ ...SL, minHeight: 38, padding: '8px 10px', fontSize: 13 }} />
+                        placeholder="30" style={{ ...SL, minHeight: 38, padding: '8px 6px', fontSize: 13, textAlign: 'center' }} />
+                      <input type="number" min="0" step="0.01" value={it.sale_cents} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, sale_cents: e.target.value } : x))}
+                        title="Valor cobrado do cliente (entra na reserva)" placeholder="venda" style={{ ...SL, minHeight: 38, padding: '8px 8px', fontSize: 13, borderColor: C.gold + '55' }} />
+                      <input type="number" min="0" step="0.01" value={it.cost_cents} onChange={e => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, cost_cents: e.target.value } : x))}
+                        title="Custo do item (entra no Budget como despesa)" placeholder="custo" style={{ ...SL, minHeight: 38, padding: '8px 8px', fontSize: 13, borderColor: '#f59e0b55' }} />
                       <button type="button" onClick={() => setFormItems(p => p.map((x, idx) => idx === i ? { ...x, mode: x.mode === 'total' ? 'unit' : 'total' } : x))}
-                        title={it.mode === 'total' ? 'Valor é o total do item' : 'Valor multiplicado pela quantidade'}
+                        title={it.mode === 'total' ? 'Valores são o total do item' : 'Valores multiplicados pela quantidade'}
                         style={{ height: 38, borderRadius: 8, border: `1px solid ${it.mode === 'total' ? C.gold : C.acc}66`, background: (it.mode === 'total' ? C.gold : C.acc) + '22', color: it.mode === 'total' ? C.gold : C.acc, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                         {it.mode === 'total' ? 'Total' : '× un'}
                       </button>
                       <button onClick={() => removeFormItem(i)}
-                        style={{ width: 32, height: 38, borderRadius: 8, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, fontSize: 14, cursor: 'pointer' }} title={`Subtotal: ${fmtCurrency(lineTotal)}`}>✕</button>
+                        style={{ width: 30, height: 38, borderRadius: 8, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, fontSize: 14, cursor: 'pointer' }} title={`Venda: ${fmtCurrency(lineSale)} · Custo: ${fmtCurrency(lineCost)}`}>✕</button>
                     </div>
                     )
                   })}
@@ -916,12 +935,16 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       <span>Valor base</span>
                       <span>{fmtCurrency(Math.round((parseFloat(String(form.amount_cents)) || 0) * 100))}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: C.mut, marginBottom: 6 }}>
-                      <span>Itens</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: C.mut, marginBottom: 4 }}>
+                      <span>Opcionais (venda)</span>
                       <span>{fmtCurrency(itemsTotal(formItems))}</span>
                     </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#f59e0b', marginBottom: 6 }}>
+                      <span>Custo opcionais (Budget)</span>
+                      <span>{fmtCurrency(itemsCostTotal(formItems))}</span>
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, color: C.gold, fontWeight: 800, borderTop: `1px solid ${C.brd}`, paddingTop: 8 }}>
-                      <span>Total</span>
+                      <span>Total da reserva</span>
                       <span>{fmtCurrency(Math.round((parseFloat(String(form.amount_cents)) || 0) * 100) + itemsTotal(formItems))}</span>
                     </div>
                   </div>
