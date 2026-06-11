@@ -171,12 +171,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [checkTasks, setCheckTasks] = useState<EventTask[]>([])
 
   // Outras despesas do evento (budget)
-  interface EventExpense { id: string; event_id: string; description: string; amount_cents: number }
+  interface EventExpense { id: string; event_id: string; description: string; amount_cents: number; kind?: string; area?: string | null }
   const [budgetExpenses, setBudgetExpenses] = useState<EventExpense[]>([])
   const [budgetRes, setBudgetRes] = useState<ProdReservation[]>([])
   const [budgetTasks, setBudgetTasks] = useState<EventTask[]>([])
-  const [expForm, setExpForm] = useState({ description: '', amount: '' })
+  const [expForm, setExpForm] = useState({ description: '', amount: '', area: '' })
   const [expAdding, setExpAdding] = useState(false)
+  const [revForm, setRevForm] = useState({ description: '', amount: '' })
+  const [revAdding, setRevAdding] = useState(false)
 
   // Reservations modal
   const [resEv, setResEv] = useState<EventWithCounts | null>(null)
@@ -614,13 +616,93 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   async function addExpense(ev: EventWithCounts) {
     const amount = Math.round((parseFloat(expForm.amount.replace(',', '.')) || 0) * 100)
     if (!expForm.description.trim() || amount <= 0) return
-    const { data } = await supabase.from('event_expenses').insert({ event_id: ev.id, house_id: house.id, description: expForm.description.trim(), amount_cents: amount }).select().single()
-    if (data) { setBudgetExpenses(pp => [...pp, data as EventExpense]); setExpForm({ description: '', amount: '' }); setExpAdding(false) }
+    const { data } = await supabase.from('event_expenses').insert({ event_id: ev.id, house_id: house.id, description: expForm.description.trim(), amount_cents: amount, kind: 'expense', area: expForm.area || null }).select().single()
+    if (data) { setBudgetExpenses(pp => [...pp, data as EventExpense]); setExpForm({ description: '', amount: '', area: expForm.area }); setExpAdding(false) }
+  }
+
+  async function addRevenue(ev: EventWithCounts) {
+    const amount = Math.round((parseFloat(revForm.amount.replace(',', '.')) || 0) * 100)
+    if (!revForm.description.trim() || amount <= 0) return
+    const { data } = await supabase.from('event_expenses').insert({ event_id: ev.id, house_id: house.id, description: revForm.description.trim(), amount_cents: amount, kind: 'revenue' }).select().single()
+    if (data) { setBudgetExpenses(pp => [...pp, data as EventExpense]); setRevForm({ description: '', amount: '' }); setRevAdding(false) }
   }
 
   async function deleteExpense(id: string) {
     await supabase.from('event_expenses').delete().eq('id', id)
     setBudgetExpenses(pp => pp.filter(e => e.id !== id))
+  }
+
+  function printBudget(ev: EventWithCounts) {
+    const ab = artistsBreakdown(ev)
+    const cache = ab.fee, consumacao = ab.cons
+    const producao = ev.production_cost_cents ?? 0
+    const freelancerTotal = budgetFreelancers.reduce((s, ef) => s + ((ef as any).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0), 0)
+    const promoterTotal = budgetPromoters.reduce((s, l) => { const ent = Math.max(l.guest_count, l.min_entries); return s + l.fixed_fee_cents + ent * l.entry_fee_cents + ent * l.consumacao_cents }, 0)
+    const resItemsTotal = budgetResItems.reduce((s, i) => s + (i.quantity || 1) * (i.unit_cost_cents || 0), 0)
+    const manualExp = budgetExpenses.filter(e => e.kind !== 'revenue')
+    const expensesTotal = manualExp.reduce((s, e) => s + e.amount_cents, 0)
+    const tasksReal = budgetTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
+    const tasksEst = budgetTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
+    const tasksTotal = tasksReal > 0 ? tasksReal : tasksEst
+    const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
+    const reservasRevenue = budgetRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
+    const otherRev = budgetExpenses.filter(e => e.kind === 'revenue')
+    const otherRevTotal = otherRev.reduce((s, e) => s + e.amount_cents, 0)
+    const revenue = reservasRevenue + otherRevTotal
+    const margin = revenue - total
+    const fmt = (c: number) => 'R$ ' + (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+    const rowH = (label: string, val: number) => `<tr><td>${label}</td><td class="r">${fmt(val)}</td></tr>`
+    // Despesas por área (avulsas)
+    const expByArea: Record<string, EventExpense[]> = {}
+    manualExp.forEach(e => { const k = e.area || '__geral__'; (expByArea[k] ||= []).push(e) })
+    const areaLbl = (k: string) => k === '__geral__' ? '📦 Geral' : wlabel(k)
+    const expAreaRows = Object.entries(expByArea).map(([k, items]) => {
+      const at = items.reduce((s, e) => s + e.amount_cents, 0)
+      return `<tr class="sub"><td>${areaLbl(k)}</td><td class="r">${fmt(at)}</td></tr>` +
+        items.map(e => `<tr><td class="i">${e.description}</td><td class="r">${fmt(e.amount_cents)}</td></tr>`).join('')
+    }).join('')
+    const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Fechamento — ${ev.name}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 28px; max-width: 800px; margin: 0 auto; color: #111; }
+      h1 { font-size: 22px; margin: 0 0 4px; } .sub2 { color: #666; font-size: 13px; margin-bottom: 22px; text-transform: capitalize; }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #444; margin: 22px 0 6px; border-bottom: 2px solid #333; padding-bottom: 4px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      td { padding: 6px 8px; border-bottom: 1px solid #eee; }
+      td.r { text-align: right; white-space: nowrap; }
+      td.i { padding-left: 24px; color: #555; }
+      tr.sub td { font-weight: 700; background: #f7f7f7; }
+      .tot { display: flex; justify-content: space-between; font-size: 15px; font-weight: 800; padding: 10px 8px; border-top: 2px solid #333; }
+      .grand { display: flex; justify-content: space-between; font-size: 20px; font-weight: 900; padding: 14px 8px; margin-top: 8px; border-top: 3px solid #111; }
+      .footer { margin-top: 28px; font-size: 12px; color: #999; text-align: center; }
+      @media print { body { padding: 12px; } }
+    </style></head><body>
+    <h1>💰 Fechamento — ${ev.name}</h1>
+    <div class="sub2">📅 ${dateStr}</div>
+
+    <h2>Receitas</h2>
+    <table>${rowH(`Reservas do dia (${budgetRes.length})`, reservasRevenue)}${otherRev.map(e => rowH('➕ ' + e.description, e.amount_cents)).join('')}</table>
+    <div class="tot"><span>Total de receitas</span><span style="color:#0a7d34">${fmt(revenue)}</span></div>
+
+    <h2>Despesas</h2>
+    <table>
+      ${ab.list.length > 0 ? ab.list.map((a, i) => rowH('🎤 ' + (a.name || `Artista ${i + 1}`), a.fee_cents ?? 0)).join('') : rowH('🎤 Cachê do artista', cache)}
+      ${consumacao > 0 ? rowH('🍺 Consumação (artistas)', consumacao) : ''}
+      ${producao > 0 ? rowH('🔧 Gastos de produção', producao) : ''}
+      ${freelancerTotal > 0 ? rowH('👷 Freelancers', freelancerTotal) : ''}
+      ${promoterTotal > 0 ? rowH('📋 Promoters', promoterTotal) : ''}
+      ${resItemsTotal > 0 ? rowH('🪑 Reservas — opcionais', resItemsTotal) : ''}
+      ${tasksTotal > 0 ? rowH('📋 Tarefas de produção', tasksTotal) : ''}
+      ${expAreaRows ? `<tr class="sub"><td>💸 Outras despesas por área</td><td></td></tr>${expAreaRows}` : ''}
+    </table>
+    <div class="tot"><span>Total de despesas</span><span style="color:#b45309">${fmt(total)}</span></div>
+
+    <div class="grand"><span>${margin >= 0 ? '🟢 MARGEM' : '🔴 PREJUÍZO'}</span><span style="color:${margin >= 0 ? '#0a7d34' : '#b91c1c'}">${fmt(margin)}</span></div>
+    <div class="footer">Fechamento gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — NightPass</div>
+    <script>window.onload = () => window.print()</script>
+    </body></html>`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
   }
 
   function openBudget(ev: EventWithCounts) {
@@ -1038,32 +1120,82 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   const cbtn = (c: string) => ({ background: c + '1f', color: c, border: `1px solid ${c}40`, justifyContent: 'center' as const, fontWeight: 700 })
 
-  const renderExpenses = (list: EventExpense[], ev: EventWithCounts) => {
+  const AREA_GERAL = '__geral__'
+  const renderExpenses = (all: EventExpense[], ev: EventWithCounts) => {
+    const list = all.filter(e => e.kind !== 'revenue')
     const tot = list.reduce((s, e) => s + e.amount_cents, 0)
+    // Agrupa por área
+    const groups: Record<string, EventExpense[]> = {}
+    list.forEach(e => { const k = e.area || AREA_GERAL; (groups[k] ||= []).push(e) })
+    const areaName = (k: string) => k === AREA_GERAL ? '📦 Geral' : wlabel(k)
     return (
       <div style={{ marginTop: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <span style={{ fontSize: 11, color: C.mut, fontWeight: 700 }}>💸 Outras despesas{tot > 0 ? ` · ${fmtCurrency(tot)}` : ''}</span>
-          {!expAdding && <button onClick={() => { setExpAdding(true); setExpForm({ description: '', amount: '' }) }} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+ Despesa</button>}
+          <span style={{ fontSize: 11, color: C.mut, fontWeight: 700 }}>💸 Outras despesas (por área){tot > 0 ? ` · ${fmtCurrency(tot)}` : ''}</span>
+          {!expAdding && <button onClick={() => { setExpAdding(true); setExpForm(p => ({ description: '', amount: '', area: p.area })) }} style={{ background: '#f59e0b22', border: `1px solid #f59e0b44`, borderRadius: 6, padding: '3px 10px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>− Despesa</button>}
         </div>
-        {list.map(e => (
-          <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
-            <span style={{ color: C.txt }}>{e.description}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#f59e0b', fontWeight: 600 }}>{fmtCurrency(e.amount_cents)}</span>
-              <button onClick={() => deleteExpense(e.id)} title="Remover" style={{ background: 'none', border: 'none', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
+        {Object.entries(groups).map(([k, items]) => {
+          const at = items.reduce((s, e) => s + e.amount_cents, 0)
+          return (
+            <div key={k} style={{ marginBottom: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.sub, fontWeight: 700, padding: '4px 0', borderBottom: `1px solid ${C.brd}` }}>
+                <span>{areaName(k)}</span><span style={{ color: '#f59e0b' }}>{fmtCurrency(at)}</span>
+              </div>
+              {items.map(e => (
+                <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0 4px 10px', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
+                  <span style={{ color: C.txt }}>{e.description}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#f59e0b', fontWeight: 600 }}>{fmtCurrency(e.amount_cents)}</span>
+                    <button onClick={() => deleteExpense(e.id)} title="Remover" style={{ background: 'none', border: 'none', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        ))}
+          )
+        })}
         {expAdding && (
-          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            <input value={expForm.description} onChange={ev2 => setExpForm(pp => ({ ...pp, description: ev2.target.value }))} placeholder="Descrição (ex: gerador, gelo...)" autoFocus style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            <select value={expForm.area} onChange={ev2 => setExpForm(pp => ({ ...pp, area: ev2.target.value }))} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 8px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }}>
+              <option value="">📦 Geral</option>
+              {workAreas.map(a => <option key={a.key} value={a.key}>{a.icon} {a.label}</option>)}
+            </select>
+            <input value={expForm.description} onChange={ev2 => setExpForm(pp => ({ ...pp, description: ev2.target.value }))} placeholder="Descrição (ex: gerador, gelo...)" autoFocus style={{ flex: 1, minWidth: 120, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
             <input value={expForm.amount} onChange={ev2 => setExpForm(pp => ({ ...pp, amount: ev2.target.value }))} onKeyDown={ev2 => ev2.key === 'Enter' && addExpense(ev)} placeholder="R$" style={{ width: 90, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
             <button onClick={() => addExpense(ev)} style={{ background: '#f59e0b', border: 'none', borderRadius: 8, padding: '7px 12px', color: '#1a1205', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
             <button onClick={() => setExpAdding(false)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
           </div>
         )}
         {list.length === 0 && !expAdding && <div style={{ fontSize: 12, color: C.mut }}>Nenhuma despesa avulsa.</div>}
+      </div>
+    )
+  }
+
+  const renderRevenues = (all: EventExpense[], ev: EventWithCounts) => {
+    const list = all.filter(e => e.kind === 'revenue')
+    const tot = list.reduce((s, e) => s + e.amount_cents, 0)
+    return (
+      <div style={{ marginTop: 4, marginBottom: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ fontSize: 11, color: C.mut, fontWeight: 700 }}>➕ Outras receitas{tot > 0 ? ` · ${fmtCurrency(tot)}` : ''}</span>
+          {!revAdding && <button onClick={() => { setRevAdding(true); setRevForm({ description: '', amount: '' }) }} style={{ background: '#10b98122', border: `1px solid #10b98144`, borderRadius: 6, padding: '3px 10px', color: '#10b981', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>+ Receita</button>}
+        </div>
+        {list.map(e => (
+          <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${C.brd}22`, fontSize: 13 }}>
+            <span style={{ color: C.txt }}>{e.description}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: '#10b981', fontWeight: 600 }}>{fmtCurrency(e.amount_cents)}</span>
+              <button onClick={() => deleteExpense(e.id)} title="Remover" style={{ background: 'none', border: 'none', color: C.red, fontSize: 13, cursor: 'pointer' }}>🗑</button>
+            </div>
+          </div>
+        ))}
+        {revAdding && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <input value={revForm.description} onChange={ev2 => setRevForm(pp => ({ ...pp, description: ev2.target.value }))} placeholder="Descrição (ex: bar, patrocínio...)" autoFocus style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+            <input value={revForm.amount} onChange={ev2 => setRevForm(pp => ({ ...pp, amount: ev2.target.value }))} onKeyDown={ev2 => ev2.key === 'Enter' && addRevenue(ev)} placeholder="R$" style={{ width: 90, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }} />
+            <button onClick={() => addRevenue(ev)} style={{ background: '#10b981', border: 'none', borderRadius: 8, padding: '7px 12px', color: '#04210f', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>OK</button>
+            <button onClick={() => setRevAdding(false)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
+          </div>
+        )}
       </div>
     )
   }
@@ -2323,12 +2455,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             return s + l.fixed_fee_cents + ent * l.entry_fee_cents + ent * l.consumacao_cents
           }, 0)
           const resItemsTotal = budgetResItems.reduce((s, i) => s + (i.quantity || 1) * (i.unit_cost_cents || 0), 0)
-          const expensesTotal = budgetExpenses.reduce((s, e) => s + e.amount_cents, 0)
+          const expensesTotal = budgetExpenses.filter(e => e.kind !== 'revenue').reduce((s, e) => s + e.amount_cents, 0)
           const tasksEst = budgetTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
           const tasksReal = budgetTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
           const tasksTotal = tasksReal > 0 ? tasksReal : tasksEst
           const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
-          const revenue = budgetRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
+          const reservasRevenue = budgetRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
+          const otherRevenue = budgetExpenses.filter(e => e.kind === 'revenue').reduce((s, e) => s + e.amount_cents, 0)
+          const revenue = reservasRevenue + otherRevenue
           const margin = revenue - total
           const taskAreas: Record<string, { icon: string; tasks: EventTask[] }> = {}
           budgetTasks.forEach(t => { if (!taskAreas[t.area]) taskAreas[t.area] = { icon: t.area_icon, tasks: [] }; taskAreas[t.area].tasks.push(t) })
@@ -2347,13 +2481,18 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           return (
             <div>
               {/* Resumo */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
-                <div style={{ background: '#10b98110', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                <button onClick={() => printBudget(budgetEv)} style={{ background: '#ffffff08', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 12px', color: C.sub, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>🖨️ Imprimir fechamento</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
+                <div style={{ background: '#10b98110', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 12px', textAlign: 'center', position: 'relative' }}>
+                  <button onClick={() => { setRevAdding(true); setRevForm({ description: '', amount: '' }) }} title="Adicionar outra receita" style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 6, border: '1px solid #10b98144', background: '#10b98122', color: '#10b981', fontSize: 14, fontWeight: 900, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
                   <div style={{ fontSize: 10, color: '#10b981', fontWeight: 700, textTransform: 'uppercase' }}>Receita</div>
                   <div style={{ fontSize: 18, fontWeight: 900, color: '#10b981' }}>{fmtCurrency(revenue)}</div>
-                  <div style={{ fontSize: 10, color: C.mut }}>{budgetRes.length} reservas</div>
+                  <div style={{ fontSize: 10, color: C.mut }}>{budgetRes.length} reservas{otherRevenue > 0 ? ` + extras` : ''}</div>
                 </div>
-                <div style={{ background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                <div style={{ background: '#f59e0b10', border: '1px solid #f59e0b33', borderRadius: 10, padding: '10px 12px', textAlign: 'center', position: 'relative' }}>
+                  <button onClick={() => { setExpAdding(true); setExpForm(p => ({ description: '', amount: '', area: p.area })) }} title="Adicionar despesa" style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 6, border: '1px solid #f59e0b44', background: '#f59e0b22', color: '#f59e0b', fontSize: 16, fontWeight: 900, cursor: 'pointer', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>−</button>
                   <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, textTransform: 'uppercase' }}>Despesas</div>
                   <div style={{ fontSize: 18, fontWeight: 900, color: '#f59e0b' }}>{fmtCurrency(total)}</div>
                 </div>
@@ -2362,6 +2501,10 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <div style={{ fontSize: 18, fontWeight: 900, color: margin >= 0 ? '#10b981' : '#f87171' }}>{fmtCurrency(margin)}</div>
                 </div>
               </div>
+
+              {/* Receita: reservas + outras receitas */}
+              {row('🪑', 'Receita de reservas', reservasRevenue, '#10b981', `${budgetRes.length} reservas do dia`)}
+              {renderRevenues(budgetExpenses, budgetEv)}
               {/* Artistas */}
               {ab.list.length > 0
                 ? ab.list.map((a, i) => (
