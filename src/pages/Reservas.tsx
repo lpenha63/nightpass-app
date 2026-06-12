@@ -308,10 +308,6 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     }, 0)
   }
 
-  function resItemsTotal(items: ResItem[]) {
-    return items.reduce((s, it) => s + (it.quantity || 0) * (it.unit_cost_cents || 0), 0)
-  }
-
   async function saveRes() {
     if (!form.name.trim()) { sT(setToast, 'Nome do responsável obrigatório', 'error'); return }
     if ((form.phone || '').replace(/\D/g, '').length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
@@ -1034,8 +1030,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             : resList.map((r, idx) => {
               const resType = resTypes.find(t => t.id === r.reservation_type)
               const items = (r.reservation_items ?? []) as ResItem[]
-              const itemsSum = resItemsTotal(items)
-              const total = (r.amount_cents ?? 0) + itemsSum
+              // amount_cents já inclui a venda dos opcionais (não somar de novo; unit_cost é custo/Budget)
+              const total = r.amount_cents ?? 0
               const ph = (r.phone ?? '').replace(/\D/g, '')
               const waHref = ph ? `https://wa.me/55${ph}` : null
               const ps = r.payment_status ?? 'unpaid'

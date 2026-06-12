@@ -63,6 +63,7 @@ interface PromoterGuest {
   gender?: string
   birth_date?: string
   list_type?: string
+  is_vip?: boolean
   checked_in: boolean
   checked_in_at?: string
   promoter_confirmed: boolean
@@ -248,6 +249,16 @@ export function CheckinPage({ house, user }: Props) {
     const { count } = await supabase.from('checkins').select('id', { count: 'exact', head: true })
       .eq('house_id', house.id).gte('created_at', today + 'T00:00:00')
     setCiToday(count ?? 0)
+  }
+
+  // Valor pré-preenchido para convidado de promoter/lista da casa:
+  // VIP entra grátis; senão usa o preço de lista do evento por gênero
+  function promoPrefill(g: PromoterGuest): string {
+    if (g.is_vip) return '0'
+    const ev = events.find(e => e.id === selEv) as { price_male_list_cents?: number; price_female_list_cents?: number } | undefined
+    const fem = g.gender === 'feminino' || g.gender === 'F'
+    const cents = (fem ? ev?.price_female_list_cents : ev?.price_male_list_cents) ?? 0
+    return cents > 0 ? String(cents / 100) : ''
   }
 
   function prefilledAmount(res: Reservation, g: ReservationGuest): string {
@@ -1021,6 +1032,7 @@ export function CheckinPage({ house, user }: Props) {
                               <div style={{ color: g.checked_in ? C.grn : C.txt, fontWeight: 600, fontSize: 13 }}>
                                 {g.full_name}
                                 {g.gender && <span style={{ color: g.gender === 'feminino' ? '#f472b6' : C.acc, fontSize: 11, marginLeft: 5 }}>{g.gender === 'feminino' ? '♀' : '♂'}</span>}
+                                {g.is_vip && <span style={{ color: C.gold, fontSize: 10, fontWeight: 800, marginLeft: 5 }}>⭐ VIP</span>}
                               </div>
                               <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                                 {g.phone && <span>📱 {ftel(g.phone)}</span>}
@@ -1033,7 +1045,7 @@ export function CheckinPage({ house, user }: Props) {
                                   {g.checked_in_at && <div style={{ color: C.acc, fontSize: 11, fontWeight: 700 }}>🕐 {new Date(g.checked_in_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
                                 </div>
                               : <button
-                                  onClick={() => { setPendingCI({ type: 'promo', guest: g }); setListComanda('') }}
+                                  onClick={() => { setPendingCI({ type: 'promo', guest: g }); setListComanda(''); setListAmount(promoPrefill(g)) }}
                                   style={{ background: `linear-gradient(135deg,${C.acc},#1d4ed8)`, border: 'none', borderRadius: 8, padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, boxShadow: '0 2px 8px rgba(59,130,246,0.4)' }}>
                                   ✅ Entrada
                                 </button>
@@ -1237,6 +1249,7 @@ export function CheckinPage({ house, user }: Props) {
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                                           <span style={{ color: C.txt, fontWeight: 800, fontSize: 15 }}>{g.full_name}</span>
                                           {g.gender && <span style={{ color: g.gender === 'feminino' ? '#f472b6' : C.acc, fontSize: 11, fontWeight: 700 }}>{g.gender === 'feminino' ? '♀' : '♂'}</span>}
+                                          {g.is_vip && <span style={{ color: C.gold, fontSize: 10, fontWeight: 800 }}>⭐ VIP</span>}
                                           <span style={{ background: g.checked_in ? C.grn + '22' : C.brd + '88', color: g.checked_in ? C.grn : C.mut, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
                                             {g.checked_in ? '✅ Entrou' : '⏳ Pendente'}
                                           </span>
@@ -1261,7 +1274,7 @@ export function CheckinPage({ house, user }: Props) {
                                           </button>
                                         )}
                                         {!g.checked_in && (
-                                          <Btn onClick={() => { setPendingCI({ type: 'promo', guest: g }); setListComanda('') }} style={{ fontSize: 13 }}>
+                                          <Btn onClick={() => { setPendingCI({ type: 'promo', guest: g }); setListComanda(''); setListAmount(promoPrefill(g)) }} style={{ fontSize: 13 }}>
                                             ✅ Entrada
                                           </Btn>
                                         )}

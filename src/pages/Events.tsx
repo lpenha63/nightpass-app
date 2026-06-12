@@ -847,8 +847,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   }
 
   function doExport() {
-    const rows = [['Nome', 'Gênero', 'Lista', 'Check-in']]
-    guests.forEach(g => rows.push([g.full_name, g.gender ?? '', g.list_type ?? '', g.checked_in ? 'Sim' : 'Não']))
+    const rows = [['Nome', 'Gênero', 'Nascimento', 'VIP', 'Check-in']]
+    guests.forEach(g => rows.push([g.full_name, g.gender ?? '', g.birth_date ?? '', g.is_vip ? 'Sim' : '', g.checked_in ? 'Sim' : 'Não']))
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
