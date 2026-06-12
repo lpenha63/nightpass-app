@@ -798,75 +798,105 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           </div>
 
           {/* ── Pagamento — última linha (finaliza o total) ── */}
-          <div style={{ order: 90, gridColumn: 'span 3', background: 'rgba(59,130,246,0.05)', border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-              <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em' }}>💳 PAGAMENTO (FINALIZAR)</div>
-              {itemsTotal(formItems) > 0 && form.payment_status !== 'free' && (
-                <div style={{ fontSize: 12, color: C.gold, fontWeight: 700 }}>
-                  Total c/ opcionais: {fmtCurrency(Math.round((parseFloat(String(form.amount_cents)) || 0) * 100) + itemsTotal(formItems))}
+          {(() => {
+            const baseCentsForm = Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
+            const optCentsForm  = itemsTotal(formItems)
+            const grandTotal    = form.payment_status === 'free' ? 0 : baseCentsForm + optCentsForm
+            const depositVal    = parseFloat(String(form.deposit_cents)) || 0
+            const remaining     = grandTotal / 100 - depositVal
+            return (
+              <div style={{ order: 90, gridColumn: 'span 3', background: 'rgba(59,130,246,0.05)', border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 16px' }}>
+                <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 12 }}>💳 PAGAMENTO</div>
+
+                {/* Breakdown: base + opcionais → total */}
+                <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Valor base (R$)</label>
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={form.amount_cents}
+                      onChange={e => setForm(p => ({ ...p, amount_cents: e.target.value }))}
+                      placeholder="0,00"
+                      style={{ background: 'transparent', border: 'none', color: C.txt, fontSize: 14, fontWeight: 700, textAlign: 'right', width: 120, outline: 'none', fontFamily: 'inherit' }}
+                    />
+                  </div>
+                  {optCentsForm > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, color: C.mut }}>+ Opcionais</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: C.gold }}>{fmtCurrency(optCentsForm)}</span>
+                    </div>
+                  )}
+                  {(optCentsForm > 0 || baseCentsForm > 0) && (
+                    <div style={{ borderTop: `1px solid ${C.brd}`, marginTop: 6, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 13, color: C.sub, fontWeight: 700 }}>TOTAL A PAGAR</span>
+                      <span style={{ fontSize: 20, fontWeight: 900, color: form.payment_status === 'free' ? '#a78bfa' : C.grn }}>
+                        {form.payment_status === 'free' ? 'Free' : fmtCurrency(grandTotal)}
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor base da reserva (R$)</label>
-                <input type="number" step="0.01" min="0" style={SL} value={form.amount_cents}
-                  onChange={e => setForm(p => ({ ...p, amount_cents: e.target.value }))} placeholder="Ex: 500,00" />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Status do Pagamento</label>
-                <div style={{ display: 'flex', gap: 6, height: 44 }}>
-                  {(['unpaid','partial','paid','free'] as const).map(ps => (
-                    <button key={ps} type="button"
-                      onClick={() => setForm(p => ({ ...p, payment_status: ps, amount_cents: ps === 'free' ? '0' : p.amount_cents, deposit_cents: ps === 'paid' ? p.amount_cents : (ps === 'unpaid' || ps === 'free') ? '' : p.deposit_cents }))}
-                      style={{ flex: 1, borderRadius: 8, border: `2px solid ${form.payment_status === ps ? PAY_COLOR[ps] : PAY_COLOR[ps] + '33'}`, background: form.payment_status === ps ? PAY_COLOR[ps] + '22' : 'transparent', color: form.payment_status === ps ? PAY_COLOR[ps] : C.mut, fontSize: 11, fontWeight: form.payment_status === ps ? 800 : 500, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, transition: 'all .15s' }}>
-                      <span style={{ fontSize: 14 }}>{PAY_ICON[ps]}</span>
-                      <span>{PAY_LABEL[ps]}</span>
-                    </button>
-                  ))}
+
+                {/* Status do pagamento */}
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 6 }}>Como será liquidado</label>
+                  <div style={{ display: 'flex', gap: 6, height: 44 }}>
+                    {(['unpaid','partial','paid','free'] as const).map(ps => (
+                      <button key={ps} type="button"
+                        onClick={() => setForm(p => ({ ...p, payment_status: ps, amount_cents: ps === 'free' ? '0' : p.amount_cents, deposit_cents: (ps === 'unpaid' || ps === 'free') ? '' : p.deposit_cents }))}
+                        style={{ flex: 1, borderRadius: 8, border: `2px solid ${form.payment_status === ps ? PAY_COLOR[ps] : PAY_COLOR[ps] + '33'}`, background: form.payment_status === ps ? PAY_COLOR[ps] + '22' : 'transparent', color: form.payment_status === ps ? PAY_COLOR[ps] : C.mut, fontSize: 11, fontWeight: form.payment_status === ps ? 800 : 500, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, transition: 'all .15s' }}>
+                        <span style={{ fontSize: 14 }}>{PAY_ICON[ps]}</span>
+                        <span>{PAY_LABEL[ps]}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              {form.payment_status === 'partial' && (() => {
-                const total = (parseFloat(String(form.amount_cents)) || 0) + itemsTotal(formItems) / 100
-                const deposit = parseFloat(String(form.deposit_cents)) || 0
-                const remaining = total - deposit
-                return (
-                  <>
+
+                {/* Sinal parcial */}
+                {form.payment_status === 'partial' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600, display: 'block', marginBottom: 4 }}>💰 Valor do Sinal (R$)</label>
-                      <input type="number" step="0.01" min="0" max={String(form.amount_cents)}
+                      <input type="number" step="0.01" min="0" max={String(grandTotal / 100)}
                         style={{ ...SL, borderColor: '#f59e0b55' }} value={form.deposit_cents}
                         onChange={e => setForm(p => ({ ...p, deposit_cents: e.target.value }))} placeholder="Ex: 200,00" />
                     </div>
                     <div>
-                      <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Saldo Restante</label>
+                      <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Saldo Restante no Caixa</label>
                       <div style={{ ...SL, display: 'flex', alignItems: 'center', gap: 8, background: remaining > 0 ? '#ef444411' : '#10b98111', borderColor: remaining > 0 ? '#ef444433' : '#10b98133' }}>
                         <span style={{ fontSize: 16 }}>{remaining > 0 ? '💸' : '✅'}</span>
                         <span style={{ fontWeight: 800, fontSize: 15, color: remaining > 0 ? '#ef4444' : '#10b981' }}>{fmtCurrency(Math.round(remaining * 100))}</span>
                         {remaining <= 0 && <span style={{ fontSize: 11, color: '#10b981' }}>Quitado!</span>}
                       </div>
                     </div>
-                  </>
-                )
-              })()}
-              {form.payment_status === 'free' && (
-                <div style={{ gridColumn: 'span 2' }}>
+                  </div>
+                )}
+
+                {/* Confirmações de status */}
+                {form.payment_status === 'free' && (
                   <div style={{ background: '#a78bfa11', border: '1px solid #a78bfa33', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 20 }}>🎁</span>
-                    <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 14 }}>Reserva gratuita · nada será cobrado</span>
+                    <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 14 }}>Reserva gratuita · nada entra no caixa</span>
                   </div>
-                </div>
-              )}
-              {form.payment_status === 'paid' && (Math.round((parseFloat(String(form.amount_cents)) || 0) * 100) + itemsTotal(formItems)) > 0 && (
-                <div style={{ gridColumn: 'span 2' }}>
+                )}
+                {form.payment_status === 'paid' && grandTotal > 0 && (
                   <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 20 }}>✅</span>
-                    <span style={{ color: '#10b981', fontWeight: 700, fontSize: 14 }}>Pagamento confirmado · {fmtCurrency(Math.round((parseFloat(String(form.amount_cents)) || 0) * 100) + itemsTotal(formItems))}</span>
+                    <span style={{ color: '#10b981', fontWeight: 700, fontSize: 14 }}>
+                      {fmtCurrency(grandTotal)} confirmados · valor entra no caixa
+                    </span>
                   </div>
-                </div>
-              )}
-            </div>
-          </div>
+                )}
+                {form.payment_status === 'unpaid' && grandTotal > 0 && (
+                  <div style={{ background: '#ef444411', border: '1px solid #ef444433', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 20 }}>💸</span>
+                    <span style={{ color: '#ef4444', fontWeight: 700, fontSize: 14 }}>
+                      {fmtCurrency(grandTotal)} a receber · pendente no caixa
+                    </span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* ── Observações — full width ── */}
           <div style={{ gridColumn: 'span 3' }}>
