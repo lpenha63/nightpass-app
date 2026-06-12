@@ -163,6 +163,10 @@ export function CheckinPage({ house, user }: Props) {
   const [portariaAccordion, setPortariaAccordion] = useState<{ reservas: boolean; promoters: boolean }>({ reservas: true, promoters: true })
   const [listasAccordion, setListasAccordion] = useState<{ reservas: boolean; promoters: boolean }>({ reservas: true, promoters: true })
 
+  // ── filtro de lista de promoter ──
+  const [selPromoList, setSelPromoList] = useState<string>('all')
+  const [promoSearch, setPromoSearch] = useState('')
+
   // ── comanda confirm ──
   const [pendingCI, setPendingCI] = useState<{ type: 'reserva' | 'promo'; guest: ReservationGuest | PromoterGuest; reservation?: Reservation } | null>(null)
   const [listComanda, setListComanda] = useState('')
@@ -198,6 +202,8 @@ export function CheckinPage({ house, user }: Props) {
 
   useEffect(() => {
     loadLists()
+    setSelPromoList('all')
+    setPromoSearch('')
   }, [selEv])
 
   function loadTypes() {
@@ -599,8 +605,27 @@ export function CheckinPage({ house, user }: Props) {
       const bUnchecked = (b.reservation_guests ?? []).filter((g: ReservationGuest) => !g.checked_in).length
       return bUnchecked - aUnchecked
     })
+
+  // Lista única de promoter lists para o dropdown
+  const promoLists = (() => {
+    const seen = new Set<string>()
+    const lists: Array<{ id: string; name: string; promoter?: string }> = []
+    promoGuests.forEach(g => {
+      const pl = g.promoter_lists as { id?: string; name?: string; promoters?: { full_name?: string } } | undefined
+      if (pl?.id && !seen.has(pl.id)) {
+        seen.add(pl.id)
+        lists.push({ id: pl.id, name: pl.name ?? 'Lista', promoter: pl.promoters?.full_name })
+      }
+    })
+    return lists
+  })()
+
   const filteredGuests = promoGuests
-    .filter(g => !listSearch || g.full_name.toLowerCase().includes(listSearch.toLowerCase()) || g.phone?.includes(listSearch))
+    .filter(g => {
+      if (selPromoList !== 'all' && g.list_id !== selPromoList) return false
+      const s = promoSearch.toLowerCase()
+      return !s || g.full_name.toLowerCase().includes(s) || (g.phone ?? '').includes(s)
+    })
     .sort((a, b) => (a.checked_in ? 1 : 0) - (b.checked_in ? 1 : 0))
 
   const evLabel = events.find(e => e.id === selEv)
@@ -1023,7 +1048,23 @@ export function CheckinPage({ house, user }: Props) {
                     ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '16px 0', border: `1px dashed ${C.brd}`, borderRadius: 10 }}>
                         {selEv === 'bar' ? 'Selecione um evento' : 'Nenhum convidado de promoter'}
                       </div>
-                    : filteredGuests.map(g => {
+                    : <>
+                        {/* Filtro de lista + busca */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                          <select value={selPromoList} onChange={e => setSelPromoList(e.target.value)} style={{ ...SL, fontSize: 12 }}>
+                            <option value="all">📋 Todas as listas ({promoGuests.length})</option>
+                            {promoLists.map(l => (
+                              <option key={l.id} value={l.id}>
+                                {l.name}{l.promoter ? ` · ${l.promoter}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <input value={promoSearch} onChange={e => setPromoSearch(e.target.value)}
+                            placeholder="🔍 Buscar nome..." style={{ ...SL, fontSize: 12 }} />
+                        </div>
+                        {filteredGuests.length === 0
+                          ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>Nenhum convidado encontrado</div>
+                          : filteredGuests.map(g => {
                         const pl = g.promoter_lists as { id?: string; name?: string; token?: string; promoters?: { full_name?: string } } | undefined
                         return (
                           <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, marginBottom: 6, background: g.checked_in ? C.grn + '0d' : C.bg, border: `1px solid ${g.checked_in ? C.grn + '33' : C.brd + '55'}` }}>
@@ -1052,7 +1093,8 @@ export function CheckinPage({ house, user }: Props) {
                             }
                           </div>
                         )
-                      })
+                      })}
+                      </>
                   }
                 </div>
               )}
@@ -1237,6 +1279,24 @@ export function CheckinPage({ house, user }: Props) {
                       </button>
                       {listasAccordion.promoters && (
                         <div style={{ padding: '0 16px 16px' }}>
+                          {/* Filtro de lista + busca */}
+                          {promoGuests.length > 0 && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                              <select value={selPromoList} onChange={e => setSelPromoList(e.target.value)} style={{ ...SL, fontSize: 12 }}>
+                                <option value="all">📋 Todas as listas ({promoGuests.length})</option>
+                                {promoLists.map(l => {
+                                  const count = promoGuests.filter(g => g.list_id === l.id).length
+                                  return (
+                                    <option key={l.id} value={l.id}>
+                                      {l.name}{l.promoter ? ` · ${l.promoter}` : ''} ({count})
+                                    </option>
+                                  )
+                                })}
+                              </select>
+                              <input value={promoSearch} onChange={e => setPromoSearch(e.target.value)}
+                                placeholder="🔍 Buscar nome ou telefone" style={{ ...SL, fontSize: 12 }} />
+                            </div>
+                          )}
                           {filteredGuests.length === 0
                             ? <div style={{ color: C.mut, fontSize: 14, textAlign: 'center', padding: 32 }}>Nenhum convidado encontrado</div>
                             : filteredGuests.map(g => {
