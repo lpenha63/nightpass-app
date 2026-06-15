@@ -170,10 +170,12 @@ export function ClientsPage({ house, user }: Props) {
   }
 
   async function sendBulkWA() {
-    const recipients = clients.filter(c => selected.has(c.id) && c.phone)
-    // Selection can span pages; warn if some selected aren't on this page
-    if (recipients.length === 0) { sT(setToast, 'Nenhum selecionado com telefone nesta página', 'warn'); return }
     if (!bulkMsg.trim()) { sT(setToast, 'Escreva uma mensagem', 'warn'); return }
+    // Busca todos os selecionados do banco (pode abranger múltiplas páginas)
+    const ids = [...selected]
+    const { data } = await supabase.from('clients').select('id,full_name,phone').in('id', ids).not('phone', 'is', null)
+    const recipients = (data ?? []).filter(c => c.phone)
+    if (recipients.length === 0) { sT(setToast, 'Nenhum selecionado com telefone', 'warn'); return }
     if (!confirm(`Disparar para ${recipients.length} cliente(s)? Abrirá uma aba do WhatsApp por contato.`)) return
     setSendingBulk(true)
     for (const c of recipients) {

@@ -1023,6 +1023,26 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     })
   }
 
+  async function generateRepeats() {
+    const rule = String(form.repeat_rule ?? 'none')
+    const dateStr = String(form.event_date ?? '')
+    if (rule === 'none' || !dateStr) return
+    const dates = repeatDates(dateStr, rule).filter(dt => !eventDates.has(dt))
+    if (dates.length === 0) { st2('Nenhuma data nova a gerar (já existem eventos nessas datas).', 'warn'); return }
+    const label = REPT.find(r => r.v === rule)?.l ?? rule
+    const preview = dates.slice(0, 5).map(d => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })).join(', ')
+    if (!confirm(`Gerar ${dates.length} eventos (${label})?\n\nPrimeiras datas: ${preview}${dates.length > 5 ? ` ... +${dates.length - 5} mais` : ''}`)) return
+    const base = { ...form, house_id: house.id, repeat_rule: 'none', status: 'ativo', updated_at: new Date().toISOString() }
+    // Remove client-only fields
+    const { checkinCount, resCount, resPeople, listGuests, tasksTotal, tasksDone, id: _id, created_at: _ca, ...rest } = base as Record<string, unknown>
+    void checkinCount; void resCount; void resPeople; void listGuests; void tasksTotal; void tasksDone
+    const rows = dates.map(dt => ({ ...rest, event_date: dt }))
+    const { error } = await supabase.from('events').insert(rows)
+    if (error) { st2('Erro: ' + error.message, 'error'); return }
+    st2(`✅ ${dates.length} eventos criados!`, 'success')
+    load()
+  }
+
   function cancelEv(ev: EventWithCounts) {
     const ns = ev.status === 'cancelado' ? 'ativo' : 'cancelado'
     if (!confirm(ev.status === 'cancelado' ? 'Reativar este evento?' : 'Cancelar este evento?')) return
@@ -1743,6 +1763,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <select {...inp} value={String(form.repeat_rule ?? 'none')} onChange={e => setF('repeat_rule', e.target.value)}>
                   {REPT.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
                 </select>
+                {String(form.repeat_rule ?? 'none') !== 'none' && String(form.event_date ?? '') && (
+                  <button type="button" onClick={generateRepeats}
+                    style={{ marginTop: 6, width: '100%', background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 8, padding: '7px 10px', color: C.acc, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    📅 Gerar datas futuras
+                  </button>
+                )}
               </div>
             </div>
             {editing && (
