@@ -18,6 +18,7 @@ import { EventPublicPage } from './pages/EventPublic'
 import { SettingsPage } from './pages/Settings'
 import { ReservaPublicPage } from './pages/ReservaPublic'
 import { ListaPublicPage } from './pages/ListaPublic'
+import { ConfirmarPresencaPage } from './pages/ConfirmarPresenca'
 import { PromoterPortal } from './pages/PromoterPortal'
 import { AniversariantePortal, NiverGuestPage } from './pages/AniversariantePortal'
 import { LoginPage } from './pages/Login'
@@ -34,6 +35,10 @@ export default function App() {
   // Public promoter list page: /lista/[token]
   const listaMatch = window.location.pathname.match(/^\/lista\/([a-zA-Z0-9_-]+)$/)
   if (listaMatch) return <ListaPublicPage token={listaMatch[1]} />
+
+  // Guest confirmation page: /confirmar/[token]
+  const confirmarMatch = window.location.pathname.match(/^\/confirmar\/([a-zA-Z0-9_-]+)$/)
+  if (confirmarMatch) return <ConfirmarPresencaPage token={confirmarMatch[1]} />
 
   // Promoter portal: /p/[token]
   const promoterMatch = window.location.pathname.match(/^\/p\/([a-zA-Z0-9_-]+)$/)
