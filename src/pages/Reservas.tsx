@@ -387,10 +387,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     supabase.from('reservations').delete().eq('id', id).then(() => { loadRes(); loadPeriodCounts(selDate) })
   }
 
-  function unarchiveRes(id: string) {
-    supabase.from('reservations').update({ archived_at: null }).eq('id', id)
-      .then(() => loadArchived())
-  }
+
 
   function deleteArchivedRes(id: string) {
     if (!confirm('Excluir permanentemente esta reserva?')) return
