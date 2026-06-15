@@ -19,6 +19,20 @@ const AREA_FORM_DEF = { id: '', label: '', icon: '📋', color: '#60a5fa' }
 export function FreelancersPage({ house }: Props) {
   const [freelancers, setFreelancers] = useState<Freelancer[]>([])
   const [areas, setAreas] = useState<WorkArea[]>(DEFAULT_AREAS)
+  const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
+
+  async function loadRatings() {
+    const { data } = await supabase.from('team_ratings').select('freelancer_id,rating').eq('house_id', house.id)
+    const map: Record<string, { sum: number; count: number }> = {}
+    for (const r of data ?? []) {
+      if (!map[r.freelancer_id]) map[r.freelancer_id] = { sum: 0, count: 0 }
+      map[r.freelancer_id].sum += r.rating
+      map[r.freelancer_id].count += 1
+    }
+    const result: Record<string, { avg: number; count: number }> = {}
+    for (const [id, v] of Object.entries(map)) result[id] = { avg: v.sum / v.count, count: v.count }
+    setRatings(result)
+  }
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState<typeof DEF>({ ...DEF })
   const [editing, setEditing] = useState<string | null>(null)
@@ -56,7 +70,7 @@ export function FreelancersPage({ house }: Props) {
       })
   }
 
-  useEffect(() => { load(); loadAreas() }, [house.id])
+  useEffect(() => { load(); loadAreas(); loadRatings() }, [house.id])
 
   function openNew() { setEditing(null); setForm({ ...DEF }); setModal(true) }
 
@@ -335,9 +349,15 @@ export function FreelancersPage({ house }: Props) {
                   {isFunc ? '🧑‍💼' : '👷'}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     {fr.full_name}
                     <span style={{ background: (isFunc ? '#10b981' : C.acc) + '22', color: isFunc ? '#10b981' : C.acc, borderRadius: 5, padding: '1px 6px', fontSize: 9, fontWeight: 700 }}>{isFunc ? 'FUNCIONÁRIO' : 'FREELANCER'}</span>
+                    {ratings[fr.id] && (
+                      <span title={`${ratings[fr.id].count} avaliação(ões)`} style={{ display: 'flex', alignItems: 'center', gap: 3, background: '#f59e0b18', border: '1px solid #f59e0b33', borderRadius: 6, padding: '1px 7px', fontSize: 11, color: '#f59e0b', fontWeight: 700 }}>
+                        ★ {ratings[fr.id].avg.toFixed(1)}
+                        <span style={{ color: C.mut, fontWeight: 400, fontSize: 10 }}>({ratings[fr.id].count})</span>
+                      </span>
+                    )}
                   </div>
                   <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
                     {fr.phone ? `📱 ${fr.phone}` : ''}{fr.phone && fr.pix_key ? ' · ' : ''}{fr.pix_key ? `💳 PIX: ${fr.pix_key}` : ''}

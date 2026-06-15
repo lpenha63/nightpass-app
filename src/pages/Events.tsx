@@ -197,6 +197,53 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   // Enviar flyer (broadcast WhatsApp)
   interface FlyerClient { id: string; full_name: string; phone?: string; gender?: string }
+  // Avaliação de equipe
+  interface RatingEntry { freelancer_id: string; full_name: string; role: string; rating: number; comment: string; existing_id?: string }
+  const [ratingEv, setRatingEv] = useState<EventWithCounts | null>(null)
+  const [ratingEntries, setRatingEntries] = useState<RatingEntry[]>([])
+  const [ratingSaving, setRatingSaving] = useState(false)
+
+  async function openRating(ev: EventWithCounts) {
+    setRatingEv(ev)
+    const { data: efs } = await supabase
+      .from('event_freelancers')
+      .select('freelancer_id, role, freelancers(full_name)')
+      .eq('event_id', ev.id)
+    const { data: existing } = await supabase
+      .from('team_ratings')
+      .select('id, freelancer_id, rating, comment')
+      .eq('event_id', ev.id)
+    const existingMap = new Map((existing ?? []).map(r => [r.freelancer_id, r]))
+    const entries: RatingEntry[] = (efs ?? []).map(ef => {
+      const ex = existingMap.get(ef.freelancer_id)
+      return {
+        freelancer_id: ef.freelancer_id,
+        full_name: (ef.freelancers as { full_name?: string } | null)?.full_name ?? 'Sem nome',
+        role: ef.role ?? '',
+        rating: ex?.rating ?? 0,
+        comment: ex?.comment ?? '',
+        existing_id: ex?.id,
+      }
+    })
+    setRatingEntries(entries)
+  }
+
+  async function saveRatings() {
+    if (!ratingEv) return
+    setRatingSaving(true)
+    const toSave = ratingEntries.filter(e => e.rating > 0)
+    for (const e of toSave) {
+      if (e.existing_id) {
+        await supabase.from('team_ratings').update({ rating: e.rating, comment: e.comment }).eq('id', e.existing_id)
+      } else {
+        await supabase.from('team_ratings').insert({ house_id: ratingEv.house_id, event_id: ratingEv.id, freelancer_id: e.freelancer_id, rating: e.rating, comment: e.comment || null })
+      }
+    }
+    setRatingSaving(false)
+    st2(`✅ ${toSave.length} avaliação(ões) salvas!`, 'success')
+    setRatingEv(null)
+  }
+
   const [flyerEv, setFlyerEv] = useState<EventWithCounts | null>(null)
   const [flyerClients, setFlyerClients] = useState<FlyerClient[]>([])
   const [flyerSel, setFlyerSel] = useState<Set<string>>(new Set())
@@ -2468,6 +2515,53 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       </Modal>
 
       {/* Enviar flyer */}
+      {/* ── Modal avaliação de equipe ── */}
+      <Modal open={!!ratingEv} title={`⭐ Avaliar equipe — ${ratingEv?.name ?? ''}`} onClose={() => setRatingEv(null)} wide>
+        {ratingEv && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            {ratingEntries.length === 0 ? (
+              <div style={{ textAlign: 'center', color: C.mut, padding: '24px 0' }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>👷</div>
+                <div>Nenhum membro escalado para este evento.</div>
+              </div>
+            ) : (
+              ratingEntries.map((e, i) => (
+                <div key={e.freelancer_id} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div>
+                      <span style={{ color: C.txt, fontWeight: 700, fontSize: 14 }}>{e.full_name}</span>
+                      {e.role && <span style={{ color: C.mut, fontSize: 11, marginLeft: 8 }}>{e.role}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {[1,2,3,4,5].map(star => (
+                        <button key={star} onClick={() => setRatingEntries(prev => prev.map((r, idx) => idx === i ? { ...r, rating: r.rating === star ? 0 : star } : r))}
+                          style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: star <= e.rating ? '#f59e0b' : C.brd, padding: '0 1px', lineHeight: 1 }}>
+                          ★
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    value={e.comment}
+                    onChange={ev2 => setRatingEntries(prev => prev.map((r, idx) => idx === i ? { ...r, comment: ev2.target.value } : r))}
+                    placeholder="Comentário opcional..."
+                    style={{ width: '100%', background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '6px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', boxSizing: 'border-box' }}
+                  />
+                </div>
+              ))
+            )}
+            {ratingEntries.length > 0 && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn onClick={saveRatings} style={{ flex: 1 }} disabled={ratingSaving}>
+                  {ratingSaving ? 'Salvando...' : '💾 Salvar avaliações'}
+                </Btn>
+                <Btn onClick={() => setRatingEv(null)} variant="ghost">Cancelar</Btn>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!flyerEv} title={`📤 Enviar flyer — ${flyerEv?.name ?? ''}`} onClose={() => { if (!flyerSending) { setFlyerEv(null); setFlyerClients([]) } }} wide>
         {flyerEv && (() => {
           const filtered = flyerClients.filter(c => {
@@ -2775,6 +2869,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                     <Pill color={evStatusColor(ev.status ?? 'ativo')} small>{ev.status ?? 'ativo'}</Pill>
                     <Btn onClick={() => openEdit(ev)} small variant="ghost" title="Editar">✏️</Btn>
                     <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')} title="Budget">💰</Btn>
+                    <Btn onClick={() => openRating(ev)} small variant="secondary" style={cbtn('#f59e0b')} title="Avaliar equipe">⭐ Avaliar</Btn>
                     {ev.status !== 'encerrado' && (
                       <Btn onClick={() => closeEv(ev)} small variant="secondary" style={cbtn('#6366f1')} title="Encerrar evento e arquivar reservas">
                         <i className="bi bi-archive-fill" /> Encerrar
