@@ -78,7 +78,7 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
 
   useEffect(() => {
     load()
-    supabase.from('freelancers').select('id,full_name,staff_type').eq('house_id', house.id).eq('status','active')
+    supabase.from('freelancers').select('id,full_name,staff_type').eq('house_id', house.id).eq('status','ativo').eq('staff_type','funcionario')
       .then(r => setStaff((r.data ?? []) as StaffOption[]))
   }, [house.id])
 
