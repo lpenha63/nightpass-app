@@ -182,6 +182,17 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       .then(r => setEventsForDate(r.data ?? []))
   }
 
+  // Arquiva automaticamente reservas com data anterior a hoje
+  async function autoArchivePast() {
+    const today = new Date()
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
+    await supabase.from('reservations')
+      .update({ archived_at: new Date().toISOString() })
+      .eq('house_id', house.id)
+      .lt('reservation_date', todayStr)
+      .is('archived_at', null)
+  }
+
   function loadArchived() {
     supabase.from('reservations')
       .select('*,events(name,event_date),reservation_items(*)')
@@ -239,6 +250,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   useEffect(() => { loadTypes() }, [house.id])
   useEffect(() => { loadSpaces() }, [house.id])
   useEffect(() => { loadPeriodCounts(selDate) }, [selDate, house.id])
+  useEffect(() => { autoArchivePast().then(() => loadRes()) }, [house.id])
 
   // Close space dropdown on outside click
   useEffect(() => {
