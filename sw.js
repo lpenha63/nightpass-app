@@ -1,4 +1,4 @@
-const CACHE = 'nightpass-v7';
+const CACHE = 'nightpass-v8';
 const STATIC = ['/manifest.json', '/icon.svg'];
 const OFFLINE_QUEUE_KEY = 'np-offline-queue';
 
