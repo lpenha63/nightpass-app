@@ -2807,7 +2807,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                       <div style={{ color: C.txt, fontWeight: 700, fontSize: 15, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.name}</div>
-                      <button onClick={() => openFlyer(ev)} title="Enviar flyer para contatos" style={{ flexShrink: 0, background: '#25d36622', border: '1px solid #25d36644', borderRadius: 7, padding: '3px 9px', color: '#25d366', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>📤 Flyer</button>
                     </div>
                     <div style={{ color: C.mut, fontSize: 12 }}>{fd(ev.event_date)} · {(ev.start_time ?? '').slice(0, 5)}</div>
                   </div>
@@ -2822,6 +2821,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                     </div>
                   </div>
                 </div>
+                <button onClick={() => openFlyer(ev)} title="Enviar flyer para contatos" style={{ width: '100%', background: '#25d36614', border: '1px solid #25d36633', borderRadius: 8, padding: '6px 12px', color: '#25d366', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', marginBottom: 8 }}>📤 Enviar flyer</button>
                 {ev.genre && <div style={{ color: C.acc, fontSize: 11, fontWeight: 600, marginBottom: 6 }}>🎵 {ev.genre}</div>}
                 {ev.promotions && <div style={{ color: C.gold, fontSize: 12, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'flex-start', gap: 5 }}><span>🎉</span><span>{ev.promotions}</span></div>}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, color: C.mut, marginBottom: 10 }}>
