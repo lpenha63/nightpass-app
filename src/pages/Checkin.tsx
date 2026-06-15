@@ -1008,17 +1008,20 @@ export function CheckinPage({ house, user }: Props) {
                                               <div style={{ color: C.grn, fontSize: 11, fontWeight: 700 }}>✅ Entrou</div>
                                               {g.checked_in_at && <div style={{ color: C.acc, fontSize: 11, fontWeight: 700 }}>🕐 {new Date(g.checked_in_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>}
                                             </div>
-                                          : hasBasic
-                                            ? <button
+                                          : <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+                                              <button
                                                 onClick={() => { setPendingCI({ type: 'reserva', guest: g, reservation: res }); setListComanda(''); setListAmount(prefilledAmount(res, g)) }}
-                                                style={{ background: `linear-gradient(135deg,${C.acc},#1d4ed8)`, border: 'none', borderRadius: 8, padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, boxShadow: '0 2px 8px rgba(59,130,246,0.4)' }}>
-                                                ✅ Check-in
+                                                style={{ background: `linear-gradient(135deg,${C.acc},#1d4ed8)`, border: 'none', borderRadius: 8, padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(59,130,246,0.4)' }}>
+                                                ✅ {hasBasic ? 'Check-in' : 'Entrada direta'}
                                               </button>
-                                            : <button
-                                                onClick={() => { setCompleteGuest(g); setCompleteForm({ phone: g.phone ?? '', cpf: g.cpf ?? '', birth_date: g.birth_date ?? '', photoDataUrl: '', comanda: '', amount: prefilledAmount(res, g) }) }}
-                                                style={{ background: C.gold + '22', border: `1px solid ${C.gold}44`, borderRadius: 8, padding: '6px 10px', color: C.gold, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                                                📝 Cadastrar
-                                              </button>
+                                              {!hasBasic && (
+                                                <button
+                                                  onClick={() => { setCompleteGuest(g); setCompleteForm({ phone: g.phone ?? '', cpf: g.cpf ?? '', birth_date: g.birth_date ?? '', photoDataUrl: '', comanda: '', amount: prefilledAmount(res, g) }) }}
+                                                  style={{ background: C.gold + '11', border: `1px solid ${C.gold}44`, borderRadius: 8, padding: '4px 8px', color: C.gold, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                                  📝 Completar dados
+                                                </button>
+                                              )}
+                                            </div>
                                         }
                                       </div>
                                     )
@@ -1232,15 +1235,18 @@ export function CheckinPage({ house, user }: Props) {
                                               )}
                                             </div>
                                             {!g.checked_in && (
-                                              (g.phone && g.birth_date)
-                                                ? <button onClick={() => { setPendingCI({ type: 'reserva', guest: g, reservation: r }); setListComanda(''); setListAmount(prefilledAmount(r, g)) }}
-                                                    style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, color: C.acc, borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                                                    Entrada
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+                                                <button onClick={() => { setPendingCI({ type: 'reserva', guest: g, reservation: r }); setListComanda(''); setListAmount(prefilledAmount(r, g)) }}
+                                                  style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, color: C.acc, borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                                  {(g.phone && g.birth_date) ? 'Entrada' : '🚪 Entrada direta'}
+                                                </button>
+                                                {!(g.phone && g.birth_date) && (
+                                                  <button onClick={() => { setCompleteGuest(g); setCompleteForm({ phone: g.phone ?? '', cpf: g.cpf ?? '', birth_date: g.birth_date ?? '', photoDataUrl: '', comanda: '', amount: prefilledAmount(r, g) }) }}
+                                                    style={{ background: C.gold + '11', border: `1px solid ${C.gold}44`, color: C.gold, borderRadius: 7, padding: '3px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                                    📝 Completar dados
                                                   </button>
-                                                : <button onClick={() => { setCompleteGuest(g); setCompleteForm({ phone: g.phone ?? '', cpf: g.cpf ?? '', birth_date: g.birth_date ?? '', photoDataUrl: '', comanda: '', amount: prefilledAmount(r, g) }) }}
-                                                    style={{ background: C.gold + '22', border: `1px solid ${C.gold}44`, color: C.gold, borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                                                    📝 Cadastrar
-                                                  </button>
+                                                )}
+                                              </div>
                                             )}
                                           </div>
                                         ))}
