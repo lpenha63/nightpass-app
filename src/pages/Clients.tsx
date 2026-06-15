@@ -168,9 +168,9 @@ export function ClientsPage({ house, user }: Props) {
     try {
       const ext = file.name.split('.').pop()
       const path = `bulk/${house.id}/${Date.now()}.${ext}`
-      const { error } = await supabase.storage.from('media').upload(path, file, { upsert: true, contentType: file.type })
+      const { error } = await supabase.storage.from('event-flyers').upload(path, file, { upsert: true, contentType: file.type })
       if (error) throw error
-      const { data: pub } = supabase.storage.from('media').getPublicUrl(path)
+      const { data: pub } = supabase.storage.from('event-flyers').getPublicUrl(path)
       setBulkImageUrl(pub.publicUrl)
     } catch (e: any) {
       sT(setToast, 'Erro ao enviar imagem: ' + e.message, 'error')
