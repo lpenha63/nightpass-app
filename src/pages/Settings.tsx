@@ -96,6 +96,77 @@ export function SettingsPage({ house }: Props) {
   const [confirmPass, setConfirmPass] = useState('')
   const [changingPass, setChangingPass] = useState(false)
   const [showNewPass, setShowNewPass] = useState(false)
+  const [qrCode, setQrCode] = useState<string | null>(null)
+  const [qrLoading, setQrLoading] = useState(false)
+  const [instanceStatus, setInstanceStatus] = useState<'unknown' | 'open' | 'close' | 'connecting'>('unknown')
+  const qrInterval = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function stopQrPolling() {
+    if (qrInterval.current) { clearInterval(qrInterval.current); qrInterval.current = null }
+  }
+
+  async function checkInstanceStatus() {
+    if (!waConfig?.api_url || !waConfig.instance_name || !waConfig.api_key) return
+    try {
+      const res = await fetch(`${waConfig.api_url}/instance/connectionState/${waConfig.instance_name}`, {
+        headers: { apikey: waConfig.api_key },
+      })
+      const data = await res.json()
+      const state = data?.instance?.state ?? data?.state ?? 'unknown'
+      setInstanceStatus(state)
+      if (state === 'open') { setQrCode(null); stopQrPolling(); sT(setToast, '✅ WhatsApp conectado com sucesso!', 'success') }
+    } catch { /* silently ignore */ }
+  }
+
+  async function createAndConnect() {
+    if (!waConfig?.api_url || !waConfig.instance_name || !waConfig.api_key) {
+      sT(setToast, 'Preencha e salve API URL, Instância e API Key antes de conectar', 'warn'); return
+    }
+    setQrLoading(true); setQrCode(null); stopQrPolling()
+    try {
+      // Tenta criar a instância (ignora erro se já existir)
+      await fetch(`${waConfig.api_url}/instance/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: waConfig.api_key },
+        body: JSON.stringify({ instanceName: waConfig.instance_name, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+      })
+      // Busca o QR
+      const qrRes = await fetch(`${waConfig.api_url}/instance/connect/${waConfig.instance_name}`, {
+        headers: { apikey: waConfig.api_key },
+      })
+      const qrData = await qrRes.json()
+      const base64 = qrData?.base64 ?? qrData?.qrcode?.base64 ?? qrData?.qr ?? null
+      if (base64) {
+        setQrCode(base64)
+        setInstanceStatus('connecting')
+        // Polling a cada 3s para checar se conectou
+        qrInterval.current = setInterval(checkInstanceStatus, 3000)
+      } else {
+        // Pode já estar conectado
+        await checkInstanceStatus()
+        if (instanceStatus !== 'open') sT(setToast, '⚠️ QR não retornado. Verifique a instância no painel da Evolution API.', 'warn')
+      }
+    } catch (e: unknown) {
+      sT(setToast, '❌ Erro ao conectar: ' + (e instanceof Error ? e.message : 'verifique a URL'), 'error')
+    }
+    setQrLoading(false)
+  }
+
+  async function disconnectInstance() {
+    if (!waConfig?.api_url || !waConfig.instance_name || !waConfig.api_key) return
+    if (!confirm('Desconectar o WhatsApp desta instância?')) return
+    stopQrPolling(); setQrCode(null)
+    try {
+      await fetch(`${waConfig.api_url}/instance/logout/${waConfig.instance_name}`, {
+        method: 'DELETE', headers: { apikey: waConfig.api_key },
+      })
+      setInstanceStatus('close')
+      sT(setToast, 'WhatsApp desconectado.', 'success')
+    } catch { sT(setToast, '❌ Erro ao desconectar', 'error') }
+  }
+
+  // Checa status ao carregar e limpa polling ao desmontar
+  useEffect(() => { return () => stopQrPolling() }, [])
 
   async function changePassword() {
     if (newPass.length < 6) { sT(setToast, 'A senha deve ter ao menos 6 caracteres', 'error'); return }
@@ -395,11 +466,54 @@ export function SettingsPage({ house }: Props) {
               </button>
             </div>
 
-            <div style={{ marginTop: 16 }}>
+            <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Btn onClick={saveWa} disabled={savingWa} variant="ghost" style={{ fontSize: 13 }}>
                 {savingWa ? 'Salvando...' : '💾 Salvar WhatsApp'}
               </Btn>
+              <Btn onClick={createAndConnect} disabled={qrLoading} style={{ fontSize: 13, background: '#25d36622', border: '1px solid #25d36644', color: '#25d366' }}>
+                {qrLoading ? '⏳ Aguarde...' : instanceStatus === 'open' ? '✅ Conectado' : '📱 Conectar WhatsApp'}
+              </Btn>
+              {instanceStatus === 'open' && (
+                <Btn onClick={disconnectInstance} variant="danger" style={{ fontSize: 13 }}>🔌 Desconectar</Btn>
+              )}
             </div>
+
+            {/* QR Code */}
+            {(qrCode || instanceStatus === 'connecting') && instanceStatus !== 'open' && (
+              <div style={{ marginTop: 20, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 14, padding: 20, textAlign: 'center' }}>
+                <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, marginBottom: 4 }}>📱 Escaneie o QR Code</div>
+                <div style={{ color: C.mut, fontSize: 12, marginBottom: 16 }}>
+                  Abra o WhatsApp → Menu → Aparelhos conectados → Conectar aparelho
+                </div>
+                {qrCode
+                  ? <img src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
+                      alt="QR Code WhatsApp"
+                      style={{ width: 220, height: 220, borderRadius: 12, border: `4px solid #25d366`, display: 'block', margin: '0 auto' }} />
+                  : <div style={{ width: 220, height: 220, borderRadius: 12, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', color: C.mut, fontSize: 13 }}>
+                      ⏳ Aguardando QR...
+                    </div>
+                }
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }}>
+                  <button onClick={createAndConnect} disabled={qrLoading}
+                    style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 14px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    🔄 Atualizar QR
+                  </button>
+                  <button onClick={() => { setQrCode(null); stopQrPolling(); setInstanceStatus('unknown') }}
+                    style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 14px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    ✕ Fechar
+                  </button>
+                </div>
+                <div style={{ marginTop: 10, color: C.mut, fontSize: 11 }}>
+                  Verificando conexão automaticamente...
+                </div>
+              </div>
+            )}
+
+            {instanceStatus === 'open' && !qrCode && (
+              <div style={{ marginTop: 12, background: '#25d36612', border: '1px solid #25d36633', borderRadius: 10, padding: '10px 14px', color: '#25d366', fontSize: 13, fontWeight: 600 }}>
+                ✅ WhatsApp conectado e pronto para enviar mensagens.
+              </div>
+            )}
           </>
         )}
       </Section>
