@@ -67,6 +67,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   })
   const [resList, setResList] = useState<Reservation[]>([])
   const [formOpen, setFormOpen] = useState(false)
+  const [viewOnly, setViewOnly] = useState(false)
   const [editing, setEditing] = useState<Reservation | null>(null)
   const [eventsForDate, setEventsForDate] = useState<Array<{ id: string; name: string }>>([])
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -422,6 +423,24 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     setEditing(null); setForm(RDEF(selDate)); setFormItems([])
     loadOccupied(selDate)
     pullEventsForDate(selDate)
+    setViewOnly(false)
+    setFormOpen(true)
+  }
+
+  function consultRes(r: Reservation) {
+    setEditing(r)
+    const saleItemsCents = (r.reservation_items ?? []).reduce((s, it) => s + (it.quantity || 0) * (it.unit_price_cents ?? it.unit_cost_cents ?? 0), 0)
+    const baseCents = Math.max(0, (r.amount_cents ?? 0) - saleItemsCents)
+    setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: baseCents ? String(baseCents / 100) : '', expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ? String(r.deposit_cents / 100) : '', observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ? String(r.list_custom_value_cents / 100) : '', list_male_value_cents: r.list_male_value_cents ? String(r.list_male_value_cents / 100) : '', list_female_value_cents: r.list_female_value_cents ? String(r.list_female_value_cents / 100) : '' })
+    setFormItems((r.reservation_items ?? []).map(it => ({
+      name: it.name, quantity: String(it.quantity),
+      sale_cents: String((it.unit_price_cents ?? it.unit_cost_cents ?? 0) / 100),
+      cost_cents: it.unit_price_cents != null ? String((it.unit_cost_cents ?? 0) / 100) : '',
+      mode: 'unit' as const,
+    })))
+    supabase.from('events').select('id,name,event_date').eq('house_id', house.id).eq('event_date', r.reservation_date ?? selDate)
+      .then(res => setEventsForDate(res.data ?? []))
+    setViewOnly(true)
     setFormOpen(true)
   }
 
@@ -522,7 +541,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       <Toast toast={toast} />
 
       {/* ── Formulário Reserva ── */}
-      <Modal open={formOpen} title={editing ? 'Editar Reserva' : 'Nova Reserva'} onClose={() => { setFormOpen(false); setEditing(null); setForm(RDEF(selDate)); setFormItems([]) }} wide maxWidth={1100}>
+      <Modal open={formOpen} title={viewOnly ? '🔍 Consultar Reserva' : editing ? 'Editar Reserva' : 'Nova Reserva'} onClose={() => { setFormOpen(false); setEditing(null); setViewOnly(false); setForm(RDEF(selDate)); setFormItems([]) }} wide maxWidth={1100}>
+        <fieldset disabled={viewOnly} style={{ border: 'none', padding: 0, margin: 0, opacity: viewOnly ? 0.8 : 1 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
 
           {/* ── Tipo de Celebração — full width ── */}
@@ -992,16 +1012,17 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           </div>
 
           <div style={{ order: 100, gridColumn: 'span 3', display: 'flex', gap: 10 }}>
-            <Btn onClick={saveRes} style={{ flex: 1 }}>💾 Salvar</Btn>
-            {editing?.token && (
+            {!viewOnly && <Btn onClick={saveRes} style={{ flex: 1 }}>💾 Salvar</Btn>}
+            {!viewOnly && editing?.token && (
               <Btn onClick={() => sendListLink(editing)} variant="secondary"
                 style={editing.list_link_sent_at ? { background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` } : undefined}>
                 {editing.list_link_sent_at ? '✅ Link enviado · Reenviar' : '📲 Enviar Link'}
               </Btn>
             )}
-            <Btn onClick={() => { setFormOpen(false); setEditing(null); setFormItems([]) }} variant="ghost">Cancelar</Btn>
+            <Btn onClick={() => { setFormOpen(false); setEditing(null); setViewOnly(false); setFormItems([]) }} variant="ghost">{viewOnly ? 'Fechar' : 'Cancelar'}</Btn>
           </div>
         </div>
+        </fieldset>
       </Modal>
 
       {/* ── Header ── */}
@@ -1578,8 +1599,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                      <Btn small onClick={() => unarchiveRes(r.id)}>
-                        <i className="bi bi-arrow-counterclockwise" /> Reativar
+                      <Btn small onClick={() => consultRes(r)}>
+                        🔍 Consultar
                       </Btn>
                       <Btn small variant="danger" onClick={() => deleteArchivedRes(r.id)}>
                         <i className="bi bi-trash3-fill" />
