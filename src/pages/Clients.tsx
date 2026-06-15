@@ -163,20 +163,19 @@ export function ClientsPage({ house, user }: Props) {
     setBulkMsg(''); setBulkEventId(''); setBulkImageUrl(''); setBulkProgress(null); setBulkModal(true)
   }
 
-  async function uploadBulkImage(file: File) {
+  function loadBulkImage(file: File) {
     setUploadingBulkImg(true)
-    try {
-      const ext = file.name.split('.').pop()
-      const path = `bulk/${house.id}/${Date.now()}.${ext}`
-      const { error } = await supabase.storage.from('event-flyers').upload(path, file, { upsert: true, contentType: file.type })
-      if (error) throw error
-      const { data: pub } = supabase.storage.from('event-flyers').getPublicUrl(path)
-      setBulkImageUrl(pub.publicUrl)
-    } catch (e: any) {
-      sT(setToast, 'Erro ao enviar imagem: ' + e.message, 'error')
-    } finally {
+    const reader = new FileReader()
+    reader.onload = e => {
+      const result = e.target?.result as string
+      if (result) setBulkImageUrl(result) // data:image/...;base64,...
       setUploadingBulkImg(false)
     }
+    reader.onerror = () => {
+      sT(setToast, 'Erro ao ler imagem', 'error')
+      setUploadingBulkImg(false)
+    }
+    reader.readAsDataURL(file)
   }
 
   function applyEventTemplate(eventId: string) {
@@ -217,8 +216,10 @@ export function ClientsPage({ house, user }: Props) {
       if (useEvolution && fph) {
         try {
           const useMedia = !!bulkImageUrl
+          // Evolution API aceita base64 puro (sem prefixo data:...)
+          const mediaBase64 = bulkImageUrl.includes(',') ? bulkImageUrl.split(',')[1] : bulkImageUrl
           const body = useMedia
-            ? { number: fph, mediatype: 'image', media: bulkImageUrl, caption: msg }
+            ? { number: fph, mediatype: 'image', media: mediaBase64, caption: msg }
             : { number: fph, text: msg }
           const resp = await fetch(`${cfg.api_url}/message/${useMedia ? 'sendMedia' : 'sendText'}/${cfg.instance_name}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.api_key }, body: JSON.stringify(body),
@@ -389,7 +390,7 @@ export function ClientsPage({ house, user }: Props) {
                 <span style={{ fontSize: 22 }}>{uploadingBulkImg ? '⏳' : '📎'}</span>
                 <span style={{ color: C.mut, fontSize: 13 }}>{uploadingBulkImg ? 'Enviando...' : 'Clique para carregar imagem (JPG, PNG, GIF)'}</span>
                 <input type="file" accept="image/*" style={{ display: 'none' }} disabled={uploadingBulkImg}
-                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadBulkImage(f); e.target.value = '' }} />
+                  onChange={e => { const f = e.target.files?.[0]; if (f) loadBulkImage(f); e.target.value = '' }} />
               </label>
             )}
             {bulkImageUrl && <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>✅ Imagem carregada — será enviada junto com a mensagem via WhatsApp API.</div>}
