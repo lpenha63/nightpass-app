@@ -124,27 +124,52 @@ export function SettingsPage({ house }: Props) {
     }
     setQrLoading(true); setQrCode(null); stopQrPolling()
     try {
-      // Tenta criar a instância (ignora erro se já existir)
-      await fetch(`${waConfig.api_url}/instance/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: waConfig.api_key },
-        body: JSON.stringify({ instanceName: waConfig.instance_name, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+      const headers = { 'Content-Type': 'application/json', apikey: waConfig.api_key }
+      const base = waConfig.api_url.replace(/\/$/, '')
+      const name = waConfig.instance_name
+
+      // 1. Tenta criar instância (ignora erro 409 se já existe)
+      const createRes = await fetch(`${base}/instance/create`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ instanceName: name, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
       })
-      // Busca o QR
-      const qrRes = await fetch(`${waConfig.api_url}/instance/connect/${waConfig.instance_name}`, {
-        headers: { apikey: waConfig.api_key },
-      })
-      const qrData = await qrRes.json()
-      const base64 = qrData?.base64 ?? qrData?.qrcode?.base64 ?? qrData?.qr ?? null
+      const createData = await createRes.json()
+
+      // 2. Extrai QR do response de criação (v2 retorna direto)
+      let base64: string | null =
+        createData?.qrcode?.base64 ??
+        createData?.base64 ??
+        createData?.qr ??
+        null
+
+      // 3. Se não veio no create, chama /instance/connect (v1)
+      if (!base64) {
+        const connectRes = await fetch(`${base}/instance/connect/${name}`, { headers: { apikey: waConfig.api_key } })
+        const connectData = await connectRes.json()
+        base64 =
+          connectData?.base64 ??
+          connectData?.qrcode?.base64 ??
+          connectData?.code ??
+          connectData?.qr ??
+          null
+      }
+
+      // 4. Se ainda não veio, tenta /instance/fetchInstances e reconnect
+      if (!base64) {
+        await fetch(`${base}/instance/restart/${name}`, { method: 'PUT', headers: { apikey: waConfig.api_key } })
+        await new Promise(r => setTimeout(r, 2000))
+        const retryRes = await fetch(`${base}/instance/connect/${name}`, { headers: { apikey: waConfig.api_key } })
+        const retryData = await retryRes.json()
+        base64 = retryData?.base64 ?? retryData?.qrcode?.base64 ?? retryData?.code ?? null
+      }
+
       if (base64) {
         setQrCode(base64)
         setInstanceStatus('connecting')
-        // Polling a cada 3s para checar se conectou
         qrInterval.current = setInterval(checkInstanceStatus, 3000)
       } else {
-        // Pode já estar conectado
         await checkInstanceStatus()
-        if (instanceStatus !== 'open') sT(setToast, '⚠️ QR não retornado. Verifique a instância no painel da Evolution API.', 'warn')
+        if (instanceStatus !== 'open') sT(setToast, '⚠️ QR não retornado. Tente clicar em "Atualizar QR" em alguns segundos.', 'warn')
       }
     } catch (e: unknown) {
       sT(setToast, '❌ Erro ao conectar: ' + (e instanceof Error ? e.message : 'verifique a URL'), 'error')
