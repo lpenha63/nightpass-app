@@ -216,7 +216,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     const me = new Date(dt.getFullYear(), dt.getMonth()+1, 0).toISOString().split('T')[0]
 
     const sum = (rows: { people_count: number | null }[]) => rows.reduce((acc, r) => acc + (r.people_count ?? 0), 0)
-    const base = () => supabase.from('reservations').select('people_count').eq('house_id', house.id)
+    const base = () => supabase.from('reservations').select('people_count').eq('house_id', house.id).is('archived_at', null)
     Promise.all([
       base().eq('reservation_date', d),
       base().gte('reservation_date', fmt(mon)).lte('reservation_date', fmt(sun)),
