@@ -44,6 +44,9 @@ export function ClientsPage({ house, user }: Props) {
   const [events, setEvents] = useState<Array<{ id: string; name: string; event_date: string; flyer_url?: string }>>([])
   const [sendingBulk, setSendingBulk] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [bulkImageUrl, setBulkImageUrl] = useState('')
+  const [uploadingBulkImg, setUploadingBulkImg] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ sent: number; total: number } | null>(null)
 
   const load = useCallback(() => {
     if (!house) return
@@ -157,7 +160,23 @@ export function ClientsPage({ house, user }: Props) {
 
   function openBulk() {
     if (selected.size === 0) { sT(setToast, 'Selecione ao menos 1 cliente', 'warn'); return }
-    setBulkMsg(''); setBulkEventId(''); setBulkModal(true)
+    setBulkMsg(''); setBulkEventId(''); setBulkImageUrl(''); setBulkProgress(null); setBulkModal(true)
+  }
+
+  async function uploadBulkImage(file: File) {
+    setUploadingBulkImg(true)
+    try {
+      const ext = file.name.split('.').pop()
+      const path = `bulk/${house.id}/${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('media').upload(path, file, { upsert: true, contentType: file.type })
+      if (error) throw error
+      const { data: pub } = supabase.storage.from('media').getPublicUrl(path)
+      setBulkImageUrl(pub.publicUrl)
+    } catch (e: any) {
+      sT(setToast, 'Erro ao enviar imagem: ' + e.message, 'error')
+    } finally {
+      setUploadingBulkImg(false)
+    }
   }
 
   function applyEventTemplate(eventId: string) {
@@ -171,21 +190,57 @@ export function ClientsPage({ house, user }: Props) {
 
   async function sendBulkWA() {
     if (!bulkMsg.trim()) { sT(setToast, 'Escreva uma mensagem', 'warn'); return }
-    // Busca todos os selecionados do banco (pode abranger múltiplas páginas)
     const ids = [...selected]
     const { data } = await supabase.from('clients').select('id,full_name,phone').in('id', ids).not('phone', 'is', null)
     const recipients = (data ?? []).filter(c => c.phone)
     if (recipients.length === 0) { sT(setToast, 'Nenhum selecionado com telefone', 'warn'); return }
-    if (!confirm(`Disparar para ${recipients.length} cliente(s)? Abrirá uma aba do WhatsApp por contato.`)) return
-    setSendingBulk(true)
-    for (const c of recipients) {
-      const nome = c.full_name.split(' ')[0]
-      const msg = bulkMsg.replace(/\{nome\}/g, nome)
-      window.open(`https://wa.me/55${cn(c.phone ?? '')}?text=${encodeURIComponent(msg)}`, '_blank')
-      await new Promise(r => setTimeout(r, 800))
+
+    // Try Evolution API first (supports images + text)
+    const { data: cfg } = await supabase.from('whatsapp_config').select('*').eq('house_id', house.id).limit(1).single()
+    const useEvolution = !!(cfg?.active && cfg?.api_url && cfg?.instance_name && cfg?.api_key)
+
+    if (!useEvolution && bulkImageUrl) {
+      sT(setToast, 'Configure o WhatsApp em Configurações para enviar imagens.', 'warn'); return
     }
-    setSendingBulk(false); setBulkModal(false); setSelected(new Set())
-    sT(setToast, `✅ ${recipients.length} conversas abertas!`, 'success')
+    if (!confirm(`Disparar para ${recipients.length} cliente(s)?`)) return
+
+    setSendingBulk(true)
+    setBulkProgress({ sent: 0, total: recipients.length })
+    let ok = 0
+
+    for (const c of recipients) {
+      const { fmtWAPhone } = await import('../utils/whatsapp')
+      const fph = fmtWAPhone(c.phone ?? '')
+      const nome = (c.full_name || '').split(' ')[0]
+      const msg = bulkMsg.replace(/\{nome\}/g, nome)
+
+      if (useEvolution && fph) {
+        try {
+          const useMedia = !!bulkImageUrl
+          const body = useMedia
+            ? { number: fph, mediatype: 'image', media: bulkImageUrl, caption: msg }
+            : { number: fph, text: msg }
+          const resp = await fetch(`${cfg.api_url}/message/${useMedia ? 'sendMedia' : 'sendText'}/${cfg.instance_name}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.api_key }, body: JSON.stringify(body),
+          })
+          const res = await resp.json()
+          const sent = !!(res?.key || res?.status === 'success' || res?.status === 'PENDING')
+          if (sent) ok++
+          await supabase.from('whatsapp_logs').insert({ house_id: house.id, recipient_phone: fph, recipient_name: c.full_name, message_type: 'bulk', message_body: msg, status: sent ? 'sent' : 'failed', error_msg: sent ? null : JSON.stringify(res), related_client_id: c.id })
+        } catch (e: any) {
+          await supabase.from('whatsapp_logs').insert({ house_id: house.id, recipient_phone: fph, recipient_name: c.full_name, message_type: 'bulk', message_body: msg, status: 'failed', error_msg: e?.message ?? 'erro', related_client_id: c.id })
+        }
+        await new Promise(r => setTimeout(r, 500))
+      } else {
+        window.open(`https://wa.me/55${cn(c.phone ?? '')}?text=${encodeURIComponent(msg)}`, '_blank')
+        ok++
+        await new Promise(r => setTimeout(r, 800))
+      }
+      setBulkProgress(p => p ? ({ ...p, sent: p.sent + 1 }) : p)
+    }
+
+    setSendingBulk(false); setBulkProgress(null); setBulkModal(false); setSelected(new Set())
+    sT(setToast, `✅ ${ok} mensagen${ok !== 1 ? 's' : ''} enviada${ok !== 1 ? 's' : ''}!`, 'success')
   }
 
   async function sendAllBdWA() {
@@ -314,9 +369,44 @@ export function ClientsPage({ house, user }: Props) {
           </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Mensagem</label>
-            <textarea {...inp({ minHeight: 150, height: 150, resize: 'vertical' as const })} value={bulkMsg} onChange={e => setBulkMsg(e.target.value)} placeholder="Escreva a mensagem... Use {nome} para inserir o primeiro nome de cada cliente." />
-            <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>💡 <code>{'{nome}'}</code> é substituído pelo primeiro nome de cada destinatário. Abre uma aba do WhatsApp por contato.</div>
+            <textarea {...inp({ minHeight: 130, height: 130, resize: 'vertical' as const })} value={bulkMsg} onChange={e => setBulkMsg(e.target.value)} placeholder="Escreva a mensagem... Use {nome} para inserir o primeiro nome de cada cliente." />
+            <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>💡 <code>{'{nome}'}</code> é substituído pelo primeiro nome de cada destinatário.</div>
           </div>
+
+          {/* Image upload */}
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 8 }}>🖼️ Imagem (opcional)</label>
+            {bulkImageUrl ? (
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <img src={bulkImageUrl} alt="preview" style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 10, border: `1px solid ${C.brd}`, display: 'block' }} />
+                <button onClick={() => setBulkImageUrl('')}
+                  style={{ position: 'absolute', top: 6, right: 6, background: '#0009', border: 'none', borderRadius: '50%', width: 28, height: 28, color: '#fff', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.card, border: `1px dashed ${C.brd}`, borderRadius: 10, padding: '12px 16px', cursor: 'pointer' }}>
+                <span style={{ fontSize: 22 }}>{uploadingBulkImg ? '⏳' : '📎'}</span>
+                <span style={{ color: C.mut, fontSize: 13 }}>{uploadingBulkImg ? 'Enviando...' : 'Clique para carregar imagem (JPG, PNG, GIF)'}</span>
+                <input type="file" accept="image/*" style={{ display: 'none' }} disabled={uploadingBulkImg}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadBulkImage(f); e.target.value = '' }} />
+              </label>
+            )}
+            {bulkImageUrl && <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>✅ Imagem carregada — será enviada junto com a mensagem via WhatsApp API.</div>}
+          </div>
+
+          {/* Progress */}
+          {bulkProgress && (
+            <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12, color: C.mut }}>
+                <span>Enviando...</span><span>{bulkProgress.sent}/{bulkProgress.total}</span>
+              </div>
+              <div style={{ background: C.brd, borderRadius: 4, height: 6 }}>
+                <div style={{ background: '#25D366', borderRadius: 4, height: 6, width: `${(bulkProgress.sent / bulkProgress.total) * 100}%`, transition: 'width 0.3s' }} />
+              </div>
+            </div>
+          )}
+
           {(() => {
             const recip = clients.filter(c => selected.has(c.id) && c.phone).length
             const noPhone = selected.size - clients.filter(c => selected.has(c.id) && c.phone).length
@@ -327,10 +417,10 @@ export function ClientsPage({ house, user }: Props) {
             )
           })()}
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-            <Btn onClick={sendBulkWA} disabled={sendingBulk} style={{ flex: 1, background: '#25D36622', color: '#25D366', border: '1px solid #25D36644' }}>
-              {sendingBulk ? '⏳ Enviando...' : '📲 Disparar agora'}
+            <Btn onClick={sendBulkWA} disabled={sendingBulk || uploadingBulkImg} style={{ flex: 1, background: '#25D36622', color: '#25D366', border: '1px solid #25D36644' }}>
+              {sendingBulk ? `⏳ ${bulkProgress ? `${bulkProgress.sent}/${bulkProgress.total}` : 'Enviando...'}` : '📲 Disparar agora'}
             </Btn>
-            <Btn onClick={() => setBulkModal(false)} variant="ghost">Cancelar</Btn>
+            <Btn onClick={() => setBulkModal(false)} variant="ghost" disabled={sendingBulk}>Cancelar</Btn>
           </div>
         </div>
       </Modal>
