@@ -37,6 +37,11 @@ interface Guest {
   is_vip?: boolean
   checked_in?: boolean
   promoter_id?: string
+  invite_token?: string
+  list_value_cents?: number
+  max_plus_ones?: number
+  invited_by?: string
+  confirmed_at?: string
 }
 
 interface ResItem {
@@ -852,9 +857,34 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   }
 
   function reloadGuests(eventId: string) {
-    supabase.from('promoter_list_guests').select('id,full_name,phone,gender,birth_date,list_type,is_vip,checked_in,promoter_id')
+    supabase.from('promoter_list_guests').select('id,full_name,phone,gender,birth_date,list_type,is_vip,checked_in,promoter_id,invite_token,list_value_cents,max_plus_ones,invited_by,confirmed_at')
       .eq('event_id', eventId).order('full_name')
       .then(r => setGuests((r.data ?? []) as Guest[]))
+  }
+
+  async function generateInviteToken(g: Guest): Promise<string> {
+    if (g.invite_token) return g.invite_token
+    const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+    await supabase.from('promoter_list_guests').update({ invite_token: token }).eq('id', g.id!)
+    return token
+  }
+
+  async function updateGuestField(guestId: string, fields: Partial<Guest>) {
+    await supabase.from('promoter_list_guests').update(fields).eq('id', guestId)
+    if (guestEv) reloadGuests(guestEv.id)
+  }
+
+  async function sendGuestInviteWA(g: Guest) {
+    if (!g.phone) { st2('Convidado sem telefone', 'warn'); return }
+    if (!guestEv) return
+    const token = await generateInviteToken(g)
+    reloadGuests(guestEv.id)
+    const confirmLink = `${window.location.origin}/confirmar/${token}`
+    const dateStr = new Date(guestEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    const plusMsg = (g.max_plus_ones ?? 0) > 0 ? `\n\n👥 Você pode trazer até *${g.max_plus_ones} amigo(s)* — compartilhe o link com eles também!` : ''
+    const msg = `Olá ${g.full_name.split(' ')[0]}! 🎉\n\nVocê está na lista VIP de *${guestEv.name}* — ${dateStr}${guestEv.start_time ? ` às ${guestEv.start_time.slice(0,5)}` : ''}.\n\n✅ Confirme sua presença com 1 clique:\n${confirmLink}${plusMsg}\n\nTe esperamos! 🔥`
+    const phone = '55' + g.phone.replace(/\D/g, '')
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
   }
 
   async function addGuestManually() {
@@ -2001,30 +2031,76 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV</Btn>
             </div>
 
-            {/* Lista de convidados — grid de 2 colunas se houver espaço */}
+            {/* Lista de convidados */}
             {guests.length === 0
               ? <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhum convidado na lista ainda</div>
               : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0 24px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {guests
                     .filter(g => guestFilter === 'all' ? true : guestFilter === 'present' ? g.checked_in : !g.checked_in)
                     .map((g, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.brd}` }}>
-                        <span style={{ fontSize: 16, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: g.checked_in ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {g.full_name}{g.is_vip && <span style={{ color: C.gold, marginLeft: 6, fontSize: 11, fontWeight: 800 }}>⭐ VIP</span>}
-                          </div>
-                          <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8 }}>
-                            {g.phone && <span>{g.phone}</span>}
-                            {g.birth_date && <span style={{ color: C.acc }}>🎂 {new Date(g.birth_date + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
+                      <div key={i} style={{ background: C.bg, border: `1px solid ${g.is_vip ? C.gold + '44' : C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
+                        {/* Linha 1: avatar + nome + status */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <span style={{ fontSize: 18, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {g.full_name}
+                              {g.invited_by && <span style={{ color: C.mut, fontSize: 10, marginLeft: 6 }}>👥 convidado</span>}
+                            </div>
+                            <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {g.phone && <span>📱 {g.phone}</span>}
+                              {g.confirmed_at && <span style={{ color: C.grn }}>✅ Confirmou</span>}
+                              {g.checked_in && <span style={{ color: C.grn, fontWeight: 700 }}>✓ Entrou</span>}
+                            </div>
                           </div>
                         </div>
-                        <button onClick={() => toggleGuestVip(g)} title="Entrada VIP (gratuita)"
-                          style={{ flexShrink: 0, background: g.is_vip ? C.gold + '22' : 'transparent', border: `1px solid ${g.is_vip ? C.gold : C.brd}`, borderRadius: 8, padding: '4px 8px', color: g.is_vip ? C.gold : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                          {g.is_vip ? '⭐ VIP' : 'VIP'}
-                        </button>
-                        {g.checked_in && <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✓ Entrou</span>}
+                        {/* Linha 2: controles */}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {/* VIP ON/OFF toggle */}
+                          <button onClick={() => toggleGuestVip(g)}
+                            title={g.is_vip ? 'VIP ativo — clique para lista normal' : 'Lista normal — clique para VIP'}
+                            style={{ display: 'flex', alignItems: 'center', gap: 5, background: g.is_vip ? C.gold + '22' : C.card, border: `1.5px solid ${g.is_vip ? C.gold : C.brd}`, borderRadius: 20, padding: '3px 8px 3px 4px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+                            {/* pill switch */}
+                            <span style={{ display: 'inline-flex', width: 28, height: 16, borderRadius: 10, background: g.is_vip ? C.gold : C.brd, position: 'relative', flexShrink: 0, transition: 'background 0.15s' }}>
+                              <span style={{ position: 'absolute', top: 2, left: g.is_vip ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0004' }} />
+                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: g.is_vip ? C.gold : C.mut, minWidth: 28 }}>
+                              {g.is_vip ? '⭐ VIP' : 'Lista'}
+                            </span>
+                          </button>
+                          {/* Valor lista */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ color: C.mut, fontSize: 10 }}>R$</span>
+                            <input
+                              type="number" min="0" step="0.01"
+                              value={g.list_value_cents ? (g.list_value_cents / 100).toFixed(2) : ''}
+                              onChange={e => {
+                                const v = Math.round(parseFloat(e.target.value || '0') * 100)
+                                updateGuestField(g.id!, { list_value_cents: v })
+                              }}
+                              placeholder="0,00"
+                              style={{ width: 70, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }}
+                            />
+                          </div>
+                          {/* Limite de amigos */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ color: C.mut, fontSize: 10 }}>👥</span>
+                            <input
+                              type="number" min="0" max="20"
+                              value={g.max_plus_ones ?? 0}
+                              onChange={e => updateGuestField(g.id!, { max_plus_ones: parseInt(e.target.value || '0') })}
+                              style={{ width: 45, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }}
+                            />
+                          </div>
+                          {/* Enviar convite */}
+                          {g.phone && !g.invited_by && (
+                            <button onClick={() => sendGuestInviteWA(g)}
+                              style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '3px 10px', color: '#25d366', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>
+                              {g.invite_token ? '🔄 Reenviar' : '📲 Convidar'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))
                   }
