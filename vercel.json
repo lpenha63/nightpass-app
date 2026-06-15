@@ -6,6 +6,7 @@
     { "source": "/p/:token*", "destination": "/index-src.html" },
     { "source": "/niver/:token*", "destination": "/index-src.html" },
     { "source": "/niver-guest/:token*", "destination": "/index-src.html" },
+    { "source": "/confirmar/:token*", "destination": "/index-src.html" },
     { "source": "/v2", "destination": "/index-src.html" },
     { "source": "/", "destination": "/index-src.html" },
     { "source": "/app", "destination": "/index-src.html" },
