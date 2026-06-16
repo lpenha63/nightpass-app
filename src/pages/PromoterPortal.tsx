@@ -23,6 +23,7 @@ interface EventItem {
   start_time?: string
   flyer_url?: string
   status: string
+  genre?: string
 }
 
 interface PromoterListItem {
@@ -60,6 +61,7 @@ export function PromoterPortal({ token }: { token: string }) {
   const [creatingFor, setCreatingFor] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [viewingList, setViewingList] = useState<string | null>(null)
+  const [genreFilter, setGenreFilter] = useState<string>('all')
 
   async function loadLists(pId: string, hId: string) {
     const { data } = await supabase
@@ -124,7 +126,7 @@ export function PromoterPortal({ token }: { token: string }) {
       const today = new Date().toISOString().slice(0, 10)
       const { data: evData } = await supabase
         .from('events')
-        .select('id, name, event_date, start_time, flyer_url, status')
+        .select('id, name, event_date, start_time, flyer_url, status, genre')
         .eq('house_id', hId)
         .neq('status', 'cancelado')
         .gte('event_date', today)
@@ -275,12 +277,35 @@ export function PromoterPortal({ token }: { token: string }) {
         )}
 
         {/* Events list */}
-        {events.length > 0 && (
+        {events.length > 0 && (() => {
+          const genres = Array.from(new Set(events.map(e => (e.genre ?? '').trim()).filter(Boolean)))
+          const shownEvents = genreFilter === 'all' ? events : events.filter(e => (e.genre ?? '').trim() === genreFilter)
+          return (
           <>
             <div style={{ color: C.grn, fontSize: 11, fontWeight: 700, marginBottom: 12, letterSpacing: '0.06em' }}>
               🔥 PRÓXIMOS EVENTOS
             </div>
-            {events.map(event => {
+
+            {/* Filtro por tipo (gênero) */}
+            {genres.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                {['all', ...genres].map(g => {
+                  const on = genreFilter === g
+                  return (
+                    <button key={g} onClick={() => setGenreFilter(g)}
+                      style={{ padding: '6px 14px', borderRadius: 20, border: `1px solid ${on ? C.purpL : C.brd}`, background: on ? C.purp + '33' : 'transparent', color: on ? C.purpL : C.mut, fontSize: 12, fontWeight: on ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      {g === 'all' ? '🎫 Todos' : `🎵 ${g}`}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {shownEvents.length === 0 && (
+              <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Nenhum evento deste tipo.</div>
+            )}
+
+            {shownEvents.map(event => {
               const list = lists.find(l => l.event_id === event.id)
               const isCreating = creatingFor === event.id
               const isViewingGuests = viewingList === event.id
@@ -389,7 +414,8 @@ export function PromoterPortal({ token }: { token: string }) {
               )
             })}
           </>
-        )}
+          )
+        })()}
 
         {events.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px' }}>
