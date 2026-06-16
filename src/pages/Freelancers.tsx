@@ -558,14 +558,14 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                 </div>
               ))
             )}
-            {ratingEntries.length > 0 && (
-              <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {ratingEntries.length > 0 && (
                 <Btn onClick={saveRatings} style={{ flex: 1 }} disabled={ratingSaving}>
                   {ratingSaving ? 'Salvando...' : '💾 Salvar avaliações'}
                 </Btn>
-                <Btn onClick={() => setRatingEv(null)} variant="ghost">Cancelar</Btn>
-              </div>
-            )}
+              )}
+              <Btn onClick={() => setRatingEv(null)} variant="ghost" style={ratingEntries.length === 0 ? { flex: 1 } : undefined}>Cancelar</Btn>
+            </div>
           </div>
         )}
       </Modal>

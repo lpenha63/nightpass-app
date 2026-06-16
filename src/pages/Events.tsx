@@ -379,7 +379,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setTaskForm({ title: '', deadline: '', assignee_name: '', assignee_phone: '', estimated_cost_cents: '', description: '' })
   }
 
-  async function addProdTask(area: string, icon: string) {
+  async function addProdTask(area: string, icon: string, delegateLater = false) {
     if (!taskForm.title.trim() || !prodEv) return
     const sort = prodTasks.filter(t => t.area === area).length
     const { data } = await supabase.from('event_tasks').insert({
@@ -387,8 +387,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       area, area_icon: icon, title: taskForm.title.trim(),
       description: taskForm.description || null,
       deadline: taskForm.deadline || null,
-      assignee_name: taskForm.assignee_name || null,
-      assignee_phone: taskForm.assignee_phone || null,
+      assignee_name: delegateLater ? null : (taskForm.assignee_name || null),
+      assignee_phone: delegateLater ? null : (taskForm.assignee_phone || null),
       estimated_cost_cents: taskForm.estimated_cost_cents ? Math.round(parseFloat(taskForm.estimated_cost_cents) * 100) : null,
       sort_order: sort, status: 'pending',
     }).select().single()
@@ -1493,6 +1493,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                               <input value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição / obs (opcional)" style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }} />
                               <div style={{ display: 'flex', gap: 6 }}>
                                 <button onClick={() => addProdTask(area, icon)} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Salvar</button>
+                                <button onClick={() => addProdTask(area, icon, true)} title="Salva a tarefa sem responsável para delegar depois" style={{ background: '#7c3aed22', border: '1px solid #7c3aed44', borderRadius: 8, padding: '7px 14px', color: '#a78bfa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>📌 Delegar depois</button>
                                 <button onClick={() => setTaskFormArea(null)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
                               </div>
                             </div>
@@ -1524,6 +1525,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                             <input value={taskForm.description} onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição / obs (opcional)" style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 6 }} />
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button onClick={() => addProdTask(formArea, formIcon)} style={{ background: 'linear-gradient(135deg,#d97706,#f59e0b)', border: 'none', borderRadius: 8, padding: '7px 16px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Salvar tarefa</button>
+                              <button onClick={() => addProdTask(formArea, formIcon, true)} title="Salva a tarefa sem responsável para delegar depois" style={{ background: '#7c3aed22', border: '1px solid #7c3aed44', borderRadius: 8, padding: '7px 14px', color: '#a78bfa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>📌 Delegar depois</button>
                               <button onClick={() => setTaskFormArea(null)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
                             </div>
                           </div>
@@ -1658,27 +1660,31 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       const available = allFreelancers.filter(f => !prodFr.some(pf => pf.freelancer_id === f.id && roleOf(pf) === teamArea))
                       const suggested = available.filter(f => (f.work_types ?? []).includes(teamArea as never))
                       const others = available.filter(f => !(f.work_types ?? []).includes(teamArea as never))
-                      const ordered = [...suggested, ...others]
+                      const rowFn = (f: Freelancer) => (
+                        <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name}</div>
+                            <div style={{ fontSize: 11, color: C.mut }}>
+                              {(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}
+                              {f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}
+                            </div>
+                          </div>
+                          <button onClick={() => { addProdFreelancer(f.id, teamArea) }} style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: 8, padding: '5px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
+                        </div>
+                      )
+                      const hdr = (txt: string) => <div style={{ fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', margin: '6px 0 2px' }}>{txt}</div>
                       return (
                         <div style={{ padding: '12px 14px', background: '#ffffff06', border: `1px solid #f59e0b44`, borderRadius: 10 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                             <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700 }}>Adicionar em {roleLabel(teamArea)}</span>
                             <button onClick={() => setTeamArea(null)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
                           </div>
-                          {ordered.length === 0
+                          {suggested.length === 0 && others.length === 0
                             ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Freelancers.' : 'Todos os freelancers já estão nesta área.'}</div>
-                            : ordered.map(f => (
-                              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name} {(f.work_types ?? []).includes(teamArea as never) && <span style={{ fontSize: 10, color: '#10b981' }}>• da função</span>}</div>
-                                  <div style={{ fontSize: 11, color: C.mut }}>
-                                    {(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}
-                                    {f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}
-                                  </div>
-                                </div>
-                                <button onClick={() => { addProdFreelancer(f.id, teamArea) }} style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: 8, padding: '5px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
-                              </div>
-                            ))
+                            : <>
+                                {suggested.length > 0 && <>{hdr(`✓ Da área · ${roleLabel(teamArea)}`)}{suggested.map(rowFn)}</>}
+                                {others.length > 0 && <>{hdr('Outras áreas')}{others.map(rowFn)}</>}
+                              </>
                           }
                         </div>
                       )
@@ -2385,24 +2391,28 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 const available = allFreelancers.filter(f => !evFreelancers.some(ef => ef.freelancer_id === f.id && roleOf(ef) === frModalArea))
                 const suggested = available.filter(f => (f.work_types ?? []).includes(frModalArea as never))
                 const others = available.filter(f => !(f.work_types ?? []).includes(frModalArea as never))
-                const ordered = [...suggested, ...others]
+                const rowFn = (f: Freelancer) => (
+                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name}</div>
+                      <div style={{ fontSize: 11, color: C.mut }}>{(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}{f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}</div>
+                    </div>
+                    <button onClick={() => addEvFreelancer(f.id, frModalArea)} style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 8, padding: '5px 12px', color: C.acc, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
+                  </div>
+                )
+                const hdr = (txt: string) => <div style={{ fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', margin: '6px 0 2px' }}>{txt}</div>
                 return (
                   <div style={{ padding: '12px 14px', background: '#ffffff06', border: `1px solid ${C.acc}44`, borderRadius: 10 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <span style={{ fontSize: 12, color: C.acc, fontWeight: 700 }}>Escalar em {wlabel(frModalArea)}</span>
                       <button onClick={() => setFrModalArea(null)} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 16, cursor: 'pointer' }}>✕</button>
                     </div>
-                    {ordered.length === 0
+                    {suggested.length === 0 && others.length === 0
                       ? <div style={{ fontSize: 12, color: C.mut, textAlign: 'center', padding: '8px 0' }}>{allFreelancers.length === 0 ? 'Nenhum freelancer cadastrado. Cadastre na aba Equipe.' : 'Todos já estão nesta área.'}</div>
-                      : ordered.map(f => (
-                        <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: `1px solid ${C.brd}22` }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: C.txt }}>{f.full_name} {(f.work_types ?? []).includes(frModalArea as never) && <span style={{ fontSize: 10, color: '#10b981' }}>• da função</span>}</div>
-                            <div style={{ fontSize: 11, color: C.mut }}>{(f.work_types ?? []).map(wt => wlabel(wt)).join(' · ')}{f.daily_rate_cents ? ` · ${fmtCurrency(f.daily_rate_cents)}/dia` : ''}</div>
-                          </div>
-                          <button onClick={() => addEvFreelancer(f.id, frModalArea)} style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 8, padding: '5px 12px', color: C.acc, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>➕ Add</button>
-                        </div>
-                      ))
+                      : <>
+                          {suggested.length > 0 && <>{hdr(`✓ Da área · ${wlabel(frModalArea)}`)}{suggested.map(rowFn)}</>}
+                          {others.length > 0 && <>{hdr('Outras áreas')}{others.map(rowFn)}</>}
+                        </>
                     }
                   </div>
                 )
@@ -2648,14 +2658,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 </div>
               ))
             )}
-            {ratingEntries.length > 0 && (
-              <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {ratingEntries.length > 0 && (
                 <Btn onClick={saveRatings} style={{ flex: 1 }} disabled={ratingSaving}>
                   {ratingSaving ? 'Salvando...' : '💾 Salvar avaliações'}
                 </Btn>
-                <Btn onClick={() => setRatingEv(null)} variant="ghost">Cancelar</Btn>
-              </div>
-            )}
+              )}
+              <Btn onClick={() => setRatingEv(null)} variant="ghost" style={ratingEntries.length === 0 ? { flex: 1 } : undefined}>Cancelar</Btn>
+            </div>
           </div>
         )}
       </Modal>
@@ -3032,6 +3042,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 </div>
                 <button onClick={() => openFlyer(ev)} title="Enviar flyer para contatos" style={{ width: '100%', background: '#25d36614', border: '1px solid #25d36633', borderRadius: 8, padding: '6px 12px', color: '#25d366', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', marginBottom: 8 }}>📤 Enviar flyer</button>
                 {ev.genre && <div style={{ color: C.acc, fontSize: 11, fontWeight: 600, marginBottom: 6 }}>🎵 {ev.genre}</div>}
+                {(() => {
+                  const names = (ev.artists ?? []).map(a => a.name).filter(n => n && n.trim())
+                  return names.length > 0 ? (
+                    <div style={{ color: '#f472b6', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+                      <span>🎤</span><span>{names.join(' · ')}</span>
+                    </div>
+                  ) : null
+                })()}
                 {ev.promotions && <div style={{ color: C.gold, fontSize: 12, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'flex-start', gap: 5 }}><span>🎉</span><span>{ev.promotions}</span></div>}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, color: C.mut, marginBottom: 10 }}>
                   {ev.price_male_cents ? <span>♂ {fmtCurrency(ev.price_male_cents)}</span> : null}
