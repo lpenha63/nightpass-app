@@ -55,18 +55,20 @@ export function ListaPublicPage({ token }: { token: string }) {
   const params = new URLSearchParams(window.location.search)
   const preNome = params.get('nome') ?? ''
   const preTel  = params.get('tel')  ?? ''
+  const refGuest = params.get('ref') ?? '' // id do convidado que indicou (amigos)
 
   const [form, setForm] = useState<Guest>({ ...EMPTY, name: preNome, phone: preTel })
 
   useEffect(() => {
+    // Não carregamos a lista de convidados existente: o cliente não deve ver
+    // a contagem nem os nomes de quem já confirmou.
     supabase.from('promoter_lists')
       .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url),houses(name,logo_url)')
       .eq('token', token).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
         setLista(r.data as PromoterList)
-        supabase.from('promoter_list_guests').select('*').eq('list_id', r.data.id)
-          .then(g => { setSaved((g.data ?? []) as SavedGuest[]); setLoading(false) })
+        setLoading(false)
       })
   }, [token])
 
@@ -85,17 +87,14 @@ export function ListaPublicPage({ token }: { token: string }) {
       gender: form.gender || null,
       birth_date: form.birth_date || null,
       promoter_confirmed: true,
+      invited_by: refGuest || null,
+      confirmed_at: new Date().toISOString(),
     }).select().single()
     if (err) { setError('Erro ao salvar. Tente novamente.'); setSubmitting(false); return }
     setSaved(p => [...p, data as SavedGuest])
     setForm(EMPTY)
     setSubmitting(false)
     setDone(true)
-  }
-
-  async function removeGuest(id: string) {
-    await supabase.from('promoter_list_guests').delete().eq('id', id)
-    setSaved(p => p.filter(g => g.id !== id))
   }
 
   function fdate(d: string) {
@@ -176,17 +175,6 @@ export function ListaPublicPage({ token }: { token: string }) {
 
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 60px' }}>
 
-        {/* Saved guests counter */}
-        {saved.length > 0 && (
-          <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 18px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ color: C.txt, fontWeight: 800, fontSize: 20 }}>{saved.length}</div>
-              <div style={{ color: C.mut, fontSize: 12 }}>já na lista</div>
-            </div>
-            <div style={{ color: '#a78bfa', fontSize: 28 }}>🎭</div>
-          </div>
-        )}
-
         {/* Add form */}
         {preNome && (
           <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 12, padding: '12px 16px', marginBottom: 16, color: '#10b981', fontSize: 13, fontWeight: 600 }}>
@@ -252,31 +240,6 @@ export function ListaPublicPage({ token }: { token: string }) {
           {submitting ? 'Salvando...' : preNome ? '✅ Confirmar Presença' : '➕ Entrar na Lista'}
         </button>
 
-        {saved.length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: '0.06em' }}>JÁ NA LISTA</div>
-            {saved.map((g, i) => (
-              <div key={g.id} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '12px 16px', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ color: C.txt, fontWeight: 700, fontSize: 15 }}>
-                    {i + 1}.{' '}
-                    {g.gender === 'feminino' ? <span style={{ color: '#f472b6' }}>♀ </span> : g.gender === 'masculino' ? <span style={{ color: C.acc }}>♂ </span> : ''}
-                    {g.full_name}
-                  </div>
-                  {g.phone && <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>📱 {fmtPhone(g.phone)}</div>}
-                </div>
-                <button onClick={() => removeGuest(g.id)}
-                  style={{ background: 'none', border: 'none', color: C.mut, fontSize: 18, cursor: 'pointer', padding: '4px 8px' }}>
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', marginTop: 20 }}>
-          Você pode retornar a este link para adicionar ou remover convidados
-        </div>
       </div>
     </div>
   )

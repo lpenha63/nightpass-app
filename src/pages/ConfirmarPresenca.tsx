@@ -7,19 +7,6 @@ const C = {
   gold: '#f59e0b', txt: '#f9fafb', mut: '#6b7280', sub: '#9ca3af',
 }
 
-const INP: React.CSSProperties = {
-  width: '100%', background: '#1f2937', border: `1px solid ${C.brd}`,
-  borderRadius: 10, padding: '12px 14px', color: C.txt, fontSize: 15,
-  fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
-}
-
-function fmtPhone(v: string) {
-  const d = v.replace(/\D/g, '').slice(0, 11)
-  if (d.length === 11) return d.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3')
-  if (d.length >= 10) return d.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3')
-  return d
-}
-
 interface GuestInfo {
   id: string
   full_name: string
@@ -42,12 +29,8 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
   const [notFound, setNotFound] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  const [showFriendForm, setShowFriendForm] = useState(false)
-  const [friendForm, setFriendForm] = useState({ name: '', phone: '', gender: '' })
-  const [friendDone, setFriendDone] = useState(false)
-  const [friendSending, setFriendSending] = useState(false)
-  const [friendsAdded, setFriendsAdded] = useState(0)
-  const [plusOnesCount, setPlusOnesCount] = useState(0)
+  const [listToken, setListToken] = useState('')
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -59,12 +42,13 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
       if (!data) { setNotFound(true); setLoading(false); return }
       setGuest(data as GuestInfo)
       if (data.confirmed_at) setConfirmed(true)
-      // Count existing plus ones
-      const { count } = await supabase
-        .from('promoter_list_guests')
-        .select('id', { count: 'exact', head: true })
-        .eq('invited_by', data.id)
-      setPlusOnesCount(count ?? 0)
+      // Busca o token da lista para gerar link de convite de amigos
+      const { data: listData } = await supabase
+        .from('promoter_lists')
+        .select('token')
+        .eq('id', data.list_id)
+        .single()
+      if (listData?.token) setListToken(listData.token)
       setLoading(false)
     }
     load()
@@ -80,32 +64,27 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
     setConfirming(false)
   }
 
-  async function addFriend() {
-    if (!guest || !friendForm.name.trim()) return
-    const maxAllowed = guest.max_plus_ones ?? 0
-    if (maxAllowed === 0) return
-    if (plusOnesCount >= maxAllowed) return
-    setFriendSending(true)
-    await supabase.from('promoter_list_guests').insert({
-      list_id: guest.list_id,
-      house_id: guest.house_id,
-      event_id: guest.event_id,
-      promoter_id: guest.promoter_id,
-      full_name: friendForm.name.trim(),
-      phone: friendForm.phone.replace(/\D/g, '') || null,
-      gender: friendForm.gender || null,
-      list_type: 'promoter',
-      is_vip: false,
-      promoter_confirmed: true,
-      invited_by: guest.id,
-      confirmed_at: new Date().toISOString(),
-    })
-    setPlusOnesCount(p => p + 1)
-    setFriendsAdded(p => p + 1)
-    setFriendForm({ name: '', phone: '', gender: '' })
-    setFriendSending(false)
-    setFriendDone(true)
-    setTimeout(() => setFriendDone(false), 3000)
+  function friendLink() {
+    // Link da lista com atribuição ao convidado que indicou (ref = id do guest)
+    return `${window.location.origin}/lista/${listToken}?ref=${guest?.id ?? ''}`
+  }
+
+  function shareFriendsWA() {
+    if (!guest) return
+    const ev = guest.events
+    const dateStr = ev?.event_date
+      ? new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+      : ''
+    const msg = `🎉 Bora pra *${ev?.name}* — ${dateStr}?\n\nTô te colocando na lista! Confirme seus dados aqui:\n${friendLink()}`
+    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
+  }
+
+  async function copyFriendLink() {
+    try {
+      await navigator.clipboard.writeText(friendLink())
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2500)
+    } catch { /* ignore */ }
   }
 
   if (loading) return (
@@ -131,9 +110,6 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
   const dateStr = ev?.event_date
     ? new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
     : ''
-  const canInvite = (guest.max_plus_ones ?? 0) > 0 && plusOnesCount < (guest.max_plus_ones ?? 0)
-  const spotsLeft = (guest.max_plus_ones ?? 0) - plusOnesCount
-
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: 'system-ui,sans-serif', padding: '0 0 60px' }}>
       {/* Flyer */}
@@ -185,56 +161,24 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
           )}
         </div>
 
-        {/* Convidar amigos */}
-        {confirmed && (guest.max_plus_ones ?? 0) > 0 && (
+        {/* Convidar amigos — compartilhar link */}
+        {confirmed && (guest.max_plus_ones ?? 0) > 0 && listToken && (
           <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 24 }}>
-            <div style={{ fontWeight: 800, color: C.txt, fontSize: 16, marginBottom: 4 }}>👥 Convidar amigos</div>
+            <div style={{ fontWeight: 800, color: C.txt, fontSize: 16, marginBottom: 4 }}>👥 Convide seus amigos</div>
             <div style={{ color: C.mut, fontSize: 13, marginBottom: 16 }}>
-              Você pode trazer <strong style={{ color: C.acc }}>{spotsLeft} amigo{spotsLeft !== 1 ? 's' : ''}</strong> ainda.
-              {friendsAdded > 0 && <span style={{ color: C.grn }}> ({friendsAdded} adicionado{friendsAdded !== 1 ? 's' : ''})</span>}
+              Você pode levar até <strong style={{ color: C.acc }}>{guest.max_plus_ones} amigo{(guest.max_plus_ones ?? 0) !== 1 ? 's' : ''}</strong>.
+              Envie o link abaixo — eles confirmam a presença em poucos segundos.
             </div>
 
-            {canInvite ? (
-              <>
-                {!showFriendForm ? (
-                  <button onClick={() => setShowFriendForm(true)}
-                    style={{ width: '100%', background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 12, padding: '14px', color: C.acc, fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                    ➕ Adicionar amigo
-                  </button>
-                ) : (
-                  <div style={{ display: 'grid', gap: 10 }}>
-                    <input style={INP} placeholder="Nome do amigo *" value={friendForm.name}
-                      onChange={e => setFriendForm(p => ({ ...p, name: e.target.value }))} />
-                    <input style={INP} placeholder="Celular (opcional)" value={fmtPhone(friendForm.phone)}
-                      onChange={e => setFriendForm(p => ({ ...p, phone: e.target.value }))} />
-                    <select style={{ ...INP }} value={friendForm.gender} onChange={e => setFriendForm(p => ({ ...p, gender: e.target.value }))}>
-                      <option value="">Gênero (opcional)</option>
-                      <option value="M">♂ Masculino</option>
-                      <option value="F">♀ Feminino</option>
-                    </select>
-                    {friendDone && (
-                      <div style={{ background: C.grn + '15', border: `1px solid ${C.grn}33`, borderRadius: 10, padding: '10px 14px', color: C.grn, fontSize: 13, fontWeight: 700, textAlign: 'center' }}>
-                        ✅ Amigo adicionado!
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={addFriend} disabled={!friendForm.name.trim() || friendSending}
-                        style={{ flex: 1, background: C.grn, border: 'none', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                        {friendSending ? '...' : '✅ Confirmar amigo'}
-                      </button>
-                      <button onClick={() => setShowFriendForm(false)}
-                        style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 16px', color: C.mut, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
-                Limite de convidados atingido.
-              </div>
-            )}
+            <button onClick={shareFriendsWA}
+              style={{ width: '100%', background: '#25D366', border: 'none', borderRadius: 12, padding: '14px', color: '#fff', fontSize: 15, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              📲 Enviar pelo WhatsApp
+            </button>
+
+            <button onClick={copyFriendLink}
+              style={{ width: '100%', background: copied ? C.grn + '22' : C.acc + '15', border: `1px solid ${copied ? C.grn : C.acc}44`, borderRadius: 12, padding: '13px', color: copied ? C.grn : C.acc, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+              {copied ? '✅ Link copiado!' : '🔗 Copiar link de convite'}
+            </button>
           </div>
         )}
       </div>

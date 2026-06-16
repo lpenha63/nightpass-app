@@ -253,11 +253,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [flyerClients, setFlyerClients] = useState<FlyerClient[]>([])
   const [flyerSel, setFlyerSel] = useState<Set<string>>(new Set())
   const [flyerMsg, setFlyerMsg] = useState('')
-  const [flyerLink, setFlyerLink] = useState('')
   const [flyerSearch, setFlyerSearch] = useState('')
   const [flyerGender, setFlyerGender] = useState<'all' | 'masculino' | 'feminino'>('all')
   const [flyerSending, setFlyerSending] = useState(false)
   const [flyerProgress, setFlyerProgress] = useState({ sent: 0, total: 0 })
+  const [flyerMaxFriends, setFlyerMaxFriends] = useState(3)
+  const [flyerListRec, setFlyerListRec] = useState<{ token: string; listId: string; promoterId: string } | null>(null)
 
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
@@ -1006,20 +1007,15 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     return newList ? { token, listId: newList.id, promoterId } : null
   }
 
-  async function ensureHouseListToken(ev: EventWithCounts): Promise<string | null> {
-    const rec = await ensureHouseListRecord(ev)
-    return rec?.token ?? null
-  }
-
   async function openFlyer(ev: EventWithCounts) {
-    setFlyerEv(ev); setFlyerSel(new Set()); setFlyerSearch(''); setFlyerGender('all'); setFlyerProgress({ sent: 0, total: 0 }); setFlyerClients([])
+    setFlyerEv(ev); setFlyerSel(new Set()); setFlyerSearch(''); setFlyerGender('all'); setFlyerProgress({ sent: 0, total: 0 }); setFlyerClients([]); setFlyerListRec(null)
     const { data } = await supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).not('phone', 'is', null).order('full_name')
     setFlyerClients((data ?? []) as FlyerClient[])
-    const token = await ensureHouseListToken(ev)
-    const link = token ? `${window.location.origin}/lista/${token}` : ''
-    setFlyerLink(link)
+    const rec = await ensureHouseListRecord(ev)
+    setFlyerListRec(rec)
     const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
-    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!` + (link ? `\n\n✅ Confirme sua presença na lista da casa: ${link}` : '') + `\n\nTe esperamos! 🔥`)
+    // Link de confirmação é gerado individualmente por convidado em sendFlyer ({{link}})
+    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!\n\n✅ Confirme sua presença com 1 clique:\n{{link}}\n\nTe esperamos! 🔥`)
   }
 
   async function sendFlyer() {
@@ -1028,12 +1024,34 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     if (!cfg?.active) { st2('Ative a integração WhatsApp em Configurações para enviar.', 'error'); return }
     const sel = flyerClients.filter(c => flyerSel.has(c.id) && c.phone)
     if (sel.length === 0) { st2('Selecione ao menos um contato.', 'warn'); return }
+    let rec = flyerListRec
+    if (!rec) { rec = await ensureHouseListRecord(flyerEv); setFlyerListRec(rec) }
+    if (!rec) { st2('Erro: lista da casa não pôde ser criada.', 'error'); return }
     setFlyerSending(true); setFlyerProgress({ sent: 0, total: sel.length })
     let ok = 0
     for (const c of sel) {
       const fph = fmtWAPhone(c.phone ?? '')
       if (fph) {
-        const msg = flyerMsg.replace(/\{\{nome\}\}/g, (c.full_name || '').split(' ')[0])
+        // Cria/reusa um registro de convidado para este cliente com token individual
+        let token: string
+        const { data: existing } = await supabase.from('promoter_list_guests')
+          .select('id,invite_token').eq('list_id', rec.listId).eq('client_id', c.id).limit(1).maybeSingle()
+        if (existing?.id) {
+          token = existing.invite_token || (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2))
+          await supabase.from('promoter_list_guests').update({ invite_token: token, max_plus_ones: flyerMaxFriends }).eq('id', existing.id)
+        } else {
+          token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+          await supabase.from('promoter_list_guests').insert({
+            list_id: rec.listId, house_id: house.id, event_id: flyerEv.id, promoter_id: rec.promoterId,
+            full_name: c.full_name, phone: (c.phone ?? '').replace(/\D/g, '') || null, gender: c.gender || null,
+            list_type: 'promoter', is_vip: false, promoter_confirmed: false,
+            client_id: c.id, invite_token: token, max_plus_ones: flyerMaxFriends,
+          })
+        }
+        const confirmLink = `${window.location.origin}/confirmar/${token}`
+        const msg = flyerMsg
+          .replace(/\{\{nome\}\}/g, (c.full_name || '').split(' ')[0])
+          .replace(/\{\{link\}\}/g, confirmLink)
         const useMedia = !!flyerEv.flyer_url
         const body = useMedia
           ? { number: fph, mediatype: 'image', media: flyerEv.flyer_url, caption: msg }
@@ -2654,9 +2672,17 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 {flyerEv.flyer_url
                   ? <img src={flyerEv.flyer_url} alt="flyer" style={{ width: '100%', borderRadius: 10, marginBottom: 10, maxHeight: 280, objectFit: 'cover' }} />
                   : <div style={{ background: C.bg, border: `1px dashed ${C.brd}`, borderRadius: 10, padding: 20, textAlign: 'center', color: C.mut, fontSize: 13, marginBottom: 10 }}>Sem flyer cadastrado — será enviado só o texto.</div>}
-                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Mensagem (use {'{{nome}}'} para o primeiro nome)</label>
+                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Mensagem (use {'{{nome}}'} para o nome e {'{{link}}'} para o link individual)</label>
                 <textarea value={flyerMsg} onChange={e => setFlyerMsg(e.target.value)} style={{ width: '100%', minHeight: 150, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginTop: 4, boxSizing: 'border-box' }} />
-                {flyerLink && <div style={{ fontSize: 11, color: C.mut, marginTop: 6, wordBreak: 'break-all' }}>🔗 Confirmação de presença: <span style={{ color: '#a78bfa' }}>{flyerLink}</span></div>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px' }}>
+                  <span style={{ fontSize: 12, color: C.txt, fontWeight: 600, flex: 1 }}>👥 Amigos que cada convidado pode levar</span>
+                  <input type="number" min="0" max="20" value={flyerMaxFriends}
+                    onChange={e => setFlyerMaxFriends(Math.max(0, parseInt(e.target.value || '0')))}
+                    style={{ width: 56, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '5px 8px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none', textAlign: 'center' }} />
+                </div>
+                <div style={{ fontSize: 11, color: C.mut, marginTop: 6 }}>
+                  🔗 Cada cliente recebe um link <span style={{ color: '#a78bfa' }}>/confirmar</span> exclusivo — confirma presença com 1 clique, sem preencher cadastro{flyerMaxFriends > 0 ? ', e pode convidar amigos pelo link' : ''}.
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <input value={flyerSearch} onChange={e => setFlyerSearch(e.target.value)} placeholder="🔍 Buscar contato" style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', marginBottom: 8 }} />
