@@ -258,6 +258,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [flyerSending, setFlyerSending] = useState(false)
   const [flyerProgress, setFlyerProgress] = useState({ sent: 0, total: 0 })
   const [flyerMaxFriends, setFlyerMaxFriends] = useState(3)
+  const [flyerFriendsOn, setFlyerFriendsOn] = useState(true)
   const [flyerListRec, setFlyerListRec] = useState<{ token: string; listId: string; promoterId: string } | null>(null)
 
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
@@ -1027,6 +1028,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     let rec = flyerListRec
     if (!rec) { rec = await ensureHouseListRecord(flyerEv); setFlyerListRec(rec) }
     if (!rec) { st2('Erro: lista da casa não pôde ser criada.', 'error'); return }
+    const effMaxFriends = flyerFriendsOn ? flyerMaxFriends : 0
     setFlyerSending(true); setFlyerProgress({ sent: 0, total: sel.length })
     let ok = 0
     for (const c of sel) {
@@ -1038,14 +1040,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           .select('id,invite_token').eq('list_id', rec.listId).eq('client_id', c.id).limit(1).maybeSingle()
         if (existing?.id) {
           token = existing.invite_token || (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2))
-          await supabase.from('promoter_list_guests').update({ invite_token: token, max_plus_ones: flyerMaxFriends }).eq('id', existing.id)
+          await supabase.from('promoter_list_guests').update({ invite_token: token, max_plus_ones: effMaxFriends }).eq('id', existing.id)
         } else {
           token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+          const g = (c.gender ?? '').toLowerCase()
+          const normGender = g === 'masculino' || g === 'm' ? 'M' : g === 'feminino' || g === 'f' ? 'F' : null
           await supabase.from('promoter_list_guests').insert({
             list_id: rec.listId, house_id: house.id, event_id: flyerEv.id, promoter_id: rec.promoterId,
-            full_name: c.full_name, phone: (c.phone ?? '').replace(/\D/g, '') || null, gender: c.gender || null,
+            full_name: c.full_name, phone: (c.phone ?? '').replace(/\D/g, '') || null, gender: normGender,
             list_type: 'promoter', is_vip: false, promoter_confirmed: false,
-            client_id: c.id, invite_token: token, max_plus_ones: flyerMaxFriends,
+            client_id: c.id, invite_token: token, max_plus_ones: effMaxFriends,
           })
         }
         const confirmLink = `${window.location.origin}/confirmar/${token}`
@@ -2674,14 +2678,22 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   : <div style={{ background: C.bg, border: `1px dashed ${C.brd}`, borderRadius: 10, padding: 20, textAlign: 'center', color: C.mut, fontSize: 13, marginBottom: 10 }}>Sem flyer cadastrado — será enviado só o texto.</div>}
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Mensagem (use {'{{nome}}'} para o nome e {'{{link}}'} para o link individual)</label>
                 <textarea value={flyerMsg} onChange={e => setFlyerMsg(e.target.value)} style={{ width: '100%', minHeight: 150, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginTop: 4, boxSizing: 'border-box' }} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px' }}>
-                  <span style={{ fontSize: 12, color: C.txt, fontWeight: 600, flex: 1 }}>👥 Amigos que cada convidado pode levar</span>
-                  <input type="number" min="0" max="20" value={flyerMaxFriends}
-                    onChange={e => setFlyerMaxFriends(Math.max(0, parseInt(e.target.value || '0')))}
-                    style={{ width: 56, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '5px 8px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none', textAlign: 'center' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px' }}>
+                  <span style={{ fontSize: 13, color: C.txt, fontWeight: 600, flex: 1 }}>👥 Convidar amigos</span>
+                  {flyerFriendsOn && (
+                    <input type="number" min="1" max="20" value={flyerMaxFriends}
+                      onChange={e => setFlyerMaxFriends(Math.max(1, parseInt(e.target.value || '1')))}
+                      style={{ width: 50, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '5px 8px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none', textAlign: 'center' }} />
+                  )}
+                  {/* toggle ON/OFF */}
+                  <button onClick={() => setFlyerFriendsOn(v => !v)}
+                    title={flyerFriendsOn ? 'Ligado — clique para desligar' : 'Desligado — clique para ligar'}
+                    style={{ display: 'inline-flex', width: 44, height: 24, borderRadius: 12, background: flyerFriendsOn ? C.grn : C.brd, border: 'none', position: 'relative', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s' }}>
+                    <span style={{ position: 'absolute', top: 2, left: flyerFriendsOn ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0005' }} />
+                  </button>
                 </div>
                 <div style={{ fontSize: 11, color: C.mut, marginTop: 6 }}>
-                  🔗 Cada cliente recebe um link <span style={{ color: '#a78bfa' }}>/confirmar</span> exclusivo — confirma presença com 1 clique, sem preencher cadastro{flyerMaxFriends > 0 ? ', e pode convidar amigos pelo link' : ''}.
+                  🔗 Cada cliente recebe um link <span style={{ color: '#a78bfa' }}>/confirmar</span> exclusivo — confirma presença com 1 clique, sem preencher cadastro{flyerFriendsOn ? `, e pode convidar até ${flyerMaxFriends} amigo(s) pelo link` : ' (convite de amigos desligado)'}.
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>

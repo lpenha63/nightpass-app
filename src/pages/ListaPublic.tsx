@@ -128,7 +128,7 @@ export function ListaPublicPage({ token }: { token: string }) {
         <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 16, textAlign: 'left', marginBottom: 16 }}>
           {saved.map((g, i) => (
             <div key={g.id} style={{ padding: '8px 0', borderBottom: i < saved.length - 1 ? `1px solid ${C.brd}` : 'none', color: C.txt, fontSize: 14 }}>
-              {g.gender === 'feminino' ? '♀' : g.gender === 'masculino' ? '♂' : '👤'} {g.full_name}
+              {g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'} {g.full_name}
               {g.phone ? <span style={{ color: C.mut, fontSize: 12 }}> · {fmtPhone(g.phone)}</span> : ''}
             </div>
           ))}
@@ -212,10 +212,10 @@ export function ListaPublicPage({ token }: { token: string }) {
             <div>
               <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 5 }}>GÊNERO</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {['masculino', 'feminino'].map(g => (
+                {(['M', 'F'] as const).map(g => (
                   <button key={g} onClick={() => setForm(p => ({ ...p, gender: p.gender === g ? '' : g }))}
                     style={{ flex: 1, padding: 10, borderRadius: 10, border: `2px solid ${form.gender === g ? '#7c3aed' : C.brd}`, background: form.gender === g ? 'rgba(124,58,237,0.2)' : 'transparent', color: form.gender === g ? '#a78bfa' : C.mut, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                    {g === 'masculino' ? '♂' : '♀'}
+                    {g === 'M' ? '♂' : '♀'}
                   </button>
                 ))}
               </div>
