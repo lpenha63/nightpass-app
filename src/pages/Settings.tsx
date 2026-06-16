@@ -197,11 +197,23 @@ export function SettingsPage({ house }: Props) {
     if (newPass.length < 6) { sT(setToast, 'A senha deve ter ao menos 6 caracteres', 'error'); return }
     if (newPass !== confirmPass) { sT(setToast, 'As senhas não conferem', 'error'); return }
     setChangingPass(true)
-    const { error } = await supabase.auth.updateUser({ password: newPass })
-    setChangingPass(false)
-    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
-    setNewPass(''); setConfirmPass('')
-    sT(setToast, '✅ Senha alterada com sucesso!', 'success')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { sT(setToast, 'Sessão expirada. Saia e entre novamente para trocar a senha.', 'error'); setChangingPass(false); return }
+      const { error } = await supabase.auth.updateUser({ password: newPass })
+      if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); setChangingPass(false); return }
+      setNewPass(''); setConfirmPass(''); setChangingPass(false)
+      sT(setToast, '✅ Senha alterada! Faça login novamente com a nova senha.', 'success')
+      setTimeout(async () => { await supabase.auth.signOut(); window.location.reload() }, 1800)
+    } catch (e) {
+      setChangingPass(false)
+      sT(setToast, 'Erro: ' + ((e as Error)?.message ?? 'falha ao alterar'), 'error')
+    }
+  }
+
+  async function logout() {
+    await supabase.auth.signOut()
+    window.location.reload()
   }
 
   useEffect(() => {
@@ -584,6 +596,16 @@ export function SettingsPage({ house }: Props) {
       <Btn onClick={saveHouse} disabled={saving} style={{ width: '100%', padding: 14, fontSize: 15 }}>
         {saving ? 'Salvando...' : '💾 Salvar Configurações'}
       </Btn>
+
+      {/* ── SAIR DA CONTA ── */}
+      <Section title="Conta" icon="👤">
+        <div style={{ color: C.sub, fontSize: 13, marginBottom: 14 }}>
+          Encerrar a sessão neste dispositivo.
+        </div>
+        <Btn onClick={logout} variant="ghost" style={{ width: '100%', color: C.red, borderColor: C.red + '55' }}>
+          🚪 Sair da conta
+        </Btn>
+      </Section>
     </div>
   )
 }
