@@ -35,7 +35,7 @@ export async function sendWADirect(
       const useMedia = !!opts.mediaUrl
       const body = useMedia
         ? { number: fph, mediatype: 'image', media: opts.mediaUrl, caption: message }
-        : { number: fph, text: message }
+        : { number: fph, text: message, linkPreview: true }
       const resp = await fetch(`${cfg.api_url}/message/${useMedia ? 'sendMedia' : 'sendText'}/${cfg.instance_name}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: cfg.api_key },

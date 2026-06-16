@@ -222,7 +222,7 @@ export function ClientsPage({ house, user }: Props) {
           const mediaBase64 = bulkImageUrl.includes(',') ? bulkImageUrl.split(',')[1] : bulkImageUrl
           const body = useMedia
             ? { number: fph, mediatype: 'image', media: mediaBase64, caption: msg }
-            : { number: fph, text: msg }
+            : { number: fph, text: msg, linkPreview: true }
           const resp = await fetch(`${cfg.api_url}/message/${useMedia ? 'sendMedia' : 'sendText'}/${cfg.instance_name}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.api_key }, body: JSON.stringify(body),
           })
