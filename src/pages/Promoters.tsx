@@ -5,6 +5,7 @@ import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
 import { QuickWA, type QuickWATarget } from '../components/QuickWA'
+import { sendWADirect } from '../utils/whatsapp'
 import type { House } from '../types'
 
 interface Props { house: House; user: { id: string } }
@@ -25,6 +26,8 @@ interface PromoterList {
 interface Guest {
   full_name: string; phone?: string; gender?: string; checked_in?: boolean; event_id?: string
 }
+
+interface UpcomingEvent { id: string; name: string; event_date: string }
 
 const DEF = { full_name: '', phone: '', email: '', commission_pct: 10, notes: '', fixed_fee_cents: '', min_entries: '', entry_fee_cents: '', consumacao_cents: '' }
 const TERMS_DEF = { fixed_fee_cents: '', min_entries: '', entry_fee_cents: '', consumacao_cents: '' }
@@ -57,6 +60,12 @@ export function PromotersPage({ house }: Props) {
   const [viewGuests, setViewGuests] = useState<PromoterList | null>(null)
   const [guestList, setGuestList] = useState<Guest[]>([])
 
+  // ── Vincular a evento / portal ──
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
+  const [newListEvent, setNewListEvent] = useState('')
+  const [creatingList, setCreatingList] = useState(false)
+  const [sendingPortal, setSendingPortal] = useState<string | null>(null)
+
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
   function load() {
@@ -81,10 +90,60 @@ export function PromotersPage({ house }: Props) {
 
   useEffect(() => { load() }, [house.id])
 
+  async function loadUpcomingEvents() {
+    const today = new Date().toISOString().slice(0, 10)
+    const { data } = await supabase.from('events')
+      .select('id, name, event_date')
+      .eq('house_id', house.id).neq('status', 'cancelado').gte('event_date', today)
+      .order('event_date', { ascending: true })
+    setUpcomingEvents((data ?? []) as UpcomingEvent[])
+  }
+
+  async function ensurePromoterToken(pr: Promoter): Promise<string | null> {
+    const { data: existing } = await supabase.from('promoter_tokens')
+      .select('token').eq('promoter_id', pr.id).eq('house_id', house.id).eq('active', true).limit(1).maybeSingle()
+    if (existing?.token) return existing.token
+    const token = crypto.randomUUID()
+    const { error } = await supabase.from('promoter_tokens').insert({ promoter_id: pr.id, house_id: house.id, token, active: true })
+    if (error) { st2('Erro ao gerar portal: ' + error.message, 'error'); return null }
+    return token
+  }
+
+  async function sendPortal(pr: Promoter) {
+    if (!pr.phone) { st2('Promoter sem telefone cadastrado', 'warn'); return }
+    setSendingPortal(pr.id)
+    const token = await ensurePromoterToken(pr)
+    if (!token) { setSendingPortal(null); return }
+    const link = `${window.location.origin}/p/${token}`
+    const msg = `Olá ${pr.full_name.split(' ')[0]}! 🎭\n\nVocê é promoter de *${house.name || 'nossa casa'}*.\n\nAcesse seu portal para criar e gerenciar suas listas dos eventos:\n${link}\n\n_Este link é pessoal — guarde com você._`
+    const r = await sendWADirect(house.id, pr.phone, msg, { type: 'promoter_portal' })
+    setSendingPortal(null)
+    st2(r.viaApi ? '✅ Portal enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
+  }
+
+  async function createListForEvent() {
+    if (!selPr || !newListEvent) return
+    if (prLists.some(l => l.event_id === newListEvent)) { st2('Este promoter já tem lista neste evento', 'warn'); return }
+    setCreatingList(true)
+    const token = crypto.randomUUID()
+    const { error } = await supabase.from('promoter_lists').insert({
+      promoter_id: selPr.id, house_id: house.id, event_id: newListEvent,
+      name: `Lista de ${selPr.full_name}`, token,
+      fixed_fee_cents: selPr.fixed_fee_cents ?? 0, min_entries: selPr.min_entries ?? 0,
+      entry_fee_cents: selPr.entry_fee_cents ?? 0, consumacao_cents: selPr.consumacao_cents ?? 0,
+    })
+    setCreatingList(false)
+    if (error) { st2('Erro: ' + error.message, 'error'); return }
+    setNewListEvent('')
+    st2('✅ Lista criada e vinculada ao evento!', 'success')
+    await loadPromoterLists(selPr)
+  }
+
   async function loadPromoterLists(pr: Promoter) {
     setSelPr(pr)
     setPrLists([])
     setLoadingLists(true)
+    loadUpcomingEvents()
     const { data } = await supabase
       .from('promoter_lists')
       .select('id, name, token, event_id, fixed_fee_cents, min_entries, entry_fee_cents, consumacao_cents, events(name, event_date)')
@@ -251,7 +310,33 @@ export function PromotersPage({ house }: Props) {
       </Modal>
 
       {/* ── Modal Listas do Promoter ── */}
-      <Modal open={!!selPr && !viewGuests} title={`📋 Listas — ${selPr?.full_name ?? ''}`} onClose={() => { setSelPr(null); setPrLists([]); setEditTermsId(null) }} wide>
+      <Modal open={!!selPr && !viewGuests} title={`📋 Listas — ${selPr?.full_name ?? ''}`} onClose={() => { setSelPr(null); setPrLists([]); setEditTermsId(null); setNewListEvent('') }} wide>
+        {/* Vincular a evento + enviar portal */}
+        {selPr && (
+          <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+            <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 10 }}>🔗 VINCULAR A UM EVENTO</div>
+            {(() => {
+              const available = upcomingEvents.filter(ev => !prLists.some(l => l.event_id === ev.id))
+              return (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <select value={newListEvent} onChange={e => setNewListEvent(e.target.value)} style={{ ...SL, flex: '1 1 220px' }}>
+                    <option value="">{available.length ? 'Selecione um evento…' : 'Nenhum evento futuro disponível'}</option>
+                    {available.map(ev => <option key={ev.id} value={ev.id}>{ev.name} · {fdateShort(ev.event_date)}</option>)}
+                  </select>
+                  <Btn onClick={createListForEvent} disabled={!newListEvent || creatingList}>{creatingList ? 'Criando...' : '➕ Criar lista'}</Btn>
+                </div>
+              )
+            })()}
+            {selPr.phone && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ flex: 1, color: C.mut, fontSize: 12 }}>Envie ao promoter o portal para ele criar/gerenciar as listas e compartilhar com os convidados.</span>
+                <Btn onClick={() => sendPortal(selPr)} disabled={sendingPortal === selPr.id} style={{ background: '#25D36622', color: '#25D366', border: '1px solid #25D36644' }}>
+                  {sendingPortal === selPr.id ? 'Enviando...' : '📲 Enviar portal ao promoter'}
+                </Btn>
+              </div>
+            )}
+          </div>
+        )}
         {loadingLists
           ? <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>Carregando...</div>
           : prLists.length === 0
@@ -437,6 +522,12 @@ export function PromotersPage({ house }: Props) {
                     style={{ display: 'inline-flex', alignItems: 'center', background: '#25D36622', color: '#25D366', border: '1px solid #25D36644', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
                     💬
                   </button>
+                )}
+                {pr.phone && (
+                  <Btn onClick={() => sendPortal(pr)} small variant="secondary" disabled={sendingPortal === pr.id}
+                    style={{ background: '#7c3aed22', color: '#a78bfa', border: '1px solid #7c3aed44' }} title="Enviar portal do promoter pelo WhatsApp">
+                    {sendingPortal === pr.id ? '...' : '📲 Portal'}
+                  </Btn>
                 )}
                 <Btn onClick={() => openEdit(pr)} small variant="ghost">✏️</Btn>
                 <Btn onClick={() => loadPromoterLists(pr)} small variant="secondary">📋 Listas</Btn>
