@@ -19,6 +19,7 @@ export function LoginPage({ onLogin }: { onLogin: (s: any) => void }) {
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
   const [signupDone, setSignupDone] = useState(false)
+  const [showPass, setShowPass] = useState(false)
 
   async function handleLogin() {
     if (!email || !password) { setError('Preencha e-mail e senha'); return }
@@ -151,9 +152,15 @@ export function LoginPage({ onLogin }: { onLogin: (s: any) => void }) {
             </div>
             <div>
               <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>SENHA</label>
-              <input style={INP} type="password" value={password}
-                onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                placeholder="••••••••" />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...INP, flex: 1 }} type={showPass ? 'text' : 'password'} value={password}
+                  onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                  placeholder="••••••••" />
+                <button type="button" onClick={() => setShowPass(s => !s)}
+                  style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '0 14px', color: C.mut, fontSize: 16, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {showPass ? '🙈' : '👁️'}
+                </button>
+              </div>
             </div>
             {error && <div style={{ background: '#f8717122', border: '1px solid #f8717144', borderRadius: 10, padding: '10px 14px', color: '#f87171', fontSize: 13 }}>{error}</div>}
             <button onClick={handleLogin} disabled={loading}
@@ -185,9 +192,15 @@ export function LoginPage({ onLogin }: { onLogin: (s: any) => void }) {
             </div>
             <div>
               <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 6, letterSpacing: '0.06em' }}>SENHA</label>
-              <input style={INP} type="password" value={password}
-                onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSignup()}
-                placeholder="Mínimo 6 caracteres" />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...INP, flex: 1 }} type={showPass ? 'text' : 'password'} value={password}
+                  onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                  placeholder="Mínimo 6 caracteres" />
+                <button type="button" onClick={() => setShowPass(s => !s)}
+                  style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '0 14px', color: C.mut, fontSize: 16, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {showPass ? '🙈' : '👁️'}
+                </button>
+              </div>
             </div>
             {error && <div style={{ background: '#f8717122', border: '1px solid #f8717144', borderRadius: 10, padding: '10px 14px', color: '#f87171', fontSize: 13 }}>{error}</div>}
             <button onClick={handleSignup} disabled={loading}

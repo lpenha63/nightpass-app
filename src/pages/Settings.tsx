@@ -94,8 +94,10 @@ export function SettingsPage({ house }: Props) {
   const logoRef = useRef<HTMLInputElement>(null)
   const [newPass, setNewPass] = useState('')
   const [confirmPass, setConfirmPass] = useState('')
+  const [currentPass, setCurrentPass] = useState('')
   const [changingPass, setChangingPass] = useState(false)
   const [showNewPass, setShowNewPass] = useState(false)
+  const [myEmail, setMyEmail] = useState('')
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
   const [instanceStatus, setInstanceStatus] = useState<'unknown' | 'open' | 'close' | 'connecting'>('unknown')
@@ -194,15 +196,20 @@ export function SettingsPage({ house }: Props) {
   useEffect(() => { return () => stopQrPolling() }, [])
 
   async function changePassword() {
-    if (newPass.length < 6) { sT(setToast, 'A senha deve ter ao menos 6 caracteres', 'error'); return }
+    if (!currentPass) { sT(setToast, 'Informe a senha atual', 'error'); return }
+    if (newPass.length < 6) { sT(setToast, 'A nova senha deve ter ao menos 6 caracteres', 'error'); return }
     if (newPass !== confirmPass) { sT(setToast, 'As senhas não conferem', 'error'); return }
     setChangingPass(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { sT(setToast, 'Sessão expirada. Saia e entre novamente para trocar a senha.', 'error'); setChangingPass(false); return }
+      const email = session?.user?.email ?? myEmail
+      if (!session || !email) { sT(setToast, 'Sessão expirada. Saia e entre novamente.', 'error'); setChangingPass(false); return }
+      // Verifica a senha atual reautenticando
+      const { error: authErr } = await supabase.auth.signInWithPassword({ email, password: currentPass })
+      if (authErr) { sT(setToast, 'Senha atual incorreta.', 'error'); setChangingPass(false); return }
       const { error } = await supabase.auth.updateUser({ password: newPass })
       if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); setChangingPass(false); return }
-      setNewPass(''); setConfirmPass(''); setChangingPass(false)
+      setNewPass(''); setConfirmPass(''); setCurrentPass(''); setChangingPass(false)
       sT(setToast, '✅ Senha alterada! Faça login novamente com a nova senha.', 'success')
       setTimeout(async () => { await supabase.auth.signOut(); window.location.reload() }, 1800)
     } catch (e) {
@@ -215,6 +222,10 @@ export function SettingsPage({ house }: Props) {
     await supabase.auth.signOut()
     window.location.reload()
   }
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setMyEmail(data.user?.email ?? ''))
+  }, [])
 
   useEffect(() => {
     Promise.all([
@@ -571,8 +582,15 @@ export function SettingsPage({ house }: Props) {
       {/* ── TROCA DE SENHA ── */}
       <Section title="Troca de Senha" icon="🔒">
         <div style={{ color: C.sub, fontSize: 13, marginBottom: 14 }}>
-          Defina uma nova senha de acesso para o seu usuário.
+          Confirme sua senha atual e defina uma nova senha de acesso.
         </div>
+        <Field label="LOGIN (E-MAIL)">
+          <input style={{ ...INP, opacity: 0.7 }} type="email" value={myEmail} readOnly autoComplete="username" />
+        </Field>
+        <Field label="SENHA ATUAL">
+          <input style={INP} type={showNewPass ? 'text' : 'password'} value={currentPass}
+            onChange={e => setCurrentPass(e.target.value)} placeholder="Sua senha atual" autoComplete="current-password" />
+        </Field>
         <Field label="NOVA SENHA">
           <div style={{ display: 'flex', gap: 8 }}>
             <input style={{ ...INP, flex: 1 }} type={showNewPass ? 'text' : 'password'} value={newPass}
@@ -588,7 +606,7 @@ export function SettingsPage({ house }: Props) {
             onChange={e => setConfirmPass(e.target.value)} placeholder="Repita a senha"
             onKeyDown={e => e.key === 'Enter' && changePassword()} autoComplete="new-password" />
         </Field>
-        <Btn onClick={changePassword} disabled={changingPass || !newPass || !confirmPass} variant="ghost" style={{ fontSize: 13 }}>
+        <Btn onClick={changePassword} disabled={changingPass || !currentPass || !newPass || !confirmPass} variant="ghost" style={{ fontSize: 13 }}>
           {changingPass ? 'Alterando...' : '🔒 Alterar Senha'}
         </Btn>
       </Section>
