@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
-import { cn, fmtCurrency } from '../utils/format'
+import { fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
+import { QuickWA, type QuickWATarget } from '../components/QuickWA'
 import type { House } from '../types'
 
 interface Props { house: House; user: { id: string } }
@@ -38,6 +39,7 @@ export function PromotersPage({ house }: Props) {
   const [form, setForm] = useState<Record<string, unknown>>(DEF)
   const [editing, setEditing] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const [quickWA, setQuickWA] = useState<QuickWATarget | null>(null)
   const [stats, setStats] = useState<Record<string, number>>({})
   const [noTable, setNoTable] = useState(false)
   const [ldg, setLdg] = useState(true)
@@ -193,6 +195,7 @@ export function PromotersPage({ house }: Props) {
   return (
     <div style={{ paddingBottom: 40 }}>
       <Toast toast={toast} />
+      <QuickWA houseId={house.id} target={quickWA} onClose={() => setQuickWA(null)} onSent={via => sT(setToast, via ? '✅ Mensagem enviada pela API' : '📲 Abrindo WhatsApp...', 'success')} />
 
       {/* ── Modal Promoter form ── */}
       <Modal open={modal} title={editing ? 'Editar Promoter' : 'Novo Promoter'} onClose={() => { setModal(false); setEditing(null) }}>
@@ -430,10 +433,10 @@ export function PromotersPage({ house }: Props) {
               {/* Ações */}
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                 {pr.phone && (
-                  <a href={`https://wa.me/55${cn(pr.phone)}`} target="_blank" rel="noreferrer"
-                    style={{ display: 'inline-flex', alignItems: 'center', background: '#25D36622', color: '#25D366', border: '1px solid #25D36644', borderRadius: 8, padding: '6px 10px', fontSize: 12, textDecoration: 'none', fontWeight: 700 }}>
+                  <button onClick={() => setQuickWA({ name: pr.full_name, phone: pr.phone! })}
+                    style={{ display: 'inline-flex', alignItems: 'center', background: '#25D36622', color: '#25D366', border: '1px solid #25D36644', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
                     💬
-                  </a>
+                  </button>
                 )}
                 <Btn onClick={() => openEdit(pr)} small variant="ghost">✏️</Btn>
                 <Btn onClick={() => loadPromoterLists(pr)} small variant="secondary">📋 Listas</Btn>

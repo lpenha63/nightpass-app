@@ -515,7 +515,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       r.flyer_url ? `\n🖼️ Flyer do evento:\n${r.flyer_url}` : '',
     ].filter(l => l !== '').join('\n')
 
-    await sendWADirect(house.id, r.phone ?? '', lines, { type: 'reservation_list' })
+    if (!r.phone) { sT(setToast, 'Reserva sem telefone cadastrado', 'warn'); return }
+    const res = await sendWADirect(house.id, r.phone, lines, { type: 'reservation_list' })
 
     // Marca que o link foi enviado (confirmação de envio)
     const ts = new Date().toISOString()
@@ -523,8 +524,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     if (!error) {
       setResList(p => p.map(x => x.id === r.id ? { ...x, list_link_sent_at: ts } : x))
       setEditing(e => (e && e.id === r.id ? { ...e, list_link_sent_at: ts } : e))
-      sT(setToast, '✅ Link marcado como enviado', 'success')
     }
+    sT(setToast, res.viaApi ? '✅ Link enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
   }
 
   const TAB = (active: boolean): React.CSSProperties => ({

@@ -5,6 +5,7 @@ import { Card, Toast, Btn, Modal, FAB } from '../components/ui'
 import { cn, fcpf, ftel, fd, fmtCurrency, loyalTier } from '../utils/format'
 import { sT, _err, type ToastState } from '../utils/toast'
 import { sendWADirect } from '../utils/whatsapp'
+import { QuickWA, type QuickWATarget } from '../components/QuickWA'
 import type { House, Client } from '../types'
 
 interface Props { house: House; user: { id: string; email: string }; role: string }
@@ -48,6 +49,7 @@ export function ClientsPage({ house, user }: Props) {
   const [bulkImageUrl, setBulkImageUrl] = useState('')
   const [uploadingBulkImg, setUploadingBulkImg] = useState(false)
   const [bulkProgress, setBulkProgress] = useState<{ sent: number; total: number } | null>(null)
+  const [quickWA, setQuickWA] = useState<QuickWATarget | null>(null)
 
   const load = useCallback(() => {
     if (!house) return
@@ -282,6 +284,7 @@ export function ClientsPage({ house, user }: Props) {
   return (
     <div style={{ paddingBottom: 80 }}>
       <Toast toast={toast} />
+      <QuickWA houseId={house.id} target={quickWA} onClose={() => setQuickWA(null)} onSent={via => sT(setToast, via ? '✅ Mensagem enviada pela API' : '📲 Abrindo WhatsApp...', 'success')} />
 
       {/* History Modal */}
       {histClient && (
@@ -499,10 +502,10 @@ export function ClientsPage({ house, user }: Props) {
                       </span>
                       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                         {c.phone && (
-                          <a href={`https://wa.me/55${cn(c.phone ?? '')}`} target="_blank" rel="noreferrer"
-                            style={{ display: 'inline-flex', alignItems: 'center', background: '#25D36622', color: '#25D366', border: '1px solid #25D36644', borderRadius: 8, padding: '6px 10px', fontSize: 12, textDecoration: 'none', fontWeight: 700 }}>
+                          <button onClick={() => setQuickWA({ name: c.full_name, phone: c.phone!, clientId: c.id })}
+                            style={{ display: 'inline-flex', alignItems: 'center', background: '#25D36622', color: '#25D366', border: '1px solid #25D36644', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
                             💬
-                          </a>
+                          </button>
                         )}
                         <Btn onClick={() => openHistory(c)} variant="ghost" small>📋</Btn>
                         <Btn onClick={() => openEdit(c)} variant="ghost" small>✏️</Btn>
