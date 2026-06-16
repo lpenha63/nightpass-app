@@ -4,6 +4,7 @@ import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, FAB } from '../components/ui'
 import { cn, fcpf, ftel, fd, fmtCurrency, loyalTier } from '../utils/format'
 import { sT, _err, type ToastState } from '../utils/toast'
+import { sendWADirect } from '../utils/whatsapp'
 import type { House, Client } from '../types'
 
 interface Props { house: House; user: { id: string; email: string }; role: string }
@@ -137,12 +138,11 @@ export function ClientsPage({ house, user }: Props) {
     })
   }
 
-  function sendBdWA(c: ClientWithDays) {
-    const ph = cn(c.phone ?? '')
-    if (!ph) { sT(setToast, 'Sem telefone cadastrado', 'warn'); return }
+  async function sendBdWA(c: ClientWithDays) {
+    if (!c.phone) { sT(setToast, 'Sem telefone cadastrado', 'warn'); return }
     const nome = c.full_name.split(' ')[0]
     const msg = `🎂 Feliz Aniversário, ${nome}! 🎉\n\nQue seu dia seja repleto de alegria e celebração! 🥳\n\nCom carinho, ${house.name || 'NightPass'}`
-    window.open(`https://wa.me/55${ph}?text=${encodeURIComponent(msg)}`, '_blank')
+    await sendWADirect(house.id, c.phone, msg, { clientId: c.id, type: 'birthday_wish' })
   }
 
   function toggleSel(id: string) {
@@ -250,11 +250,11 @@ export function ClientsPage({ house, user }: Props) {
     if (!confirm(`Enviar mensagem de aniversário para ${withPhone.length} pessoa(s)?`)) return
     setSendingAll(true)
     for (const c of withPhone) {
-      sendBdWA(c)
-      await new Promise(r => setTimeout(r, 800))
+      await sendBdWA(c)
+      await new Promise(r => setTimeout(r, 500))
     }
     setSendingAll(false)
-    sT(setToast, `✅ ${withPhone.length} mensagens abertas!`, 'success')
+    sT(setToast, `✅ ${withPhone.length} mensagem(ns) enviada(s)!`, 'success')
   }
 
   const now = new Date()

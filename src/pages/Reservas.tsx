@@ -4,6 +4,7 @@ import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, FAB } from '../components/ui'
 import { ftel, fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
+import { sendWADirect } from '../utils/whatsapp'
 import type { House } from '../types'
 
 interface Props {
@@ -514,8 +515,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       r.flyer_url ? `\n🖼️ Flyer do evento:\n${r.flyer_url}` : '',
     ].filter(l => l !== '').join('\n')
 
-    const ph = (r.phone ?? '').replace(/\D/g, '')
-    window.open(`https://wa.me/${ph ? '55' + ph : ''}?text=${encodeURIComponent(lines)}`, '_blank')
+    await sendWADirect(house.id, r.phone ?? '', lines, { type: 'reservation_list' })
 
     // Marca que o link foi enviado (confirmação de envio)
     const ts = new Date().toISOString()

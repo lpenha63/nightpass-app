@@ -4,7 +4,7 @@ import { C } from '../constants/theme'
 import { Card, Toast, Btn } from '../components/ui'
 import { cn, fmtCurrency, payColor, payLabel } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
-import { sendWA } from '../utils/whatsapp'
+import { sendWA, sendWADirect } from '../utils/whatsapp'
 import type { House } from '../types'
 
 interface Props {
@@ -549,7 +549,7 @@ export function DashboardPage({ house, user }: Props) {
                   <span style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{b.full_name}</span>
                 </div>
                 {b.phone && (
-                  <button onClick={() => window.open(`https://wa.me/55${cn(b.phone ?? '')}?text=${encodeURIComponent(`🎂 Feliz aniversário, ${b.full_name.split(' ')[0]}! 🎉`)}`, '_blank')}
+                  <button onClick={() => sendWADirect(house.id, b.phone ?? '', `🎂 Feliz aniversário, ${b.full_name.split(' ')[0]}! 🎉`, { type: 'birthday_wish' })}
                     style={{ background: '#25d36622', border: '1px solid #25d36644', borderRadius: 8, padding: '4px 10px', color: '#25d366', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>💬</button>
                 )}
               </div>

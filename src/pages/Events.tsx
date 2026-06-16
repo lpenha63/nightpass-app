@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, FAB, Pill } from '../components/ui'
 import { fd, fmtCurrency } from '../utils/format'
-import { fmtWAPhone } from '../utils/whatsapp'
+import { fmtWAPhone, sendWADirect } from '../utils/whatsapp'
 import { sT, _err, type ToastState } from '../utils/toast'
 import type { House, Event, ArtistEntry, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
@@ -487,7 +487,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     if (w) { w.document.write(html); w.document.close() }
   }
 
-  function sendTaskWA(task: EventTask) {
+  async function sendTaskWA(task: EventTask) {
     const url = `https://nightpass-app.vercel.app/tarefa.html?t=${task.token}`
     const deadline = task.deadline ? new Date(task.deadline).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
     const lines = [
@@ -499,8 +499,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       '👇 Acesse para marcar como concluído:',
       url,
     ].filter(Boolean).join('\n')
-    const ph = (task.assignee_phone ?? '').replace(/\D/g, '')
-    window.open(`https://wa.me/${ph ? '55' + ph : ''}?text=${encodeURIComponent(lines)}`, '_blank')
+    if (!task.assignee_phone) { st2('Tarefa sem responsável com telefone', 'warn'); return }
+    const r = await sendWADirect(house.id, task.assignee_phone, lines, { eventId: prodEv?.id, type: 'task_delegate' })
+    st2(r.viaApi ? '✅ Tarefa enviada pela API' : '📲 Abrindo WhatsApp...', 'success')
   }
 
   async function saveFrFee(id: string, val: string) {
@@ -510,16 +511,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setFrFeeEdit(null)
   }
 
-  function convocateFrWA(fr: EventFreelancer) {
+  async function convocateFrWA(fr: EventFreelancer) {
     const frData = (fr as any).freelancers
-    const ph = (frData?.phone ?? '').replace(/\D/g, '')
-    if (!ph) { alert('Freelancer sem telefone cadastrado'); return }
+    if (!frData?.phone) { st2('Freelancer sem telefone cadastrado', 'warn'); return }
     const lines = [
       `Olá ${frData?.full_name ?? ''}! 👋`,
       prodEv ? `Temos uma vaga para você no evento *${prodEv.name}* — ${new Date(prodEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}` : '',
       `Confirme sua disponibilidade respondendo esta mensagem.`,
     ].filter(Boolean).join('\n')
-    window.open(`https://wa.me/55${ph}?text=${encodeURIComponent(lines)}`, '_blank')
+    const r = await sendWADirect(house.id, frData.phone, lines, { eventId: prodEv?.id, type: 'fr_convocate' })
+    st2(r.viaApi ? '✅ Convocação enviada pela API' : '📲 Abrindo WhatsApp...', 'success')
   }
 
   function openCheck(ev: EventWithCounts) {
@@ -656,10 +657,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     ].join('\n'))
   }
 
-  function sendMontagem() {
+  async function sendMontagem() {
     const fr = allFreelancers.find(f => f.id === montagemFr)
-    const ph = (fr?.phone ?? '').replace(/\D/g, '')
-    window.open(`https://wa.me/${ph ? '55' + ph : ''}?text=${encodeURIComponent(montagemMsg)}`, '_blank')
+    if (!fr?.phone) { st2('Selecione um responsável com telefone', 'warn'); return }
+    const r = await sendWADirect(house.id, fr.phone, montagemMsg, { eventId: montagemEv?.id, type: 'montagem' })
+    st2(r.viaApi ? '✅ Montagem enviada pela API' : '📲 Abrindo WhatsApp...', 'success')
     setMontagemEv(null)
   }
 
@@ -886,8 +888,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const dateStr = new Date(guestEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
     const plusMsg = (g.max_plus_ones ?? 0) > 0 ? `\n\n👥 Você pode trazer até *${g.max_plus_ones} amigo(s)* — compartilhe o link com eles também!` : ''
     const msg = `Olá ${g.full_name.split(' ')[0]}! 🎉\n\nVocê está na lista VIP de *${guestEv.name}* — ${dateStr}${guestEv.start_time ? ` às ${guestEv.start_time.slice(0,5)}` : ''}.\n\n✅ Confirme sua presença com 1 clique:\n${confirmLink}${plusMsg}\n\nTe esperamos! 🔥`
-    const phone = '55' + g.phone.replace(/\D/g, '')
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+    const r = await sendWADirect(house.id, g.phone, msg, { eventId: guestEv.id, type: 'guest_invite' })
+    st2(r.viaApi ? '✅ Convite enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
   }
 
   async function addGuestManually() {
@@ -2156,14 +2158,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             return `${baseLink}?nome=${encodeURIComponent(c.full_name)}${c.phone ? `&tel=${c.phone.replace(/\D/g, '')}` : ''}`
           }
 
-          function openWhatsApp(c: FlyerClient) {
+          async function openWhatsApp(c: FlyerClient) {
             if (!c.phone) { st2('Cliente sem telefone cadastrado', 'warn'); return }
             const ev = guestEv!
             const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
             const link = makePersonalLink(c)
             const msg = `Olá ${c.full_name.split(' ')[0]}! 🎉 Você está convidado(a) para *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}.\n\n✅ Confirme sua presença na lista da casa:\n${link}\n\nTe esperamos! 🔥`
-            const phone = '55' + c.phone.replace(/\D/g, '')
-            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+            const r = await sendWADirect(house.id, c.phone, msg, { eventId: ev.id, type: 'list_invite' })
+            st2(r.viaApi ? '✅ Convite enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
           }
 
           return (
