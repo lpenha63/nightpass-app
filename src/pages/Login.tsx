@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { ROLE_PAGES, ALL_PAGES } from '../constants/permissions'
+import { InstallButton } from '../components/InstallButton'
 
 const INP: React.CSSProperties = {
   width: '100%', background: '#1f2937', border: `1px solid #1e2736`,
@@ -211,6 +212,9 @@ export function LoginPage({ onLogin }: { onLogin: (s: any) => void }) {
             </button>
           </div>
         )}
+        <div style={{ marginTop: 16 }}>
+          <InstallButton full />
+        </div>
       </div>
     </div>
   )
