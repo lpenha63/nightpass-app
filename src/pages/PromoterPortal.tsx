@@ -286,19 +286,13 @@ export function PromoterPortal({ token }: { token: string }) {
               🔥 PRÓXIMOS EVENTOS
             </div>
 
-            {/* Filtro por tipo (gênero) */}
+            {/* Filtro por tipo (gênero musical) */}
             {genres.length > 0 && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-                {['all', ...genres].map(g => {
-                  const on = genreFilter === g
-                  return (
-                    <button key={g} onClick={() => setGenreFilter(g)}
-                      style={{ padding: '6px 14px', borderRadius: 20, border: `1px solid ${on ? C.purpL : C.brd}`, background: on ? C.purp + '33' : 'transparent', color: on ? C.purpL : C.mut, fontSize: 12, fontWeight: on ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      {g === 'all' ? '🎫 Todos' : `🎵 ${g}`}
-                    </button>
-                  )
-                })}
-              </div>
+              <select value={genreFilter} onChange={e => setGenreFilter(e.target.value)}
+                style={{ width: '100%', marginBottom: 16, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '11px 14px', color: C.txt, fontSize: 14, fontFamily: 'inherit', outline: 'none' }}>
+                <option value="all">🎫 Todos os gêneros</option>
+                {genres.map(g => <option key={g} value={g}>🎵 {g}</option>)}
+              </select>
             )}
 
             {shownEvents.length === 0 && (
