@@ -63,6 +63,7 @@ export function PromoterPortal({ token }: { token: string }) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [viewingList, setViewingList] = useState<string | null>(null)
   const [genreFilter, setGenreFilter] = useState<string>('all')
+  const [viewMode, setViewMode] = useState<'all' | 'mine'>('all')
 
   // Manifest dinâmico: o app instalado abre direto neste portal do promoter
   useEffect(() => {
@@ -285,15 +286,17 @@ export function PromoterPortal({ token }: { token: string }) {
             <div style={{ color: C.mut, fontSize: 11 }}>convidados total</div>
           </div>
           <div style={{ width: 1, background: C.brd }} />
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ color: C.txt, fontWeight: 800, fontSize: 22 }}>{events.length}</div>
+          <button onClick={() => setViewMode('all')}
+            style={{ textAlign: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0, borderRadius: 8, opacity: viewMode === 'all' ? 1 : 0.55 }}>
+            <div style={{ color: viewMode === 'all' ? C.purpL : C.txt, fontWeight: 800, fontSize: 22 }}>{events.length}</div>
             <div style={{ color: C.mut, fontSize: 11 }}>eventos futuros</div>
-          </div>
+          </button>
           <div style={{ width: 1, background: C.brd }} />
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ color: C.txt, fontWeight: 800, fontSize: 22 }}>{lists.length}</div>
-            <div style={{ color: C.mut, fontSize: 11 }}>listas criadas</div>
-          </div>
+          <button onClick={() => setViewMode('mine')}
+            style={{ textAlign: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0, borderRadius: 8, opacity: viewMode === 'mine' ? 1 : 0.55 }}>
+            <div style={{ color: viewMode === 'mine' ? C.purpL : C.txt, fontWeight: 800, fontSize: 22 }}>{lists.length}</div>
+            <div style={{ color: viewMode === 'mine' ? C.purpL : C.mut, fontSize: 11, fontWeight: viewMode === 'mine' ? 700 : 400 }}>minhas listas</div>
+          </button>
         </div>
 
         {/* Instalar como app */}
@@ -311,11 +314,12 @@ export function PromoterPortal({ token }: { token: string }) {
         {/* Events list */}
         {events.length > 0 && (() => {
           const genres = Array.from(new Set(events.map(e => (e.genre ?? '').trim()).filter(Boolean)))
-          const shownEvents = genreFilter === 'all' ? events : events.filter(e => (e.genre ?? '').trim() === genreFilter)
+          const base = viewMode === 'mine' ? events.filter(e => lists.some(l => l.event_id === e.id)) : events
+          const shownEvents = genreFilter === 'all' ? base : base.filter(e => (e.genre ?? '').trim() === genreFilter)
           return (
           <>
-            <div style={{ color: C.grn, fontSize: 11, fontWeight: 700, marginBottom: 12, letterSpacing: '0.06em' }}>
-              🔥 PRÓXIMOS EVENTOS
+            <div style={{ color: viewMode === 'mine' ? C.purpL : C.grn, fontSize: 11, fontWeight: 700, marginBottom: 12, letterSpacing: '0.06em' }}>
+              {viewMode === 'mine' ? '📋 MINHAS LISTAS' : '🔥 PRÓXIMOS EVENTOS'}
             </div>
 
             {/* Filtro por tipo (gênero musical) */}
@@ -328,7 +332,9 @@ export function PromoterPortal({ token }: { token: string }) {
             )}
 
             {shownEvents.length === 0 && (
-              <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Nenhum evento deste tipo.</div>
+              <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+                {viewMode === 'mine' ? 'Você ainda não tem listas. Toque em "eventos futuros" e crie a sua.' : 'Nenhum evento deste tipo.'}
+              </div>
             )}
 
             {shownEvents.map(event => {
