@@ -340,7 +340,7 @@ export function CheckinPage({ house, user }: Props) {
         cpf: cpfClean || null,
         phone: phoneClean || null,
         birth_date: g.birth_date || null,
-        status: 'ativo',
+        status: 'active',
         created_by: user.id,
       }).select('id').single()
       clientId = created?.id ?? null
@@ -393,7 +393,7 @@ export function CheckinPage({ house, user }: Props) {
         cpf: g.cpf?.replace(/\D/g, '') || null,
         phone: g.phone?.replace(/\D/g, '') || null,
         birth_date: g.birth_date || null,
-        status: 'ativo',
+        status: 'active',
         created_by: user.id,
         ...(photo_url ? { photo_url } : {}),
       }).select('id').single()
@@ -567,7 +567,7 @@ export function CheckinPage({ house, user }: Props) {
     }
     supabase.from('clients').insert({
       full_name: nc.full_name, cpf: cn(nc.cpf) || null, phone: cn(nc.phone) || null,
-      birth_date: nc.birth_date || null, gender: nc.gender || null, house_id: house.id, status: 'ativo', created_by: user.id,
+      birth_date: nc.birth_date || null, gender: nc.gender || null, house_id: house.id, status: 'active', created_by: user.id,
     }).select().single().then(r => {
       if (r.error) { sT(setToast, 'Erro: ' + r.error.message, 'error'); return }
       doCheckin(r.data)
