@@ -491,13 +491,12 @@ export function CheckinPage({ house, user }: Props) {
     if (!search.trim()) return
     setLoading(true); setResult(null); setShowForm(false)
     const q = cn(search)
-    const isCPF = q.length === 11
-    const isPhone = q.length >= 10 && q.length <= 11 && !isCPF
-    const pr = isCPF
-      ? supabase.from('clients').select('*').eq('house_id', house.id).eq('cpf', q).single()
-      : isPhone
-        ? supabase.from('clients').select('*').eq('house_id', house.id).eq('phone', q).single()
-        : supabase.from('clients').select('*').eq('house_id', house.id).ilike('full_name', `%${search}%`).limit(1).single()
+    // Número (10–11 dígitos) é tratado como CELULAR por padrão (primeira entrada
+    // mais comum). Busca casa tanto em phone quanto em cpf, para achar de qualquer jeito.
+    const isNumeric = /^\d+$/.test(q) && q.length >= 10 && q.length <= 11
+    const pr = isNumeric
+      ? supabase.from('clients').select('*').eq('house_id', house.id).or(`phone.eq.${q},cpf.eq.${q}`).limit(1).maybeSingle()
+      : supabase.from('clients').select('*').eq('house_id', house.id).ilike('full_name', `%${search}%`).limit(1).maybeSingle()
     pr.then(r => {
       if (r.data) {
         setResult(r.data)
@@ -509,7 +508,7 @@ export function CheckinPage({ house, user }: Props) {
       } else {
         setShowForm(true)
         sT(setToast, 'Cliente não encontrado. Preencha o cadastro abaixo.', 'warn')
-        setNc(prev => ({ ...prev, cpf: isCPF ? q : '', phone: isPhone ? q : '', gender: '' }))
+        setNc(prev => ({ ...prev, cpf: '', phone: isNumeric ? q : '', gender: '' }))
         // Novo cliente (fora de lista) → valor padrão do evento (masculino como base)
         if (!selTypeId) setPayAmt(eventPriceFor(''))
       }
