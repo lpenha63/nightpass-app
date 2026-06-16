@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, FAB } from '../components/ui'
@@ -47,6 +47,8 @@ interface Reservation {
   status: string
   arrived_at?: string
   amount_cents: number
+  deposit_cents?: number
+  payment_status?: string
   token?: string
   list_type?: string
   list_male_value_cents?: number
@@ -619,13 +621,57 @@ export function CheckinPage({ house, user }: Props) {
     return lists
   })()
 
+  // Identifica a Lista da Casa para separá-la das listas de promoters
+  const isHouseGuest = (g: PromoterGuest) => {
+    const pl = g.promoter_lists as { name?: string; promoters?: { full_name?: string } } | undefined
+    return pl?.promoters?.full_name === 'Lista da Casa' || pl?.name === 'Lista da Casa'
+  }
+  const guestListKey = (g: PromoterGuest) => {
+    const pl = g.promoter_lists as { promoters?: { full_name?: string }; name?: string } | undefined
+    return (pl?.promoters?.full_name || pl?.name || '').toLowerCase()
+  }
+
   const filteredGuests = promoGuests
     .filter(g => {
       if (selPromoList !== 'all' && g.list_id !== selPromoList) return false
       const s = promoSearch.toLowerCase()
       return !s || g.full_name.toLowerCase().includes(s) || (g.phone ?? '').includes(s)
     })
-    .sort((a, b) => (a.checked_in ? 1 : 0) - (b.checked_in ? 1 : 0))
+    // Agrupa por lista (cada promoter individual); a Lista da Casa vai por último
+    .sort((a, b) => {
+      const ah = isHouseGuest(a) ? 1 : 0, bh = isHouseGuest(b) ? 1 : 0
+      if (ah !== bh) return ah - bh
+      const ak = guestListKey(a), bk = guestListKey(b)
+      if (ak !== bk) return ak.localeCompare(bk)
+      return (a.checked_in ? 1 : 0) - (b.checked_in ? 1 : 0)
+    })
+
+  // Contagem por lista (para os cabeçalhos de grupo)
+  const countByList = (() => {
+    const m = new Map<string, number>()
+    filteredGuests.forEach(g => { const id = (g.promoter_lists?.id ?? g.list_id ?? ''); m.set(id, (m.get(id) ?? 0) + 1) })
+    return m
+  })()
+
+  // Cabeçalho de grupo de lista — só aparece quando muda a lista (separa cada promoter e a Lista da Casa)
+  function listGroupHeader(g: PromoterGuest, prev?: PromoterGuest) {
+    const id = g.promoter_lists?.id ?? g.list_id ?? ''
+    const prevId = prev ? (prev.promoter_lists?.id ?? prev.list_id ?? '') : null
+    if (selPromoList !== 'all') return null
+    if (id === prevId) return null
+    const house = isHouseGuest(g)
+    const pl = g.promoter_lists as { name?: string; promoters?: { full_name?: string } } | undefined
+    const main = house ? 'Lista da Casa' : (pl?.promoters?.full_name || pl?.name || 'Lista')
+    const sub = !house && pl?.name && pl.name !== main ? ` · ${pl.name}` : ''
+    const count = countByList.get(id) ?? 0
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 6px', padding: '5px 10px', borderRadius: 8, background: house ? '#10b98114' : '#7c3aed14', border: `1px solid ${house ? '#10b98133' : '#7c3aed33'}` }}>
+        <span style={{ fontSize: 13 }}>{house ? '🏠' : '📣'}</span>
+        <span style={{ color: house ? '#10b981' : '#a78bfa', fontSize: 12, fontWeight: 800 }}>{main}{sub}</span>
+        <span style={{ color: C.mut, fontSize: 11, fontWeight: 700, marginLeft: 'auto' }}>{count} convidado{count !== 1 ? 's' : ''}</span>
+      </div>
+    )
+  }
 
   const evLabel = events.find(e => e.id === selEv)
 
@@ -978,6 +1024,17 @@ export function CheckinPage({ house, user }: Props) {
                                   {res.expected_arrival && <span>🕐 {res.expected_arrival.slice(0,5)}</span>}
                                   {res.people_count > 0 && <span>👥 {res.people_count} pessoas</span>}
                                 </div>
+                                {(() => {
+                                  const remaining = (res.amount_cents ?? 0) - (res.deposit_cents ?? 0)
+                                  const open = (res.payment_status === 'unpaid' || res.payment_status === 'partial') && remaining > 0
+                                  if (!open) return null
+                                  return (
+                                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, background: '#f8717118', border: '1px solid #f8717155', borderRadius: 8, padding: '6px 10px' }}>
+                                      <span style={{ color: C.red, fontSize: 13, fontWeight: 800 }}>⚠️ A receber: {fmtCurrency(remaining)}</span>
+                                      {(res.deposit_cents ?? 0) > 0 && <span style={{ color: C.mut, fontSize: 11 }}>sinal {fmtCurrency(res.deposit_cents ?? 0)} pago</span>}
+                                    </div>
+                                  )
+                                })()}
                               </div>
                               {guests.length === 0
                                 ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '12px 0', fontStyle: 'italic' }}>
@@ -1066,10 +1123,12 @@ export function CheckinPage({ house, user }: Props) {
                         </div>
                         {filteredGuests.length === 0
                           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>Nenhum convidado encontrado</div>
-                          : filteredGuests.map(g => {
+                          : filteredGuests.map((g, i, arr) => {
                         const pl = g.promoter_lists as { id?: string; name?: string; token?: string; promoters?: { full_name?: string } } | undefined
                         return (
-                          <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, marginBottom: 6, background: g.checked_in ? C.grn + '0d' : C.bg, border: `1px solid ${g.checked_in ? C.grn + '33' : C.brd + '55'}` }}>
+                          <Fragment key={g.id}>
+                          {listGroupHeader(g, arr[i - 1])}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, marginBottom: 6, background: g.checked_in ? C.grn + '0d' : C.bg, border: `1px solid ${g.checked_in ? C.grn + '33' : C.brd + '55'}` }}>
                             <div style={{ width: 8, height: 8, borderRadius: '50%', background: g.checked_in ? C.grn : C.mut, flexShrink: 0, boxShadow: g.checked_in ? `0 0 6px ${C.grn}` : 'none' }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ color: g.checked_in ? C.grn : C.txt, fontWeight: 600, fontSize: 13 }}>
@@ -1094,6 +1153,7 @@ export function CheckinPage({ house, user }: Props) {
                                 </button>
                             }
                           </div>
+                          </Fragment>
                         )
                       })}
                       </>
@@ -1205,6 +1265,17 @@ export function CheckinPage({ house, user }: Props) {
                                           {r.expected_arrival && <span>🕐 {r.expected_arrival}</span>}
                                           {r.amount_cents > 0 && <span style={{ color: C.gold }}>💰 {fmtCurrency(r.amount_cents)}</span>}
                                         </div>
+                                        {(() => {
+                                          const remaining = (r.amount_cents ?? 0) - (r.deposit_cents ?? 0)
+                                          const open = (r.payment_status === 'unpaid' || r.payment_status === 'partial') && remaining > 0
+                                          if (!open) return null
+                                          return (
+                                            <div style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f8717118', border: '1px solid #f8717155', borderRadius: 8, padding: '4px 10px' }}>
+                                              <span style={{ color: C.red, fontSize: 12, fontWeight: 800 }}>⚠️ A receber: {fmtCurrency(remaining)}</span>
+                                              {(r.deposit_cents ?? 0) > 0 && <span style={{ color: C.mut, fontSize: 11 }}>(sinal {fmtCurrency(r.deposit_cents ?? 0)} pago)</span>}
+                                            </div>
+                                          )
+                                        })()}
                                       </div>
                                       {!arrived && (
                                         <Btn onClick={() => confirmReservation(r.id)} style={{ marginLeft: 10, flexShrink: 0, fontSize: 12 }}>
@@ -1304,11 +1375,13 @@ export function CheckinPage({ house, user }: Props) {
                           )}
                           {filteredGuests.length === 0
                             ? <div style={{ color: C.mut, fontSize: 14, textAlign: 'center', padding: 32 }}>Nenhum convidado encontrado</div>
-                            : filteredGuests.map(g => {
+                            : filteredGuests.map((g, i, arr) => {
                                 const pl = g.promoter_lists as { id?: string; name?: string; token?: string; promoters?: { full_name?: string } } | undefined
                                 const listaLink = pl?.token ? `${window.location.origin}/lista/${pl.token}` : null
                                 return (
-                                  <div key={g.id} style={{ marginBottom: 10, border: `1px solid ${g.checked_in ? C.grn + '44' : C.brd}`, borderRadius: 14, padding: 14 }}>
+                                  <Fragment key={g.id}>
+                                  {listGroupHeader(g, arr[i - 1])}
+                                  <div style={{ marginBottom: 10, border: `1px solid ${g.checked_in ? C.grn + '44' : C.brd}`, borderRadius: 14, padding: 14 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                       <div style={{ flex: 1 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
@@ -1346,6 +1419,7 @@ export function CheckinPage({ house, user }: Props) {
                                       </div>
                                     </div>
                                   </div>
+                                  </Fragment>
                                 )
                               })
                           }

@@ -279,6 +279,29 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
+  // Detalhes do evento (valores, atrações e promoções) para incluir nos convites enviados
+  function eventDetailsText(ev: EventWithCounts): string {
+    const lines: string[] = []
+    const hasList = (ev.price_male_list_cents ?? 0) > 0 || (ev.price_female_list_cents ?? 0) > 0
+    if (hasList) {
+      const parts: string[] = []
+      if ((ev.price_male_list_cents ?? 0) > 0) parts.push(`♂ ${fmtCurrency(ev.price_male_list_cents ?? 0)}`)
+      if ((ev.price_female_list_cents ?? 0) > 0) parts.push(`♀ ${fmtCurrency(ev.price_female_list_cents ?? 0)}`)
+      lines.push(`💵 Lista: ${parts.join(' · ')}`)
+    } else {
+      const parts: string[] = []
+      if ((ev.price_male_cents ?? 0) > 0) parts.push(`♂ ${fmtCurrency(ev.price_male_cents ?? 0)}`)
+      if ((ev.price_female_cents ?? 0) > 0) parts.push(`♀ ${fmtCurrency(ev.price_female_cents ?? 0)}`)
+      if (parts.length) lines.push(`💵 Entrada: ${parts.join(' · ')}`)
+    }
+    const artistNames = (ev.artists ?? []).map(a => a.name).filter(n => n && n.trim())
+    if (artistNames.length) lines.push(`🎤 ${artistNames.join(' · ')}`)
+    const promos = (ev.promotions_list ?? []).map(p => p.label).filter(l => l && l.trim())
+    const promoText = promos.length ? promos : (ev.promotions ? [ev.promotions] : [])
+    if (promoText.length) lines.push(`🎉 ${promoText.join(' · ')}`)
+    return lines.length ? '\n\n' + lines.join('\n') : ''
+  }
+
   async function openProd(ev: EventWithCounts) {
     setProdEv(ev); setProdTasks([]); setProdRes([]); setProdTab('tasks'); setProdFr([]); setTeamArea(null); setProdStaffing(ev.staffing_needs ?? {})
     const [tasksR, resR, frR] = await Promise.all([
@@ -936,7 +959,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const confirmLink = `${window.location.origin}/confirmar/${token}`
     const dateStr = new Date(guestEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
     const plusMsg = (g.max_plus_ones ?? 0) > 0 ? `\n\n👥 Você pode trazer até *${g.max_plus_ones} amigo(s)* — compartilhe o link com eles também!` : ''
-    const msg = `Olá ${g.full_name.split(' ')[0]}! 🎉\n\nVocê está na lista VIP de *${guestEv.name}* — ${dateStr}${guestEv.start_time ? ` às ${guestEv.start_time.slice(0,5)}` : ''}.\n\n✅ Confirme sua presença com 1 clique:\n${confirmLink}${plusMsg}\n\nTe esperamos! 🔥`
+    const msg = `Olá ${g.full_name.split(' ')[0]}! 🎉\n\nVocê está na lista VIP de *${guestEv.name}* — ${dateStr}${guestEv.start_time ? ` às ${guestEv.start_time.slice(0,5)}` : ''}.${eventDetailsText(guestEv)}\n\n✅ Confirme sua presença com 1 clique:\n${confirmLink}${plusMsg}\n\nTe esperamos! 🔥`
     const r = await sendWADirect(house.id, g.phone, msg, { eventId: guestEv.id, type: 'guest_invite' })
     st2(r.viaApi ? '✅ Convite enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
   }
@@ -1081,9 +1104,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
     const artistNames = (ev.artists ?? []).map(a => a.name).filter(n => n && n.trim())
     const linhaArtistas = artistNames.length > 0 ? `\n🎤 Atrações: ${artistNames.join(', ')}` : ''
-    const linhaPromo = ev.promotions ? `\n🎉 ${ev.promotions}` : ''
+    const promosArr = (ev.promotions_list ?? []).map(p => p.label).filter(l => l && l.trim())
+    const promoText = promosArr.length ? promosArr.join(' · ') : (ev.promotions ?? '')
+    const linhaPromo = promoText ? `\n🎉 ${promoText}` : ''
+    const hasList = (ev.price_male_list_cents ?? 0) > 0 || (ev.price_female_list_cents ?? 0) > 0
+    const valParts: string[] = hasList
+      ? [(ev.price_male_list_cents ?? 0) > 0 ? `♂ ${fmtCurrency(ev.price_male_list_cents ?? 0)}` : '', (ev.price_female_list_cents ?? 0) > 0 ? `♀ ${fmtCurrency(ev.price_female_list_cents ?? 0)}` : ''].filter(Boolean)
+      : [(ev.price_male_cents ?? 0) > 0 ? `♂ ${fmtCurrency(ev.price_male_cents ?? 0)}` : '', (ev.price_female_cents ?? 0) > 0 ? `♀ ${fmtCurrency(ev.price_female_cents ?? 0)}` : ''].filter(Boolean)
+    const linhaValores = valParts.length ? `\n💵 ${hasList ? 'Lista' : 'Entrada'}: ${valParts.join(' · ')}` : ''
     // Link de confirmação é gerado individualmente por convidado em sendFlyer ({{link}})
-    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!${linhaArtistas}${linhaPromo}\n\n✅ Confirme sua presença com 1 clique:\n{{link}}\n\nTe esperamos! 🔥`)
+    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!${linhaValores}${linhaArtistas}${linhaPromo}\n\n✅ Confirme sua presença com 1 clique:\n{{link}}\n\nTe esperamos! 🔥`)
   }
 
   async function sendFlyer() {
@@ -2310,7 +2340,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             const ev = guestEv!
             const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
             const link = makePersonalLink(c)
-            const msg = `Olá ${c.full_name.split(' ')[0]}! 🎉 Você está convidado(a) para *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}.\n\n✅ Confirme sua presença na lista da casa:\n${link}\n\nTe esperamos! 🔥`
+            const msg = `Olá ${c.full_name.split(' ')[0]}! 🎉 Você está convidado(a) para *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}.${eventDetailsText(ev)}\n\n✅ Confirme sua presença na lista da casa:\n${link}\n\nTe esperamos! 🔥`
             const r = await sendWADirect(house.id, c.phone, msg, { eventId: ev.id, type: 'list_invite' })
             st2(r.viaApi ? '✅ Convite enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
           }

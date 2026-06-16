@@ -322,13 +322,25 @@ export function PromoterPortal({ token }: { token: string }) {
               {viewMode === 'mine' ? '📋 MINHAS LISTAS' : '🔥 PRÓXIMOS EVENTOS'}
             </div>
 
-            {/* Filtro por tipo (gênero musical) */}
+            {/* Filtro por tipo (gênero musical) — chips tocáveis (funcionam no app instalado) */}
             {genres.length > 0 && (
-              <select value={genreFilter} onChange={e => setGenreFilter(e.target.value)}
-                style={{ width: '100%', marginBottom: 16, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '11px 14px', color: C.txt, fontSize: 14, fontFamily: 'inherit', outline: 'none' }}>
-                <option value="all">🎫 Todos os gêneros</option>
-                {genres.map(g => <option key={g} value={g}>🎵 {g}</option>)}
-              </select>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }}>
+                {(['all', ...genres] as string[]).map(g => {
+                  const active = genreFilter === g
+                  return (
+                    <button key={g} type="button" onClick={() => setGenreFilter(g)}
+                      style={{
+                        flexShrink: 0, borderRadius: 999, padding: '8px 14px', cursor: 'pointer', fontFamily: 'inherit',
+                        fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
+                        background: active ? C.purp : C.card,
+                        border: `1px solid ${active ? C.purp : C.brd}`,
+                        color: active ? '#fff' : C.sub,
+                      }}>
+                      {g === 'all' ? '🎫 Todos' : `🎵 ${g}`}
+                    </button>
+                  )
+                })}
+              </div>
             )}
 
             {shownEvents.length === 0 && (

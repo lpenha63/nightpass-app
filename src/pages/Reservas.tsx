@@ -60,7 +60,7 @@ const SL: React.CSSProperties = {
 }
 
 export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
-  const [view, setView] = useState<'list' | 'settings' | 'spaces' | 'archive'>('list')
+  const [view, setView] = useState<'list' | 'receivable' | 'settings' | 'spaces' | 'archive'>('list')
   const [archivedList, setArchivedList] = useState<Reservation[]>([])
   const [selDate, setSelDate] = useState(() => {
     const now = new Date()
@@ -193,6 +193,21 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       .eq('house_id', house.id)
       .lt('reservation_date', todayStr)
       .is('archived_at', null)
+  }
+
+  // Reservas com saldo em aberto (a receber) — independente da data, ativas (não arquivadas)
+  function loadReceivables() {
+    supabase.from('reservations')
+      .select('*,events(name,event_date),reservation_items(*)')
+      .eq('house_id', house.id)
+      .is('archived_at', null)
+      .in('payment_status', ['unpaid', 'partial'])
+      .neq('status', 'cancelled')
+      .order('reservation_date')
+      .then(r => {
+        const open = (r.data ?? []).filter((x: Reservation) => ((x.amount_cents ?? 0) - (x.deposit_cents ?? 0)) > 0)
+        setResList(open)
+      })
   }
 
   function loadArchived() {
@@ -1038,6 +1053,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button style={TAB(view === 'list')} onClick={() => setView('list')}>📋 Reservas</button>
+            <button style={TAB(view === 'receivable')} onClick={() => { setView('receivable'); loadReceivables() }}>💰 A Receber</button>
             <button style={TAB(view === 'settings')} onClick={() => setView('settings')}>⚙️ Tipos</button>
             <button style={TAB(view === 'spaces')} onClick={() => setView('spaces')}>🗂️ Espaços</button>
             <button style={TAB(view === 'archive')} onClick={() => { setView('archive'); loadArchived() }}>📦 Arquivo</button>
@@ -1083,11 +1099,22 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
         )}
       </div>
 
+      {/* ── A RECEBER: resumo do total em aberto ── */}
+      {view === 'receivable' && (() => {
+        const totalOpen = resList.reduce((s, r) => s + ((r.amount_cents ?? 0) - (r.deposit_cents ?? 0)), 0)
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#f59e0b14', border: '1px solid #f59e0b44', borderRadius: 12, padding: '12px 18px', marginBottom: 14, flexWrap: 'wrap' }}>
+            <span style={{ color: '#f59e0b', fontSize: 13, fontWeight: 700 }}>💰 {resList.length} reserva(s) com saldo em aberto</span>
+            <span style={{ color: '#f59e0b', fontSize: 18, fontWeight: 900 }}>{fmtCurrency(totalOpen)} a receber</span>
+          </div>
+        )
+      })()}
+
       {/* ── LISTA ── */}
-      {view === 'list' && (
+      {(view === 'list' || view === 'receivable') && (
         <Card style={{ padding: 0 }}>
           {resList.length === 0
-            ? <div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>Nenhuma reserva para este período</div>
+            ? <div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>{view === 'receivable' ? 'Nenhuma reserva com saldo em aberto 🎉' : 'Nenhuma reserva para este período'}</div>
             : resList.map((r, idx) => {
               const resType = resTypes.find(t => t.id === r.reservation_type)
               const items = (r.reservation_items ?? []) as ResItem[]

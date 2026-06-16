@@ -19,8 +19,68 @@ interface GuestInfo {
   house_id: string
   event_id: string
   promoter_id: string
-  events?: { name: string; event_date: string; start_time?: string; flyer_url?: string }
+  events?: EventInfo
   houses?: { name: string; logo_url?: string }
+}
+
+interface EventInfo {
+  name: string; event_date: string; start_time?: string; flyer_url?: string
+  price_male_cents?: number; price_female_cents?: number
+  price_male_list_cents?: number; price_female_list_cents?: number
+  artists?: Array<{ name?: string }>
+  promotions?: string
+  promotions_list?: Array<{ label?: string; value_cents?: number }>
+}
+
+function fmtBRL(cents?: number) {
+  return 'R$ ' + ((cents ?? 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+}
+
+// Bloco de detalhes do evento (valores, atrações e promoções) — usado nos convites
+function EventDetails({ ev }: { ev?: EventInfo }) {
+  if (!ev) return null
+  const artistNames = (ev.artists ?? []).map(a => a?.name).filter((n): n is string => !!n && n.trim().length > 0)
+  const promos = (ev.promotions_list ?? []).map(p => p?.label).filter((l): l is string => !!l && l.trim().length > 0)
+  const promoText = promos.length > 0 ? promos : (ev.promotions ? [ev.promotions] : [])
+  const hasList = (ev.price_male_list_cents ?? 0) > 0 || (ev.price_female_list_cents ?? 0) > 0
+  const hasCover = (ev.price_male_cents ?? 0) > 0 || (ev.price_female_cents ?? 0) > 0
+  if (!hasList && !hasCover && artistNames.length === 0 && promoText.length === 0) return null
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 20, marginBottom: 20, display: 'grid', gap: 14 }}>
+      {(hasList || hasCover) && (
+        <div>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6 }}>💵 VALORES</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {hasList ? (
+              <>
+                {(ev.price_male_list_cents ?? 0) > 0 && <span style={{ background: C.acc + '18', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♂ Lista {fmtBRL(ev.price_male_list_cents)}</span>}
+                {(ev.price_female_list_cents ?? 0) > 0 && <span style={{ background: '#ec489918', border: '1px solid #ec489933', borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♀ Lista {fmtBRL(ev.price_female_list_cents)}</span>}
+              </>
+            ) : (
+              <>
+                {(ev.price_male_cents ?? 0) > 0 && <span style={{ background: C.acc + '18', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♂ {fmtBRL(ev.price_male_cents)}</span>}
+                {(ev.price_female_cents ?? 0) > 0 && <span style={{ background: '#ec489918', border: '1px solid #ec489933', borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♀ {fmtBRL(ev.price_female_cents)}</span>}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {artistNames.length > 0 && (
+        <div>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6 }}>🎤 ATRAÇÕES</div>
+          <div style={{ color: '#f472b6', fontSize: 14, fontWeight: 600 }}>{artistNames.join(' · ')}</div>
+        </div>
+      )}
+      {promoText.length > 0 && (
+        <div>
+          <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6 }}>🎉 PROMOÇÕES</div>
+          <div style={{ display: 'grid', gap: 3 }}>
+            {promoText.map((p, i) => <div key={i} style={{ color: C.gold, fontSize: 14, fontWeight: 600 }}>• {p}</div>)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function ConfirmarPresencaPage({ token }: { token: string }) {
@@ -36,7 +96,7 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
     async function load() {
       const { data } = await supabase
         .from('promoter_list_guests')
-        .select('*,events(name,event_date,start_time,flyer_url),houses(name,logo_url)')
+        .select('*,events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists,promotions,promotions_list),houses(name,logo_url)')
         .eq('invite_token', token)
         .single()
       if (!data) { setNotFound(true); setLoading(false); return }
@@ -141,6 +201,9 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
           )}
         </div>
 
+        {/* Detalhes do evento — valores, atrações e promoções */}
+        <EventDetails ev={ev} />
+
         {/* Card confirmação */}
         <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 24, marginBottom: 20 }}>
           <div style={{ fontSize: 22, marginBottom: 4 }}>👋</div>
@@ -161,8 +224,8 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
           )}
         </div>
 
-        {/* Convidar amigos — compartilhar link */}
-        {confirmed && (guest.max_plus_ones ?? 0) > 0 && listToken && (
+        {/* Convidar amigos — visível mesmo antes de confirmar, para o convidado já saber que pode trazer amigos */}
+        {(guest.max_plus_ones ?? 0) > 0 && listToken && (
           <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 24 }}>
             <div style={{ fontWeight: 800, color: C.txt, fontSize: 16, marginBottom: 4 }}>👥 Convide seus amigos</div>
             <div style={{ color: C.mut, fontSize: 13, marginBottom: 16 }}>

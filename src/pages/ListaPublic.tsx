@@ -14,8 +14,19 @@ interface PromoterList {
   event_id: string
   promoter_id: string
   promoters?: { full_name: string; photo_url?: string }
-  events?: { name: string; event_date: string; start_time?: string; flyer_url?: string }
+  events?: {
+    name: string; event_date: string; start_time?: string; flyer_url?: string
+    price_male_cents?: number; price_female_cents?: number
+    price_male_list_cents?: number; price_female_list_cents?: number
+    artists?: Array<{ name?: string }>
+    promotions?: string
+    promotions_list?: Array<{ label?: string; value_cents?: number }>
+  }
   houses?: { name: string; logo_url?: string }
+}
+
+function fmtBRL(cents?: number) {
+  return 'R$ ' + ((cents ?? 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
 }
 
 interface Guest { name: string; phone: string; cpf: string; gender: string; birth_date: string }
@@ -63,7 +74,7 @@ export function ListaPublicPage({ token }: { token: string }) {
     // Não carregamos a lista de convidados existente: o cliente não deve ver
     // a contagem nem os nomes de quem já confirmou.
     supabase.from('promoter_lists')
-      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url),houses(name,logo_url)')
+      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists,promotions,promotions_list),houses(name,logo_url)')
       .eq('token', token).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
@@ -174,6 +185,48 @@ export function ListaPublicPage({ token }: { token: string }) {
       </div>
 
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 60px' }}>
+
+        {/* Detalhes do evento — valores, atrações e promoções */}
+        {(() => {
+          const artistNames = (ev?.artists ?? []).map(a => a?.name).filter((n): n is string => !!n && n.trim().length > 0)
+          const promosArr = (ev?.promotions_list ?? []).map(p => p?.label).filter((l): l is string => !!l && l.trim().length > 0)
+          const promoText = promosArr.length > 0 ? promosArr : (ev?.promotions ? [ev.promotions] : [])
+          const hasList = (ev?.price_male_list_cents ?? 0) > 0 || (ev?.price_female_list_cents ?? 0) > 0
+          const hasCover = (ev?.price_male_cents ?? 0) > 0 || (ev?.price_female_cents ?? 0) > 0
+          if (!hasList && !hasCover && artistNames.length === 0 && promoText.length === 0) return null
+          return (
+            <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: 16, marginBottom: 16, display: 'grid', gap: 12 }}>
+              {(hasList || hasCover) && (
+                <div>
+                  <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6 }}>💵 VALORES</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {hasList ? (<>
+                      {(ev?.price_male_list_cents ?? 0) > 0 && <span style={{ background: C.acc + '18', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♂ Lista {fmtBRL(ev?.price_male_list_cents)}</span>}
+                      {(ev?.price_female_list_cents ?? 0) > 0 && <span style={{ background: '#ec489918', border: '1px solid #ec489933', borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♀ Lista {fmtBRL(ev?.price_female_list_cents)}</span>}
+                    </>) : (<>
+                      {(ev?.price_male_cents ?? 0) > 0 && <span style={{ background: C.acc + '18', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♂ {fmtBRL(ev?.price_male_cents)}</span>}
+                      {(ev?.price_female_cents ?? 0) > 0 && <span style={{ background: '#ec489918', border: '1px solid #ec489933', borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♀ {fmtBRL(ev?.price_female_cents)}</span>}
+                    </>)}
+                  </div>
+                </div>
+              )}
+              {artistNames.length > 0 && (
+                <div>
+                  <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6 }}>🎤 ATRAÇÕES</div>
+                  <div style={{ color: '#f472b6', fontSize: 14, fontWeight: 600 }}>{artistNames.join(' · ')}</div>
+                </div>
+              )}
+              {promoText.length > 0 && (
+                <div>
+                  <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6 }}>🎉 PROMOÇÕES</div>
+                  <div style={{ display: 'grid', gap: 3 }}>
+                    {promoText.map((p, i) => <div key={i} style={{ color: C.gold, fontSize: 14, fontWeight: 600 }}>• {p}</div>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Add form */}
         {preNome && (
