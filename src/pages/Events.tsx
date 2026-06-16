@@ -5,7 +5,7 @@ import { Card, Toast, Btn, Modal, FAB, Pill } from '../components/ui'
 import { fd, fmtCurrency } from '../utils/format'
 import { fmtWAPhone, sendWADirect } from '../utils/whatsapp'
 import { sT, _err, type ToastState } from '../utils/toast'
-import type { House, Event, ArtistEntry, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
+import type { House, Event, ArtistEntry, PromotionEntry, PromoterPriceMode, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 
 function fmtMoneyInput(v: number | string): string {
@@ -14,6 +14,11 @@ function fmtMoneyInput(v: number | string): string {
 }
 function parseMoneyInput(raw: string): number {
   return parseInt(raw.replace(/\D/g, '') || '0', 10) / 100
+}
+// Mostra "R$ x,xx" quando preenchido; vazio quando 0 (para o placeholder de exemplo aparecer)
+function moneyVal(v: number | string): string {
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')) || 0
+  return n > 0 ? `R$ ${fmtMoneyInput(n)}` : ''
 }
 
 interface Props { house: House; onGoToReservas?: (date: string, eventId: string) => void }
@@ -84,6 +89,7 @@ const DEF = {
   name: '', event_date: '', genre: 'Sertanejo', start_time: '22:00', end_time: '04:00',
   price_male_cents: 0, price_female_cents: 0, price_male_list_cents: 0, price_female_list_cents: 0,
   promotions: '', repeat_rule: 'none', capacity: '', birthday_list_enabled: false, house_list_enabled: false,
+  promoter_enabled: false, promoter_price_mode: 'list', promoter_price_cents: 0,
   attractions: '', flyer_url: '', observations: '',
   artist_fee_cents: 0, artist_fee_type: 'fixed', artist_fee_percent: 0,
   consumption_cents: 0, production_cost_cents: 0, status: 'ativo',
@@ -118,6 +124,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [listaTab, setListaTab] = useState<'lista' | 'convidar'>('lista')
   const [listaClients, setListaClients] = useState<FlyerClient[]>([])
   const [listaSearch, setListaSearch] = useState('')
+  // Resumo de TODAS as listas geradas para o evento (casa, promoters, aniversário, reservas)
+  interface ListSummaryRow { key: string; icon: string; label: string; count: number; people?: number }
+  const [listSummary, setListSummary] = useState<ListSummaryRow[]>([])
 
   // House list link in event form
   const [houseListToken, setHouseListToken] = useState<string | null>(null)
@@ -173,6 +182,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   function addArtist() { setArtists(a => [...a, { name: '', fee_type: 'fixed', fee_cents: 0, fee_percent: 0, consumption_cents: 0 }]) }
   function removeArtist(i: number) { setArtists(a => a.filter((_, idx) => idx !== i)) }
   function setArtist(i: number, patch: Partial<ArtistEntry>) { setArtists(a => a.map((ar, idx) => idx === i ? { ...ar, ...patch } : ar)) }
+
+  // Promoções (várias por evento, com valor que entra na produção)
+  const [promos, setPromos] = useState<PromotionEntry[]>([])
+  function addPromo() { setPromos(p => [...p, { label: '', value_cents: 0 }]) }
+  function removePromo(i: number) { setPromos(p => p.filter((_, idx) => idx !== i)) }
+  function setPromo(i: number, patch: Partial<PromotionEntry>) { setPromos(p => p.map((pr, idx) => idx === i ? { ...pr, ...patch } : pr)) }
 
   // Checklist do card — checagem das tarefas adicionadas na Produção
   const [checkEv, setCheckEv] = useState<EventWithCounts | null>(null)
@@ -696,6 +711,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const ab = artistsBreakdown(ev)
     const cache = ab.fee, consumacao = ab.cons
     const producao = ev.production_cost_cents ?? 0
+    const promosTotal = (ev.promotions_list ?? []).reduce((s, p) => s + (p.value_cents ?? 0), 0)
     const freelancerTotal = budgetFreelancers.reduce((s, ef) => s + ((ef as any).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0), 0)
     const promoterTotal = budgetPromoters.reduce((s, l) => { const ent = Math.max(l.guest_count, l.min_entries); return s + l.fixed_fee_cents + ent * l.entry_fee_cents + ent * l.consumacao_cents }, 0)
     const resItemsTotal = budgetResItems.reduce((s, i) => s + (i.quantity || 1) * (i.unit_cost_cents || 0), 0)
@@ -704,7 +720,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const tasksReal = budgetTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
     const tasksEst = budgetTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
     const tasksTotal = tasksReal > 0 ? tasksReal : tasksEst
-    const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
+    const total = cache + consumacao + producao + promosTotal + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
     const reservasRevenue = budgetRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
     const otherRev = budgetExpenses.filter(e => e.kind === 'revenue')
     const otherRevTotal = otherRev.reduce((s, e) => s + e.amount_cents, 0)
@@ -749,6 +765,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       ${ab.list.length > 0 ? ab.list.map((a, i) => rowH('🎤 ' + (a.name || `Artista ${i + 1}`), a.fee_cents ?? 0)).join('') : rowH('🎤 Cachê do artista', cache)}
       ${consumacao > 0 ? rowH('🍺 Consumação (artistas)', consumacao) : ''}
       ${producao > 0 ? rowH('🔧 Gastos de produção', producao) : ''}
+      ${promosTotal > 0 ? `<tr class="sub"><td>🎉 Promoções (${(ev.promotions_list ?? []).length})</td><td class="r">${fmt(promosTotal)}</td></tr>${(ev.promotions_list ?? []).map(p => rowH(`<span class="i">${p.label || 'Promoção'}</span>`, p.value_cents ?? 0)).join('')}` : ''}
       ${freelancerTotal > 0 ? rowH('👷 Freelancers', freelancerTotal) : ''}
       ${promoterTotal > 0 ? rowH('📋 Promoters', promoterTotal) : ''}
       ${resItemsTotal > 0 ? rowH('🪑 Reservas — opcionais', resItemsTotal) : ''}
@@ -848,7 +865,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setListaTab('lista')
     setListaSearch('')
     setListaClients([])
+    setListSummary([])
     reloadGuests(ev.id)
+    loadListSummary(ev)
     const [rec, cl] = await Promise.all([
       ensureHouseListRecord(ev),
       supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).order('full_name'),
@@ -865,6 +884,36 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     supabase.from('promoter_list_guests').select('id,full_name,phone,gender,birth_date,list_type,is_vip,checked_in,promoter_id,invite_token,list_value_cents,max_plus_ones,invited_by,confirmed_at')
       .eq('event_id', eventId).order('full_name')
       .then(r => setGuests((r.data ?? []) as Guest[]))
+  }
+
+  // Agrega todas as listas geradas para o evento: casa, cada promoter, aniversários e reservas
+  async function loadListSummary(ev: EventWithCounts) {
+    setListSummary([])
+    try {
+      const [plists, blists, rsv] = await Promise.all([
+        supabase.from('promoter_lists').select('id,name,promoter_id,promoters(full_name)').eq('event_id', ev.id),
+        supabase.from('birthday_lists').select('id,birthday_person_name').eq('event_id', ev.id).neq('status', 'cancelled'),
+        supabase.from('reservations').select('id,people_count,status').eq('event_id', ev.id).neq('status', 'cancelled'),
+      ])
+      const rows: ListSummaryRow[] = []
+      for (const l of (plists.data ?? []) as Array<{ id: string; name: string; promoters?: { full_name?: string } | null }>) {
+        const { count } = await supabase.from('promoter_list_guests').select('id', { count: 'exact', head: true }).eq('list_id', l.id)
+        const promoName = l.promoters?.full_name ?? l.name
+        const isHouse = promoName === 'Lista da Casa'
+        rows.push({
+          key: 'pl_' + l.id, icon: isHouse ? '🏠' : '📣',
+          label: isHouse ? 'Lista da Casa' : `${promoName}${l.name && l.name !== promoName ? ' · ' + l.name : ''}`,
+          count: count ?? 0,
+        })
+      }
+      for (const b of (blists.data ?? []) as Array<{ id: string; birthday_person_name: string }>) {
+        const { count } = await supabase.from('birthday_guests').select('id', { count: 'exact', head: true }).eq('birthday_list_id', b.id)
+        rows.push({ key: 'bd_' + b.id, icon: '🎂', label: `Aniversário · ${b.birthday_person_name}`, count: count ?? 0 })
+      }
+      const resData = (rsv.data ?? []) as Array<{ people_count?: number }>
+      if (resData.length) rows.push({ key: 'res', icon: '🪑', label: 'Reservas', count: resData.length, people: resData.reduce((s, r) => s + (r.people_count ?? 0), 0) })
+      setListSummary(rows)
+    } catch { /* schema opcional — ignora se alguma tabela não existir */ }
   }
 
   async function generateInviteToken(g: Guest): Promise<string> {
@@ -939,7 +988,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     URL.revokeObjectURL(url)
   }
 
-  function openNew() { setEditing(null); setForm(DEF); setArtists([]); setModal(true) }
+  function openNew() { setEditing(null); setForm(DEF); setArtists([]); setPromos([]); setModal(true) }
 
   function openEdit(ev: EventWithCounts) {
     setEditing(ev.id)
@@ -955,7 +1004,19 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       capacity: ev.capacity ?? '',
       consumption_cents: ((ev.consumption_cents ?? 0) / 100) || 0,
       production_cost_cents: ((ev.production_cost_cents ?? 0) / 100) || 0,
+      promoter_enabled: !!ev.promoter_enabled,
+      promoter_price_mode: ev.promoter_price_mode ?? 'list',
+      promoter_price_cents: ((ev.promoter_price_cents ?? 0) / 100) || 0,
     })
+    // Promoções: carrega do novo campo ou migra do texto antigo
+    const savedPromos = ev.promotions_list ?? []
+    if (savedPromos.length > 0) {
+      setPromos(savedPromos.map(p => ({ label: p.label, value_cents: (p.value_cents ?? 0) / 100 })))
+    } else if (ev.promotions && ev.promotions.trim()) {
+      setPromos([{ label: ev.promotions, value_cents: 0 }])
+    } else {
+      setPromos([])
+    }
     if (ev.house_list_enabled) {
       ensureHouseListRecord(ev).then(rec => { if (rec) setHouseListToken(rec.token) })
     }
@@ -1100,6 +1161,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       capacity: form.capacity ? parseInt(String(form.capacity)) : null,
       artists: artists.map(a => ({ ...a, fee_cents: Math.round((a.fee_cents ?? 0) * 100), consumption_cents: Math.round((a.consumption_cents ?? 0) * 100) })),
       production_cost_cents: Math.round((parseFloat(String(form.production_cost_cents)) || 0) * 100),
+      promoter_enabled: !!form.promoter_enabled,
+      promoter_price_mode: String(form.promoter_price_mode ?? 'list'),
+      promoter_price_cents: Math.round((parseFloat(String(form.promoter_price_cents)) || 0) * 100),
+      promotions_list: promos.filter(p => p.label.trim() || p.value_cents > 0).map(p => ({ label: p.label.trim(), value_cents: Math.round((p.value_cents ?? 0) * 100) })),
+      promotions: promos.filter(p => p.label.trim()).map(p => p.label.trim()).join(' · '),
       status: editing ? (form.status ?? 'ativo') : 'ativo',
       updated_at: new Date().toISOString(),
     }
@@ -1752,8 +1818,23 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               </div>
             </div>
             <div>
-              <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Promoções</label>
-              <input {...inp} value={String(form.promotions ?? '')} onChange={e => setF('promotions', e.target.value)} placeholder="Open bar 22h-23h..." />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>🎉 Promoções</label>
+                <button type="button" onClick={addPromo} style={{ background: C.gold + '22', border: `1px solid ${C.gold}44`, borderRadius: 7, padding: '3px 10px', color: C.gold, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>+ Adicionar</button>
+              </div>
+              {promos.length === 0 && (
+                <div style={{ color: C.mut, fontSize: 11, padding: '4px 0' }}>Nenhuma promoção. Toque em “+ Adicionar”.</div>
+              )}
+              {promos.map((pr, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 32px', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                  <input {...inp} value={pr.label} onChange={e => setPromo(i, { label: e.target.value })} placeholder="Ex: Open bar 22h-23h" />
+                  <input inputMode="decimal" {...inp} value={moneyVal(pr.value_cents)} placeholder="Ex: R$ 500,00" onChange={e => setPromo(i, { value_cents: parseMoneyInput(e.target.value) })} />
+                  <button type="button" onClick={() => removePromo(i)} style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 7, padding: '6px 0', color: C.red, cursor: 'pointer', fontSize: 13 }}>✕</button>
+                </div>
+              ))}
+              {promos.length > 0 && (
+                <div style={{ fontSize: 10, color: C.mut, marginTop: 2 }}>💡 Os valores das promoções entram no custo da Produção/Budget.</div>
+              )}
             </div>
             <div>
               <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Observações</label>
@@ -1790,21 +1871,21 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cover Masc (R$)</label>
-                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_male_cents as number)}`} onChange={e => setF('price_male_cents', parseMoneyInput(e.target.value))} />
+                <input inputMode="decimal" {...inp} value={moneyVal(form.price_male_cents as number)} placeholder="Ex: R$ 40,00" onChange={e => setF('price_male_cents', parseMoneyInput(e.target.value))} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Cover Fem (R$)</label>
-                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_female_cents as number)}`} onChange={e => setF('price_female_cents', parseMoneyInput(e.target.value))} />
+                <input inputMode="decimal" {...inp} value={moneyVal(form.price_female_cents as number)} placeholder="Ex: R$ 30,00" onChange={e => setF('price_female_cents', parseMoneyInput(e.target.value))} />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lista Masc (R$)</label>
-                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_male_list_cents as number)}`} onChange={e => setF('price_male_list_cents', parseMoneyInput(e.target.value))} />
+                <input inputMode="decimal" {...inp} value={moneyVal(form.price_male_list_cents as number)} placeholder="Ex: R$ 20,00" onChange={e => setF('price_male_list_cents', parseMoneyInput(e.target.value))} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lista Fem (R$)</label>
-                <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(form.price_female_list_cents as number)}`} onChange={e => setF('price_female_list_cents', parseMoneyInput(e.target.value))} />
+                <input inputMode="decimal" {...inp} value={moneyVal(form.price_female_list_cents as number)} placeholder="Ex: R$ 15,00" onChange={e => setF('price_female_list_cents', parseMoneyInput(e.target.value))} />
               </div>
             </div>
             {/* Lista da Casa toggle */}
@@ -1866,6 +1947,46 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 </button>
               </div>
             )}
+            {/* Liberar evento para Promoter */}
+            {(() => {
+              const pe = !!form.promoter_enabled
+              const mode = String(form.promoter_price_mode ?? 'list') as PromoterPriceMode
+              return (
+                <div style={{ padding: '10px 12px', borderRadius: 8, background: pe ? '#a78bfa11' : 'rgba(255,255,255,0.03)', border: `1px solid ${pe ? '#a78bfa44' : C.brd}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>📣 Liberar para Promoter</div>
+                      <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Permite que promoters montem listas para este evento</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setF('promoter_enabled', !pe)}
+                      style={{ width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer', background: pe ? '#a78bfa' : C.brd, position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                    >
+                      <span style={{ position: 'absolute', top: 3, left: pe ? 26 : 4, width: 22, height: 22, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', display: 'block' }} />
+                    </button>
+                  </div>
+                  {pe && (
+                    <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: mode === 'other' ? '1fr 130px' : '1fr', gap: 8 }}>
+                      <div>
+                        <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor da entrada do promoter</label>
+                        <select {...inp} value={mode} onChange={e => setF('promoter_price_mode', e.target.value)}>
+                          <option value="list">Mesmo da Lista</option>
+                          <option value="other">Outro valor</option>
+                          <option value="vip">VIP (cortesia)</option>
+                        </select>
+                      </div>
+                      {mode === 'other' && (
+                        <div>
+                          <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor (R$)</label>
+                          <input inputMode="decimal" {...inp} value={moneyVal(form.promoter_price_cents as number)} placeholder="Ex: R$ 25,00" onChange={e => setF('promoter_price_cents', parseMoneyInput(e.target.value))} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Capacidade</label>
@@ -1986,7 +2107,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       )}{/* end overlay */}
 
       {/* Guest list modal — large, two-tab layout */}
-      <Modal open={!!guestEv} title={`👥 Lista da Casa — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListaClients([]) }}>
+      <Modal open={!!guestEv} title={`👥 Listas — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListaClients([]); setListSummary([]) }}>
 
         {/* Link compartilhável */}
         {guestListToken && (
@@ -2002,23 +2123,49 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           </div>
         )}
 
-        {/* Tabs */}
+        {/* Tabs — Lista (todas as listas) + Convidar Clientes (abre Enviar Flyer) */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-          {(['lista', 'convidar'] as const).map(t => (
-            <button key={t} onClick={() => setListaTab(t)} style={{
-              padding: '8px 18px', borderRadius: 8, border: `1px solid ${listaTab === t ? C.acc : C.brd}`,
-              background: listaTab === t ? C.acc + '22' : 'transparent',
-              color: listaTab === t ? C.acc : C.mut, fontSize: 13, fontWeight: 700,
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}>
-              {t === 'lista' ? `📋 Lista (${guests.length})` : `📨 Convidar Clientes`}
-            </button>
-          ))}
+          <button onClick={() => setListaTab('lista')} style={{
+            padding: '8px 18px', borderRadius: 8, border: `1px solid ${C.acc}`,
+            background: C.acc + '22', color: C.acc, fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            📋 Lista ({guests.length})
+          </button>
+          <button onClick={() => { if (guestEv) { const ev = guestEv; setGuestEv(null); openFlyer(ev) } }} style={{
+            padding: '8px 18px', borderRadius: 8, border: `1px solid ${C.brd}`,
+            background: 'transparent', color: C.mut, fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            📨 Convidar Clientes
+          </button>
         </div>
 
         {/* ── ABA LISTA ── */}
         {listaTab === 'lista' && (
           <>
+            {/* Resumo de TODAS as listas geradas para o evento */}
+            {listSummary.length > 0 && (() => {
+              const totalPeople = listSummary.reduce((s, r) => s + (r.people ?? r.count), 0)
+              return (
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.06em' }}>📑 LISTAS DO EVENTO</span>
+                    <span style={{ fontSize: 11, color: C.acc, fontWeight: 700 }}>👥 {totalPeople} ligados</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {listSummary.map(r => (
+                      <span key={r.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '5px 10px', fontSize: 12, color: C.txt }}>
+                        <span>{r.icon}</span>
+                        <span style={{ fontWeight: 600 }}>{r.label}</span>
+                        <span style={{ color: C.mut, fontWeight: 700 }}>{r.people != null ? `${r.count} (${r.people}p)` : r.count}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* Valor da lista (cadastrado no evento) */}
             {guestEv && ((guestEv.price_male_list_cents ?? 0) > 0 || (guestEv.price_female_list_cents ?? 0) > 0) && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -2770,6 +2917,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           const cache = ab.fee
           const consumacao = ab.cons
           const producao = budgetEv.production_cost_cents ?? 0
+          const promos = budgetEv.promotions_list ?? []
+          const promosTotal = promos.reduce((s, p) => s + (p.value_cents ?? 0), 0)
           const freelancerTotal = budgetFreelancers.reduce((s, ef) => s + ((ef as any).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0), 0)
           const promoterTotal = budgetPromoters.reduce((s, l) => {
             const ent = Math.max(l.guest_count, l.min_entries)
@@ -2780,7 +2929,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           const tasksEst = budgetTasks.reduce((s, t) => s + (t.estimated_cost_cents ?? 0), 0)
           const tasksReal = budgetTasks.reduce((s, t) => s + (t.actual_cost_cents ?? 0), 0)
           const tasksTotal = tasksReal > 0 ? tasksReal : tasksEst
-          const total = cache + consumacao + producao + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
+          const total = cache + consumacao + producao + promosTotal + freelancerTotal + promoterTotal + resItemsTotal + expensesTotal + tasksTotal
           const reservasRevenue = budgetRes.reduce((s, r) => s + (r.amount_cents ?? 0), 0)
           const otherRevenue = budgetExpenses.filter(e => e.kind === 'revenue').reduce((s, e) => s + e.amount_cents, 0)
           const revenue = reservasRevenue + otherRevenue
@@ -2835,6 +2984,23 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
               {consumacao > 0 && row('🍺', 'Consumação (artistas)', consumacao, '#f59e0b')}
               {row('🔧', 'Gastos de Produção', producao, '#8b5cf6')}
+
+              {/* Promoções */}
+              {promos.length > 0 && (
+                <div style={{ borderBottom: `1px solid ${C.brd}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '11px 0 6px' }}>
+                    <div style={{ fontSize: 20, width: 34 }}>🎉</div>
+                    <div style={{ flex: 1, color: C.txt, fontSize: 14, fontWeight: 600 }}>Promoções ({promos.length})</div>
+                    <div style={{ color: C.gold, fontWeight: 700, fontSize: 15 }}>{fmtCurrency(promosTotal)}</div>
+                  </div>
+                  {promos.map((p, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '3px 0 3px 34px' }}>
+                      <div style={{ flex: 1, color: C.mut, fontSize: 12 }}>{p.label || `Promoção ${i + 1}`}</div>
+                      <div style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>{fmtCurrency(p.value_cents ?? 0)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Freelancers */}
               <div style={{ borderBottom: `1px solid ${C.brd}` }}>

@@ -44,6 +44,13 @@ export interface ArtistEntry {
   consumption_cents: number
 }
 
+export interface PromotionEntry {
+  label: string
+  value_cents: number
+}
+
+export type PromoterPriceMode = 'list' | 'other' | 'vip'
+
 export interface Event {
   id: string
   house_id: string
@@ -60,6 +67,10 @@ export interface Event {
   repeat_rule?: string
   attractions?: string
   promotions?: string
+  promotions_list?: PromotionEntry[]
+  promoter_enabled?: boolean
+  promoter_price_mode?: PromoterPriceMode
+  promoter_price_cents?: number
   flyer_url?: string
   birthday_list_enabled?: boolean
   house_list_enabled?: boolean
