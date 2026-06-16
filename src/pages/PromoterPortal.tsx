@@ -107,7 +107,7 @@ export function PromoterPortal({ token }: { token: string }) {
         .eq('id', pId)
         .single()
 
-      if (!pData || pData.status !== 'ativo') {
+      if (!pData || pData.status === 'inactive') {
         setNotFound(true); setLoading(false); return
       }
       setPromoter(pData as PromoterInfo)
