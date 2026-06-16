@@ -36,10 +36,11 @@ interface SidebarProps {
   mOpen: boolean
   setMOpen: (v: boolean) => void
   newCI: number
+  pendingRatings?: number
   onLogout: () => void
 }
 
-export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, onLogout }: SidebarProps) {
+export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pendingRatings = 0, onLogout }: SidebarProps) {
   const isAdmin = ['super_admin', 'admin'].includes(session.role)
 
   return (
@@ -95,7 +96,9 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, on
             return session.allowedPages.includes(n.id)
           }).map(n => {
             const isActive = active === n.id
-            const showBadge = n.id === 'checkin' && newCI > 0
+            const badgeCount = n.id === 'checkin' ? newCI : n.id === 'freelancers' ? pendingRatings : 0
+            const badgeColor = n.id === 'freelancers' ? '#f59e0b' : C.acc
+            const showBadge = badgeCount > 0
             return (
               <button
                 key={n.id}
@@ -124,13 +127,13 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, on
                 <span style={{ flex: 1 }}>{n.label}</span>
                 {showBadge && (
                   <span style={{
-                    background: C.acc, color: '#fff',
+                    background: badgeColor, color: '#fff',
                     fontSize: 10, fontWeight: 800,
                     padding: '2px 7px', borderRadius: 10,
                     minWidth: 18, textAlign: 'center', lineHeight: '16px',
                     animation: 'pulse 1.5s ease-in-out infinite',
                   }}>
-                    {newCI > 99 ? '99+' : newCI}
+                    {badgeCount > 99 ? '99+' : badgeCount}
                   </span>
                 )}
               </button>

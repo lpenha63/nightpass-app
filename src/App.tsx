@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSession } from './hooks/useSession'
 import { supabase } from './lib/supabase'
 import { C } from './constants/theme'
@@ -96,6 +96,25 @@ export default function App() {
   const [mOpen, setMOpen] = useState(false)
   const [newCI, setNewCI] = useState(0)
   const [reservaNav, setReservaNav] = useState<{ date: string; eventId?: string } | null>(null)
+  const [pendingRatings, setPendingRatings] = useState(0)
+
+  const refreshPending = useCallback(async () => {
+    if (!session?.house) return
+    const today = new Date().toISOString().slice(0, 10)
+    const { data: evs } = await supabase.from('events').select('id').eq('house_id', session.house.id).lt('event_date', today)
+    const ids = (evs ?? []).map(e => e.id)
+    if (ids.length === 0) { setPendingRatings(0); return }
+    const { data: efs } = await supabase.from('event_freelancers').select('event_id,freelancer_id').in('event_id', ids)
+    const { data: rts } = await supabase.from('team_ratings').select('event_id,freelancer_id').in('event_id', ids)
+    const ratedSet = new Set((rts ?? []).map(r => `${r.event_id}:${r.freelancer_id}`))
+    const pendingEvents = new Set<string>()
+    for (const ef of efs ?? []) {
+      if (!ratedSet.has(`${ef.event_id}:${ef.freelancer_id}`)) pendingEvents.add(ef.event_id)
+    }
+    setPendingRatings(pendingEvents.size)
+  }, [session?.house?.id])
+
+  useEffect(() => { refreshPending() }, [refreshPending])
 
   useEffect(() => {
     if (!session?.house) return
@@ -142,7 +161,7 @@ export default function App() {
     reports:   <ReportsPage house={session.house} />,
     whatsapp:  <WhatsAppPage house={session.house} />,
     users:       <UsersPage house={session.house} user={session.user} role={session.role} />,
-    freelancers: <FreelancersPage house={session.house} />,
+    freelancers: <FreelancersPage house={session.house} onRatingsChanged={refreshPending} />,
     settings:    <SettingsPage house={session.house} />,
   }
 
@@ -155,6 +174,7 @@ export default function App() {
         mOpen={mOpen}
         setMOpen={setMOpen}
         newCI={newCI}
+        pendingRatings={pendingRatings}
         onLogout={handleLogout}
       />
       <main
@@ -171,6 +191,7 @@ export default function App() {
         setActive={navigateTo}
         setMOpen={setMOpen}
         newCI={newCI}
+        pendingRatings={pendingRatings}
       />
     </div>
   )

@@ -7,7 +7,10 @@ import { sT, type ToastState } from '../utils/toast'
 import type { House, Freelancer } from '../types'
 import { DEFAULT_AREAS, AREA_ICON_OPTIONS, AREA_COLOR_OPTIONS, slugifyArea, areaMeta, type WorkArea } from '../constants/areas'
 
-interface Props { house: House }
+interface Props { house: House; onRatingsChanged?: () => void }
+
+interface PendingEvent { id: string; name: string; event_date: string; flyer_url?: string; total: number; rated: number }
+interface RatingEntry { freelancer_id: string; full_name: string; role: string; rating: number; comment: string; existing_id?: string }
 
 const DEF = {
   full_name: '', address: '', phone: '', pix_key: '',
@@ -16,10 +19,78 @@ const DEF = {
 
 const AREA_FORM_DEF = { id: '', label: '', icon: '📋', color: '#60a5fa' }
 
-export function FreelancersPage({ house }: Props) {
+export function FreelancersPage({ house, onRatingsChanged }: Props) {
   const [freelancers, setFreelancers] = useState<Freelancer[]>([])
   const [areas, setAreas] = useState<WorkArea[]>(DEFAULT_AREAS)
   const [ratings, setRatings] = useState<Record<string, { avg: number; count: number }>>({})
+  const [tab, setTab] = useState<'equipe' | 'avaliacoes'>('equipe')
+
+  // Avaliações pendentes
+  const [pending, setPending] = useState<PendingEvent[]>([])
+  const [ratingEv, setRatingEv] = useState<PendingEvent | null>(null)
+  const [ratingEntries, setRatingEntries] = useState<RatingEntry[]>([])
+  const [ratingSaving, setRatingSaving] = useState(false)
+
+  async function loadPending() {
+    const today = new Date().toISOString().slice(0, 10)
+    const { data: evs } = await supabase.from('events').select('id,name,event_date,flyer_url')
+      .eq('house_id', house.id).lt('event_date', today).order('event_date', { ascending: false })
+    const ids = (evs ?? []).map(e => e.id)
+    if (ids.length === 0) { setPending([]); return }
+    const { data: efs } = await supabase.from('event_freelancers').select('event_id,freelancer_id').in('event_id', ids)
+    const { data: rts } = await supabase.from('team_ratings').select('event_id,freelancer_id').in('event_id', ids)
+    const ratedSet = new Set((rts ?? []).map(r => `${r.event_id}:${r.freelancer_id}`))
+    const byEvent: Record<string, { total: number; rated: number }> = {}
+    for (const ef of efs ?? []) {
+      if (!byEvent[ef.event_id]) byEvent[ef.event_id] = { total: 0, rated: 0 }
+      byEvent[ef.event_id].total++
+      if (ratedSet.has(`${ef.event_id}:${ef.freelancer_id}`)) byEvent[ef.event_id].rated++
+    }
+    const result: PendingEvent[] = []
+    for (const e of evs ?? []) {
+      const c = byEvent[e.id]
+      if (c && c.rated < c.total) result.push({ ...e, total: c.total, rated: c.rated })
+    }
+    setPending(result)
+  }
+
+  async function openRating(ev: PendingEvent) {
+    setRatingEv(ev)
+    const { data: efs } = await supabase.from('event_freelancers')
+      .select('freelancer_id, role, freelancers(full_name)').eq('event_id', ev.id)
+    const { data: existing } = await supabase.from('team_ratings')
+      .select('id, freelancer_id, rating, comment').eq('event_id', ev.id)
+    const existingMap = new Map((existing ?? []).map(r => [r.freelancer_id, r]))
+    const entries: RatingEntry[] = (efs ?? []).map(ef => {
+      const ex = existingMap.get(ef.freelancer_id)
+      return {
+        freelancer_id: ef.freelancer_id,
+        full_name: (ef.freelancers as { full_name?: string } | null)?.full_name ?? 'Sem nome',
+        role: ef.role ?? '',
+        rating: ex?.rating ?? 0,
+        comment: ex?.comment ?? '',
+        existing_id: ex?.id,
+      }
+    })
+    setRatingEntries(entries)
+  }
+
+  async function saveRatings() {
+    if (!ratingEv) return
+    setRatingSaving(true)
+    const toSave = ratingEntries.filter(e => e.rating > 0)
+    for (const e of toSave) {
+      if (e.existing_id) {
+        await supabase.from('team_ratings').update({ rating: e.rating, comment: e.comment }).eq('id', e.existing_id)
+      } else {
+        await supabase.from('team_ratings').insert({ house_id: house.id, event_id: ratingEv.id, freelancer_id: e.freelancer_id, rating: e.rating, comment: e.comment || null })
+      }
+    }
+    setRatingSaving(false)
+    st2(`✅ ${toSave.length} avaliação(ões) salvas!`)
+    setRatingEv(null)
+    loadPending(); loadRatings(); onRatingsChanged?.()
+  }
 
   async function loadRatings() {
     const { data } = await supabase.from('team_ratings').select('freelancer_id,rating').eq('house_id', house.id)
@@ -70,7 +141,7 @@ export function FreelancersPage({ house }: Props) {
       })
   }
 
-  useEffect(() => { load(); loadAreas(); loadRatings() }, [house.id])
+  useEffect(() => { load(); loadAreas(); loadRatings(); loadPending() }, [house.id])
 
   function openNew() { setEditing(null); setForm({ ...DEF }); setModal(true) }
 
@@ -308,6 +379,25 @@ export function FreelancersPage({ house }: Props) {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+        {([['equipe', '👷 Equipe'], ['avaliacoes', '⭐ Avaliações']] as const).map(([id, label]) => {
+          const on = tab === id
+          const isRat = id === 'avaliacoes'
+          const col = isRat ? '#f59e0b' : C.acc
+          return (
+            <button key={id} onClick={() => setTab(id)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 18px', borderRadius: 10, border: `1px solid ${on ? col : C.brd}`, background: on ? col + '22' : 'transparent', color: on ? col : C.mut, fontSize: 14, fontWeight: on ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+              {label}
+              {isRat && pending.length > 0 && (
+                <span style={{ background: '#f59e0b', color: '#fff', borderRadius: 9, padding: '1px 7px', fontSize: 11, fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{pending.length}</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {tab === 'equipe' && <>
       {/* Filters */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
         <input
@@ -395,6 +485,90 @@ export function FreelancersPage({ house }: Props) {
           })
         }
       </Card>
+      </>}
+
+      {/* ── ABA AVALIAÇÕES ── */}
+      {tab === 'avaliacoes' && (
+        pending.length === 0 ? (
+          <Card>
+            <div style={{ textAlign: 'center', color: C.mut, padding: 40 }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
+              <div style={{ color: C.txt, fontWeight: 700, fontSize: 15 }}>Nenhuma avaliação pendente</div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>Todos os eventos passados já foram avaliados.</div>
+            </div>
+          </Card>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {pending.map(ev => {
+              const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })
+              return (
+                <Card key={ev.id}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    {ev.flyer_url
+                      ? <img src={ev.flyer_url} alt={ev.name} style={{ width: 52, height: 52, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
+                      : <div style={{ width: 52, height: 52, borderRadius: 10, background: '#f59e0b22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>📅</div>}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: C.txt, fontWeight: 700, fontSize: 15 }}>{ev.name}</div>
+                      <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>📅 {dateStr}</div>
+                      <div style={{ color: '#f59e0b', fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+                        ⭐ {ev.rated}/{ev.total} avaliados · {ev.total - ev.rated} pendente(s)
+                      </div>
+                    </div>
+                    <Btn onClick={() => openRating(ev)} style={{ flexShrink: 0, background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44' }}>⭐ Avaliar</Btn>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        )
+      )}
+
+      {/* Modal de avaliação */}
+      <Modal open={!!ratingEv} title={`⭐ Avaliar equipe — ${ratingEv?.name ?? ''}`} onClose={() => setRatingEv(null)} wide>
+        {ratingEv && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            {ratingEntries.length === 0 ? (
+              <div style={{ textAlign: 'center', color: C.mut, padding: '24px 0' }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>👷</div>
+                <div>Nenhum membro escalado para este evento.</div>
+              </div>
+            ) : (
+              ratingEntries.map((e, i) => (
+                <div key={e.freelancer_id} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div>
+                      <span style={{ color: C.txt, fontWeight: 700, fontSize: 14 }}>{e.full_name}</span>
+                      {e.role && <span style={{ color: C.mut, fontSize: 11, marginLeft: 8 }}>{e.role}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {[1,2,3,4,5].map(star => (
+                        <button key={star} onClick={() => setRatingEntries(prev => prev.map((r, idx) => idx === i ? { ...r, rating: r.rating === star ? 0 : star } : r))}
+                          style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: star <= e.rating ? '#f59e0b' : C.brd, padding: '0 1px', lineHeight: 1 }}>
+                          ★
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    value={e.comment}
+                    onChange={ev2 => setRatingEntries(prev => prev.map((r, idx) => idx === i ? { ...r, comment: ev2.target.value } : r))}
+                    placeholder="Comentário opcional..."
+                    style={{ width: '100%', background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '6px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', boxSizing: 'border-box' }}
+                  />
+                </div>
+              ))
+            )}
+            {ratingEntries.length > 0 && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn onClick={saveRatings} style={{ flex: 1 }} disabled={ratingSaving}>
+                  {ratingSaving ? 'Salvando...' : '💾 Salvar avaliações'}
+                </Btn>
+                <Btn onClick={() => setRatingEv(null)} variant="ghost">Cancelar</Btn>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <FAB onClick={openNew} icon="➕" title="Novo cadastro" />
     </div>

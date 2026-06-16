@@ -20,9 +20,10 @@ interface Props {
   setActive: (id: PageId) => void
   setMOpen: (v: boolean) => void
   newCI: number
+  pendingRatings?: number
 }
 
-export function BottomNav({ active, setActive, setMOpen, newCI }: Props) {
+export function BottomNav({ active, setActive, setMOpen, newCI, pendingRatings = 0 }: Props) {
   const isBottomTab = (id: PageId) => BOTTOM_NAV.some(n => n.id === id)
 
   return (
@@ -121,7 +122,20 @@ export function BottomNav({ active, setActive, setMOpen, newCI }: Props) {
             borderRadius: '0 0 2px 2px',
           }} />
         )}
-        <i className="bi bi-grid-fill" style={{ fontSize: 20, lineHeight: 1 }} />
+        <div style={{ position: 'relative' }}>
+          <i className="bi bi-grid-fill" style={{ fontSize: 20, lineHeight: 1 }} />
+          {pendingRatings > 0 && (
+            <span style={{
+              position: 'absolute', top: -4, right: -7,
+              background: '#f59e0b', color: '#fff',
+              fontSize: 9, fontWeight: 800,
+              padding: '1px 5px', borderRadius: 8,
+              minWidth: 16, textAlign: 'center', lineHeight: '14px',
+            }}>
+              {pendingRatings > 99 ? '99+' : pendingRatings}
+            </span>
+          )}
+        </div>
         <span style={{ fontSize: 10, fontWeight: !isBottomTab(active) ? 700 : 500, lineHeight: 1 }}>
           Menu
         </span>
