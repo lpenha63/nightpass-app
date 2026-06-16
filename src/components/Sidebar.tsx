@@ -1,6 +1,5 @@
 import { C, RC, RL } from '../constants/theme'
 import { Pill } from './ui'
-import { InstallButton } from './InstallButton'
 import type { Session } from '../types'
 
 export type PageId =
@@ -142,9 +141,8 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
           })}
         </nav>
 
-        {/* Install + Logout */}
-        <div style={{ padding: '12px 10px', borderTop: `1px solid rgba(59,130,246,0.08)`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <InstallButton full />
+        {/* Logout */}
+        <div style={{ padding: '12px 10px', borderTop: `1px solid rgba(59,130,246,0.08)` }}>
           <button
             onClick={onLogout}
             style={{

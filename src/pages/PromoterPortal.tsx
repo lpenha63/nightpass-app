@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { InstallButton } from '../components/InstallButton'
 
 const C = {
   bg: '#0a0e1a', card: '#111827', brd: '#1e2736',
@@ -62,6 +63,32 @@ export function PromoterPortal({ token }: { token: string }) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [viewingList, setViewingList] = useState<string | null>(null)
   const [genreFilter, setGenreFilter] = useState<string>('all')
+
+  // Manifest dinâmico: o app instalado abre direto neste portal do promoter
+  useEffect(() => {
+    const manifest = {
+      name: 'Portal do Promoter',
+      short_name: 'Promoter',
+      start_url: window.location.pathname,
+      scope: window.location.pathname,
+      display: 'standalone',
+      orientation: 'portrait-primary',
+      background_color: '#0a0e1a',
+      theme_color: '#7c3aed',
+      lang: 'pt-BR',
+      icons: [
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
+    }
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' })
+    const url = URL.createObjectURL(blob)
+    let link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null
+    const prev = link ? link.getAttribute('href') : null
+    if (!link) { link = document.createElement('link'); link.rel = 'manifest'; document.head.appendChild(link) }
+    link.setAttribute('href', url)
+    return () => { URL.revokeObjectURL(url); if (prev) link!.setAttribute('href', prev) }
+  }, [token])
 
   async function loadLists(pId: string, hId: string) {
     const { data } = await supabase
@@ -267,6 +294,11 @@ export function PromoterPortal({ token }: { token: string }) {
             <div style={{ color: C.txt, fontWeight: 800, fontSize: 22 }}>{lists.length}</div>
             <div style={{ color: C.mut, fontSize: 11 }}>listas criadas</div>
           </div>
+        </div>
+
+        {/* Instalar como app */}
+        <div style={{ marginBottom: 20 }}>
+          <InstallButton full />
         </div>
 
         {/* Success message */}
