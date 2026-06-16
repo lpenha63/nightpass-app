@@ -259,6 +259,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [flyerProgress, setFlyerProgress] = useState({ sent: 0, total: 0 })
   const [flyerMaxFriends, setFlyerMaxFriends] = useState(3)
   const [flyerFriendsOn, setFlyerFriendsOn] = useState(true)
+  const [flyerVip, setFlyerVip] = useState(false)
   const [flyerListRec, setFlyerListRec] = useState<{ token: string; listId: string; promoterId: string } | null>(null)
 
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
@@ -1009,14 +1010,17 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   }
 
   async function openFlyer(ev: EventWithCounts) {
-    setFlyerEv(ev); setFlyerSel(new Set()); setFlyerSearch(''); setFlyerGender('all'); setFlyerProgress({ sent: 0, total: 0 }); setFlyerClients([]); setFlyerListRec(null)
+    setFlyerEv(ev); setFlyerSel(new Set()); setFlyerSearch(''); setFlyerGender('all'); setFlyerProgress({ sent: 0, total: 0 }); setFlyerClients([]); setFlyerListRec(null); setFlyerVip(false)
     const { data } = await supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).not('phone', 'is', null).order('full_name')
     setFlyerClients((data ?? []) as FlyerClient[])
     const rec = await ensureHouseListRecord(ev)
     setFlyerListRec(rec)
     const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    const artistNames = (ev.artists ?? []).map(a => a.name).filter(n => n && n.trim())
+    const linhaArtistas = artistNames.length > 0 ? `\n🎤 Atrações: ${artistNames.join(', ')}` : ''
+    const linhaPromo = ev.promotions ? `\n🎉 ${ev.promotions}` : ''
     // Link de confirmação é gerado individualmente por convidado em sendFlyer ({{link}})
-    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!\n\n✅ Confirme sua presença com 1 clique:\n{{link}}\n\nTe esperamos! 🔥`)
+    setFlyerMsg(`🎉 Olá {{nome}}! Não perca *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}!${linhaArtistas}${linhaPromo}\n\n✅ Confirme sua presença com 1 clique:\n{{link}}\n\nTe esperamos! 🔥`)
   }
 
   async function sendFlyer() {
@@ -1028,7 +1032,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     let rec = flyerListRec
     if (!rec) { rec = await ensureHouseListRecord(flyerEv); setFlyerListRec(rec) }
     if (!rec) { st2('Erro: lista da casa não pôde ser criada.', 'error'); return }
-    const effMaxFriends = flyerFriendsOn ? flyerMaxFriends : 0
+    // 0 com toggle ligado = ilimitado (9999); toggle desligado = sem amigos (0)
+    const effMaxFriends = flyerFriendsOn ? (flyerMaxFriends === 0 ? 9999 : flyerMaxFriends) : 0
     setFlyerSending(true); setFlyerProgress({ sent: 0, total: sel.length })
     let ok = 0
     for (const c of sel) {
@@ -1040,7 +1045,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           .select('id,invite_token').eq('list_id', rec.listId).eq('client_id', c.id).limit(1).maybeSingle()
         if (existing?.id) {
           token = existing.invite_token || (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2))
-          await supabase.from('promoter_list_guests').update({ invite_token: token, max_plus_ones: effMaxFriends }).eq('id', existing.id)
+          await supabase.from('promoter_list_guests').update({ invite_token: token, max_plus_ones: effMaxFriends, is_vip: flyerVip }).eq('id', existing.id)
         } else {
           token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
           const g = (c.gender ?? '').toLowerCase()
@@ -1048,12 +1053,13 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           await supabase.from('promoter_list_guests').insert({
             list_id: rec.listId, house_id: house.id, event_id: flyerEv.id, promoter_id: rec.promoterId,
             full_name: c.full_name, phone: (c.phone ?? '').replace(/\D/g, '') || null, gender: normGender,
-            list_type: 'promoter', is_vip: false, promoter_confirmed: false,
+            list_type: 'promoter', is_vip: flyerVip, promoter_confirmed: false,
             client_id: c.id, invite_token: token, max_plus_ones: effMaxFriends,
           })
         }
         const confirmLink = `${window.location.origin}/confirmar/${token}`
-        const msg = flyerMsg
+        const vipLine = flyerVip ? '⭐ *VOCÊ É NOSSO CONVIDADO VIP!*\n\n' : ''
+        const msg = vipLine + flyerMsg
           .replace(/\{\{nome\}\}/g, (c.full_name || '').split(' ')[0])
           .replace(/\{\{link\}\}/g, confirmLink)
         const useMedia = !!flyerEv.flyer_url
@@ -2691,8 +2697,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px' }}>
                   <span style={{ fontSize: 13, color: C.txt, fontWeight: 600, flex: 1 }}>👥 Convidar amigos</span>
                   {flyerFriendsOn && (
-                    <input type="number" min="1" max="20" value={flyerMaxFriends}
-                      onChange={e => setFlyerMaxFriends(Math.max(1, parseInt(e.target.value || '1')))}
+                    <input type="number" min="0" max="99" value={flyerMaxFriends}
+                      title="0 = ilimitado"
+                      onChange={e => setFlyerMaxFriends(Math.max(0, parseInt(e.target.value || '0')))}
                       style={{ width: 50, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '5px 8px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none', textAlign: 'center' }} />
                   )}
                   {/* toggle ON/OFF */}
@@ -2702,8 +2709,22 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                     <span style={{ position: 'absolute', top: 2, left: flyerFriendsOn ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0005' }} />
                   </button>
                 </div>
+                {flyerFriendsOn && flyerMaxFriends === 0 && (
+                  <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, marginTop: 4 }}>♾️ Amigos ilimitados (0 = sem limite)</div>
+                )}
+
+                {/* Toggle Convidado VIP */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, background: C.bg, border: `1px solid ${flyerVip ? C.gold + '66' : C.brd}`, borderRadius: 8, padding: '8px 10px' }}>
+                  <span style={{ fontSize: 13, color: flyerVip ? C.gold : C.txt, fontWeight: 600, flex: 1 }}>⭐ Convidado VIP</span>
+                  <button onClick={() => setFlyerVip(v => !v)}
+                    title={flyerVip ? 'VIP ligado — clique para desligar' : 'Desligado — clique para ligar'}
+                    style={{ display: 'inline-flex', width: 44, height: 24, borderRadius: 12, background: flyerVip ? C.gold : C.brd, border: 'none', position: 'relative', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s' }}>
+                    <span style={{ position: 'absolute', top: 2, left: flyerVip ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0005' }} />
+                  </button>
+                </div>
+
                 <div style={{ fontSize: 11, color: C.mut, marginTop: 6 }}>
-                  🔗 Cada cliente recebe um link <span style={{ color: '#a78bfa' }}>/confirmar</span> exclusivo — confirma presença com 1 clique, sem preencher cadastro{flyerFriendsOn ? `, e pode convidar até ${flyerMaxFriends} amigo(s) pelo link` : ' (convite de amigos desligado)'}.
+                  🔗 Cada cliente recebe um link <span style={{ color: '#a78bfa' }}>/confirmar</span> exclusivo — confirma presença com 1 clique, sem preencher cadastro{flyerFriendsOn ? (flyerMaxFriends === 0 ? ', e pode convidar amigos ilimitados pelo link' : `, e pode convidar até ${flyerMaxFriends} amigo(s) pelo link`) : ' (convite de amigos desligado)'}.{flyerVip ? ' A mensagem incluirá "VOCÊ É NOSSO CONVIDADO VIP" e marcará os convidados como VIP.' : ''}
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>

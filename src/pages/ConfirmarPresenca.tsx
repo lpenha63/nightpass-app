@@ -166,8 +166,10 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
           <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 24 }}>
             <div style={{ fontWeight: 800, color: C.txt, fontSize: 16, marginBottom: 4 }}>👥 Convide seus amigos</div>
             <div style={{ color: C.mut, fontSize: 13, marginBottom: 16 }}>
-              Você pode levar até <strong style={{ color: C.acc }}>{guest.max_plus_ones} amigo{(guest.max_plus_ones ?? 0) !== 1 ? 's' : ''}</strong>.
-              Envie o link abaixo — eles confirmam a presença em poucos segundos.
+              {(guest.max_plus_ones ?? 0) >= 9999
+                ? <>Você pode levar <strong style={{ color: C.acc }}>quantos amigos quiser</strong>.</>
+                : <>Você pode levar até <strong style={{ color: C.acc }}>{guest.max_plus_ones} amigo{(guest.max_plus_ones ?? 0) !== 1 ? 's' : ''}</strong>.</>}
+              {' '}Envie o link abaixo — eles confirmam a presença em poucos segundos.
             </div>
 
             <button onClick={shareFriendsWA}
