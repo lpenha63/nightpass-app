@@ -1051,7 +1051,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   : 'Tipos de celebração configuráveis'}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button style={TAB(view === 'list')} onClick={() => setView('list')}>📋 Reservas</button>
             <button style={TAB(view === 'receivable')} onClick={() => { setView('receivable'); loadReceivables() }}>💰 A Receber</button>
             <button style={TAB(view === 'settings')} onClick={() => setView('settings')}>⚙️ Tipos</button>

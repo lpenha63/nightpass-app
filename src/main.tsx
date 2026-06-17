@@ -22,8 +22,10 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-// Service Worker registration
-if ('serviceWorker' in navigator) {
+// Service Worker registration — apenas em produção.
+// Em dev (localhost) o SW serve assets em cache e mascara o código novo.
+const isLocalhost = ['localhost', '127.0.0.1'].includes(location.hostname)
+if ('serviceWorker' in navigator && !isLocalhost) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {})
   })
