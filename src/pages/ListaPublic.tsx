@@ -159,12 +159,14 @@ export function ListaPublicPage({ token }: { token: string }) {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
+      {/* Flyer inteiro (sem corte) */}
+      {ev?.flyer_url && (
+        <img src={ev.flyer_url} alt={ev?.name ?? 'Flyer'} style={{ width: '100%', maxWidth: 480, height: 'auto', display: 'block', margin: '0 auto' }} />
+      )}
       {/* Header */}
       <div style={{
-        background: ev?.flyer_url
-          ? `linear-gradient(to bottom, rgba(10,14,26,0.4) 0%, rgba(10,14,26,1) 100%), url(${ev.flyer_url}) center/cover`
-          : `linear-gradient(135deg,#7c3aed,#1d4ed8,#0a0e1a)`,
-        padding: '40px 20px 28px', textAlign: 'center',
+        background: `linear-gradient(135deg,#7c3aed,#1d4ed8,#0a0e1a)`,
+        padding: '28px 20px 28px', textAlign: 'center',
       }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {lista!.houses?.logo_url && (

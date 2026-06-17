@@ -172,11 +172,9 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
     : ''
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: 'system-ui,sans-serif', padding: '0 0 60px' }}>
-      {/* Flyer */}
+      {/* Flyer inteiro (sem corte) */}
       {ev?.flyer_url && (
-        <div style={{ width: '100%', maxHeight: 300, overflow: 'hidden' }}>
-          <img src={ev.flyer_url} alt={ev.name} style={{ width: '100%', objectFit: 'cover', display: 'block' }} />
-        </div>
+        <img src={ev.flyer_url} alt={ev.name} style={{ width: '100%', maxWidth: 480, height: 'auto', display: 'block', margin: '0 auto' }} />
       )}
 
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px' }}>
