@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ChangeEvent } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, FAB } from '../components/ui'
@@ -11,6 +11,28 @@ import type { House, Client } from '../types'
 interface Props { house: House; user: { id: string; email: string }; role: string }
 
 const EMPTY_FORM = { full_name: '', cpf: '', phone: '', birth_date: '', email: '', photo_url: '', fingerprint_id: '', gender: '' }
+
+// ── Helpers de importação por planilha ──────────────────────────────────────
+const stripAccents = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '')
+function normHeader(h: string): string { return stripAccents(String(h).toLowerCase()).replace(/[^a-z0-9]/g, '') }
+function parseImportBirth(v: unknown): string | null {
+  if (v == null || v === '') return null
+  if (v instanceof Date && !isNaN(v.getTime())) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
+  const s = String(v).trim()
+  let m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
+  if (m) { let y = m[3]; if (y.length === 2) y = (parseInt(y, 10) > 30 ? '19' : '20') + y; return `${y.padStart(4, '0')}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` }
+  m = s.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})/)
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+  return null
+}
+function normGender(v: string): string | null {
+  const s = stripAccents(String(v).toLowerCase()).trim()
+  if (!s) return null
+  if (s.startsWith('f') || s === 'mulher') return 'feminino'
+  if (s.startsWith('m') || s.startsWith('h')) return 'masculino'
+  return null
+}
+interface ImportRow { full_name: string; cpf: string | null; phone: string; birth_date: string | null; email: string | null; gender: string | null; house_id: string; status: string; created_by: string }
 
 // ── Birthday types ─────────────────────────────────────────────────────────
 interface ClientWithDays extends Client { daysUntil: number }
@@ -50,6 +72,78 @@ export function ClientsPage({ house, user }: Props) {
   const [uploadingBulkImg, setUploadingBulkImg] = useState(false)
   const [bulkProgress, setBulkProgress] = useState<{ sent: number; total: number } | null>(null)
   const [quickWA, setQuickWA] = useState<QuickWATarget | null>(null)
+
+  // Importação por planilha
+  const [importOpen, setImportOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importName, setImportName] = useState('')
+  const [importRows, setImportRows] = useState<ImportRow[]>([])
+  const [importStats, setImportStats] = useState<{ total: number; ready: number; dup: number; noPhone: number } | null>(null)
+  const [importDone, setImportDone] = useState<{ inserted: number; failed: number } | null>(null)
+
+  function openImport() { setImportOpen(true); setImportName(''); setImportRows([]); setImportStats(null); setImportDone(null) }
+
+  async function handleImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImportName(file.name); setImporting(true); setImportStats(null); setImportRows([]); setImportDone(null)
+    try {
+      const XLSX = await import('xlsx')
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+      const { data: existing } = await supabase.from('clients').select('cpf,phone').eq('house_id', house.id)
+      const exCpf = new Set<string>(); const exPhone = new Set<string>()
+      ;(existing ?? []).forEach(c => { const cp = cn(c.cpf ?? ''); if (cp) exCpf.add(cp); const ph = cn(c.phone ?? ''); if (ph) exPhone.add(ph) })
+      const seenCpf = new Set<string>(); const seenPhone = new Set<string>()
+      const ready: ImportRow[] = []
+      let dup = 0, noPhone = 0
+      for (const r of raw) {
+        const keyMap: Record<string, string> = {}
+        for (const k of Object.keys(r)) keyMap[normHeader(k)] = k
+        const cell = (...ks: string[]): unknown => { for (const k of ks) { if (keyMap[k] != null) return r[keyMap[k]] } return '' }
+        const str = (...ks: string[]) => String(cell(...ks) ?? '').trim()
+        const name = str('nome', 'nomecompleto', 'name', 'cliente', 'razaosocial')
+        const cpf = cn(str('cpf', 'documento', 'doc'))
+        const phone = cn(str('telefone', 'celular', 'phone', 'tel', 'whatsapp', 'fone', 'contato'))
+        const birth = parseImportBirth(cell('nascimento', 'datadenascimento', 'datanascimento', 'aniversario', 'nasc', 'birthdate', 'dtnasc'))
+        const email = str('email', 'e-mail', 'mail') || null
+        const gender = normGender(str('genero', 'sexo', 'gender'))
+        if (phone.length < 10) { noPhone++; continue }
+        if ((cpf && (exCpf.has(cpf) || seenCpf.has(cpf))) || exPhone.has(phone) || seenPhone.has(phone)) { dup++; continue }
+        if (cpf) seenCpf.add(cpf)
+        seenPhone.add(phone)
+        ready.push({ full_name: name || `Cliente ${phone}`, cpf: cpf || null, phone, birth_date: birth, email, gender, house_id: house.id, status: 'active', created_by: user.id })
+      }
+      setImportStats({ total: raw.length, ready: ready.length, dup, noPhone })
+      setImportRows(ready)
+    } catch (err) {
+      sT(setToast, 'Erro ao ler a planilha: ' + ((err as Error)?.message ?? 'formato inválido'), 'error')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  async function doImport() {
+    if (importRows.length === 0) return
+    setImporting(true)
+    let inserted = 0, failed = 0
+    for (let i = 0; i < importRows.length; i += 200) {
+      const batch = importRows.slice(i, i + 200)
+      const { error, data } = await supabase.from('clients').insert(batch).select('id')
+      if (!error) { inserted += data?.length ?? batch.length; continue }
+      for (const row of batch) {
+        const { error: e1 } = await supabase.from('clients').insert(row)
+        if (e1) failed++; else inserted++
+      }
+    }
+    setImporting(false)
+    setImportDone({ inserted, failed })
+    setImportRows([])
+    load()
+  }
 
   const load = useCallback(() => {
     if (!house) return
@@ -429,13 +523,61 @@ export function ClientsPage({ house, user }: Props) {
         </div>
       </Modal>
 
+      {/* Importar planilha */}
+      <Modal open={importOpen} title="📥 Importar Clientes" onClose={() => { if (!importing) setImportOpen(false) }}>
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.5 }}>
+            Envie uma planilha <strong>.xlsx, .xls ou .csv</strong>. A 1ª linha é o cabeçalho.
+            <div style={{ marginTop: 6, color: C.mut, fontSize: 12 }}>
+              Colunas reconhecidas: <strong style={{ color: C.txt }}>Telefone</strong> (obrigatório) · Nome · CPF · Nascimento · Email · Gênero
+            </div>
+            <div style={{ marginTop: 4, color: C.mut, fontSize: 12 }}>
+              Duplicados (mesmo <strong>CPF</strong>, ou mesmo <strong>telefone</strong>) são ignorados automaticamente.
+            </div>
+          </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: C.bg, border: `1px dashed ${C.brd}`, borderRadius: 10, padding: '16px 14px', cursor: importing ? 'wait' : 'pointer', color: C.acc, fontSize: 14, fontWeight: 700 }}>
+            📁 {importName || 'Selecionar planilha'}
+            <input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" style={{ display: 'none' }} disabled={importing} onChange={handleImportFile} />
+          </label>
+
+          {importing && !importStats && <div style={{ color: C.mut, textAlign: 'center', fontSize: 13 }}>⏳ Lendo planilha…</div>}
+
+          {importStats && (
+            <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+              {([['Linhas', importStats.total, C.mut], ['A importar', importStats.ready, C.grn], ['Duplicados', importStats.dup, C.gold], ['Sem telefone', importStats.noPhone, C.red]] as const).map(([lbl, val, col]) => (
+                <div key={lbl} style={{ background: (col as string) + '14', border: `1px solid ${col}33`, borderRadius: 10, padding: '10px 8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: col as string }}>{val}</div>
+                  <div style={{ fontSize: 10, color: C.mut, fontWeight: 700, textTransform: 'uppercase' }}>{lbl}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {importDone
+            ? <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '12px 14px', color: C.grn, fontSize: 14, fontWeight: 700, textAlign: 'center' }}>
+                ✅ {importDone.inserted} cliente(s) importado(s){importDone.failed > 0 ? ` · ${importDone.failed} falha(s)` : ''}
+              </div>
+            : importStats && importStats.ready > 0
+              ? <Btn onClick={doImport} disabled={importing} style={{ width: '100%' }}>{importing ? '⏳ Importando…' : `✅ Importar ${importStats.ready} cliente(s)`}</Btn>
+              : importStats
+                ? <div style={{ color: C.gold, fontSize: 13, textAlign: 'center' }}>Nada novo para importar.</div>
+                : null}
+        </div>
+      </Modal>
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, marginBottom: 4 }}>👥 Clientes</h1>
           <p style={{ color: C.mut, fontSize: 14 }}>{total.toLocaleString('pt-BR')} clientes cadastrados</p>
         </div>
-        {tab === 'clientes' && <Btn onClick={openNew} icon="➕">Novo Cliente</Btn>}
+        {tab === 'clientes' && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <Btn onClick={openImport} variant="secondary" icon="📥">Importar</Btn>
+            <Btn onClick={openNew} icon="➕">Novo Cliente</Btn>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
