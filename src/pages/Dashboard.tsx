@@ -7,6 +7,23 @@ import { sT, type ToastState } from '../utils/toast'
 import { sendWA, sendWADirect } from '../utils/whatsapp'
 import type { House } from '../types'
 
+// Casa noturna em horário local (não UTC): até as 6h da manhã ainda conta como a
+// "noite"/dia de negócio anterior. Corrige o evento do dia e a contagem de check-ins.
+function bizRefDate(): Date {
+  const now = new Date()
+  const d = new Date(now)
+  if (now.getHours() < 6) d.setDate(d.getDate() - 1)
+  return d
+}
+function bizTodayStr(): string {
+  const d = bizRefDate()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function bizDayStartISO(): string {
+  const d = bizRefDate()
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString()
+}
+
 interface Props {
   house: House
   user: { id: string; email: string }
@@ -105,8 +122,8 @@ export function DashboardPage({ house, user }: Props) {
   const chartRef = useRef<HTMLCanvasElement>(null)
 
   async function load() {
-    const today = new Date().toISOString().slice(0, 10)
-    const dayStart = today + 'T00:00:00'
+    const today = bizTodayStr()
+    const dayStart = bizDayStartISO()
 
     const [clientsC, eventsC, ciR, evR] = await Promise.all([
       supabase.from('clients').select('id', { count: 'exact', head: true }).eq('house_id', house.id),
@@ -249,7 +266,7 @@ export function DashboardPage({ house, user }: Props) {
       .then(r => {
         if (r.data) {
           setCiEvs(r.data)
-          const today = new Date().toISOString().slice(0, 10)
+          const today = bizTodayStr()
           const todayEv = r.data.find(ev => ev.event_date?.slice(0, 10) === today)
           if (todayEv) setCiSelEv(todayEv.id)
           else if (r.data.length > 0) setCiSelEv(r.data[0].id)
