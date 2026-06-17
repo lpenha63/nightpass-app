@@ -325,7 +325,7 @@ export function ReportsPage({ house }: Props) {
       </div>
 
       {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
         {kpis.map((k, i) => (
           <div key={i} className="card-3d" style={{ background: 'linear-gradient(160deg,rgba(20,28,46,0.98),rgba(10,14,26,0.99))', border: '1px solid rgba(59,130,246,0.12)', borderTop: `3px solid ${k.color}`, borderRadius: 16, padding: '16px 18px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 8px rgba(0,0,0,0.35), 0 16px 32px rgba(0,0,0,0.5)', transform: 'translateY(-3px)' }}>
             <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{k.label}</div>
@@ -384,7 +384,7 @@ export function ReportsPage({ house }: Props) {
         {evPnL.length === 0
           ? <div style={{ color: C.mut, textAlign: 'center', padding: '24px 0', fontSize: 13 }}>Nenhum evento no período selecionado.</div>
           : <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 20 }}>
+            <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 20 }}>
               {[
                 { label: 'Receita Total', value: fmtCurrency(totRev), color: C.grn },
                 { label: 'Custo Total', value: fmtCurrency(totCost), color: C.red },
@@ -398,6 +398,7 @@ export function ReportsPage({ house }: Props) {
               ))}
             </div>
 
+            <div className="r-scroll-x"><div style={{ minWidth: 540 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 90px 70px', gap: 4, padding: '6px 8px', background: C.bg, borderRadius: 8, marginBottom: 6 }}>
               {['Evento', 'Receita', 'Custos', 'Resultado', 'Margem'].map((h, i) => (
                 <div key={i} style={{ color: C.mut, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textAlign: i > 0 ? 'right' : 'left' }}>{h}</div>
@@ -436,6 +437,7 @@ export function ReportsPage({ house }: Props) {
                 </div>
               )
             })}
+            </div></div>
           </>
         }
       </Card>
@@ -447,6 +449,7 @@ export function ReportsPage({ house }: Props) {
           {promoterRank.length === 0
             ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem listas de promoter no período.</div>
             : <>
+              <div className="r-scroll-x"><div style={{ minWidth: 420 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 90px', gap: 4, padding: '4px 6px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
                 <div>PROMOTER</div><div style={{ textAlign: 'right' }}>CONV.</div><div style={{ textAlign: 'right' }}>COMPAR.</div><div style={{ textAlign: 'right' }}>R$/CABEÇA</div>
               </div>
@@ -465,6 +468,7 @@ export function ReportsPage({ house }: Props) {
                   </div>
                 )
               })}
+              </div></div>
             </>
           }
         </Card>
@@ -499,7 +503,7 @@ export function ReportsPage({ house }: Props) {
       <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card>
           {sectionTitle('🏆 Clientes')}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
+          <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
             {[
               { label: 'Novos', val: clientStats.novos.toLocaleString('pt-BR'), color: '#f59e0b' },
               { label: 'Ativos', val: clientStats.distinct.toLocaleString('pt-BR'), color: C.acc },

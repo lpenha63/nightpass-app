@@ -434,7 +434,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
           : filtered.map((fr, i) => {
             const isFunc = (fr.staff_type ?? 'freelancer') === 'funcionario'
             return (
-              <div key={fr.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < filtered.length - 1 ? `1px solid ${C.brd}` : 'none', opacity: fr.status === 'inativo' ? 0.55 : 1 }}>
+              <div key={fr.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 0', borderBottom: i < filtered.length - 1 ? `1px solid ${C.brd}` : 'none', opacity: fr.status === 'inativo' ? 0.55 : 1 }}>
                 <div style={{ width: 40, height: 40, borderRadius: '50%', background: (isFunc ? '#10b981' : C.acc) + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
                   {isFunc ? '🧑‍💼' : '👷'}
                 </div>

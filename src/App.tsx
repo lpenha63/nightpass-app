@@ -182,7 +182,7 @@ export default function App() {
         key={active}
         style={{ marginLeft: 240, flex: 1, minHeight: '100vh', overflowY: 'auto', background: C.bg }}
       >
-        <div style={{ padding: '16px 32px' }}>
+        <div className="np-content" style={{ padding: '16px 32px' }}>
           {pages[active]}
         </div>
       </main>

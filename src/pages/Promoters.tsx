@@ -487,7 +487,7 @@ export function PromotersPage({ house }: Props) {
         {promos.length === 0
           ? <div style={{ color: C.mut, textAlign: 'center', padding: 20 }}>Nenhum promoter cadastrado</div>
           : promos.map((pr, i) => (
-            <div key={pr.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < promos.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+            <div key={pr.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 0', borderBottom: i < promos.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
               {/* Avatar */}
               <div style={{ width: 40, height: 40, borderRadius: '50%', background: C.acc + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
                 📋

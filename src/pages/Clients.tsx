@@ -482,7 +482,7 @@ export function ClientsPage({ house, user }: Props) {
                   const count = ciCounts[c.id] ?? 0
                   const tier = loyalTier(count)
                   return (
-                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < clients.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 0', borderBottom: i < clients.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
                       <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} style={{ width: 16, height: 16, accentColor: C.acc, cursor: 'pointer', flexShrink: 0 }} />
                       <div style={{ width: 40, height: 40, borderRadius: '50%', background: C.acc + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, overflow: 'hidden', border: `2px solid ${tier.color}44` }}>
                         {c.photo_url
@@ -573,7 +573,7 @@ export function ClientsPage({ house, user }: Props) {
               ? <Card><div style={{ color: C.mut, textAlign: 'center', padding: 40 }}>Nenhum aniversariante no período</div></Card>
               : <Card>
                 {filteredBd.map((c, i) => (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < filteredBd.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 0', borderBottom: i < filteredBd.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
                     <div style={{ fontSize: 28, flexShrink: 0 }}>{c.daysUntil === 0 ? '🎂' : '🎈'}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ color: C.txt, fontWeight: 700, fontSize: 14 }}>{c.full_name}</div>

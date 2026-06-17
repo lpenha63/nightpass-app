@@ -36,6 +36,7 @@ interface Stats {
   todayCount: number
   todayRev: number
   reservations: number
+  newClients: number
 }
 
 interface PayStat { k: string; v: number }
@@ -88,6 +89,7 @@ interface Birthday { id: string; full_name: string; phone?: string }
 
 const KPIS = (s: Stats, cash: number) => [
   { icon: '👥', label: 'Clientes', value: s.clients.toLocaleString('pt-BR'), color: C.acc },
+  { icon: '🆕', label: 'Novos Hoje', value: s.newClients.toLocaleString('pt-BR'), color: '#22d3ee' },
   { icon: '🎉', label: 'Eventos Ativos', value: s.events.toLocaleString('pt-BR'), color: C.mut },
   { icon: '✅', label: 'Check-ins Hoje', value: s.todayCount.toLocaleString('pt-BR'), color: C.grn },
   { icon: '💰', label: 'Caixa Hoje', value: fmtCurrency(cash), color: C.gold },
@@ -98,7 +100,7 @@ const PAY_METHODS = ['pix', 'cartao', 'dinheiro', 'cortesia', 'credito', 'debito
 const reservaArrived = (status: string) => status === 'arrived' || status === 'confirmado' || status === 'confirmed'
 
 export function DashboardPage({ house, user }: Props) {
-  const [stats, setStats] = useState<Stats>({ clients: 0, events: 0, todayCount: 0, todayRev: 0, reservations: 0 })
+  const [stats, setStats] = useState<Stats>({ clients: 0, events: 0, todayCount: 0, todayRev: 0, reservations: 0, newClients: 0 })
   const [hourly, setHourly] = useState<HourData[]>([])
   const [payStats, setPayStats] = useState<PayStat[]>([])
   const [recent, setRecent] = useState<RecentCI[]>([])
@@ -125,8 +127,9 @@ export function DashboardPage({ house, user }: Props) {
     const today = bizTodayStr()
     const dayStart = bizDayStartISO()
 
-    const [clientsC, eventsC, ciR, evR] = await Promise.all([
+    const [clientsC, newClientsC, eventsC, ciR, evR] = await Promise.all([
       supabase.from('clients').select('id', { count: 'exact', head: true }).eq('house_id', house.id),
+      supabase.from('clients').select('id', { count: 'exact', head: true }).eq('house_id', house.id).gte('created_at', dayStart),
       supabase.from('events').select('id', { count: 'exact', head: true }).eq('house_id', house.id).neq('status', 'cancelado'),
       supabase.from('checkins').select('id,amount_cents,created_at,payment_method,event_id').eq('house_id', house.id).gte('created_at', dayStart),
       supabase.from('events').select('id,name,event_date,start_time,capacity,artist_fee_cents,consumption_cents,production_cost_cents')
@@ -165,7 +168,7 @@ export function DashboardPage({ house, user }: Props) {
     const cashTotal = todayDoorRev + ticketsRevToday + resConsumToday
     setCash({ door: todayDoorRev, tickets: ticketsRevToday, reservations: resConsumToday, total: cashTotal })
 
-    setStats({ clients: clientsC.count ?? 0, events: eventsC.count ?? 0, todayCount: cins.length, todayRev: cashTotal, reservations: rd.length })
+    setStats({ clients: clientsC.count ?? 0, events: eventsC.count ?? 0, todayCount: cins.length, todayRev: cashTotal, reservations: rd.length, newClients: newClientsC.count ?? 0 })
 
     // Tonight event metrics (occupancy + P&L + pendings)
     if (ev) {
