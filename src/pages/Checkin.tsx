@@ -734,7 +734,7 @@ export function CheckinPage({ house, user }: Props) {
                   ))}
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
                 <div>
                   <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>NOME *</label>
                   <input value={typeForm.name} onChange={e => setTypeForm(p => ({ ...p, name: e.target.value }))} placeholder="Ex: VIP, Day Use, Quadra"
@@ -824,7 +824,7 @@ export function CheckinPage({ house, user }: Props) {
 
       {/* ── PORTARIA ── */}
       {mode === 'checkin' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Card>
             {/* Search */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
@@ -872,7 +872,7 @@ export function CheckinPage({ house, user }: Props) {
             )}
 
             {/* Valor + Pagamento + Comanda */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: 10, marginBottom: 14 }}>
+            <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: 10, marginBottom: 14 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 6 }}>VALOR</label>
                 <input value={payAmt} onChange={e => setPayAmt(e.target.value)} placeholder="R$ 0,00" type="number" step="0.01"
@@ -926,7 +926,7 @@ export function CheckinPage({ house, user }: Props) {
                 <div style={{ display: 'grid', gap: 10 }}>
                   <input value={nc.full_name} onChange={e => setNc(p => ({ ...p, full_name: e.target.value }))} placeholder="Nome completo *"
                     style={{ background: C.bg2, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, minHeight: 44, fontFamily: 'inherit', width: '100%' }} />
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <input value={fcpf(nc.cpf)} onChange={e => setNc(p => ({ ...p, cpf: cn(e.target.value).slice(0, 11) }))} placeholder="CPF"
                       style={{ background: C.bg2, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, minHeight: 44, fontFamily: 'inherit' }} />
                     <input value={ftel(nc.phone)} onChange={e => setNc(p => ({ ...p, phone: cn(e.target.value).slice(0, 11) }))} placeholder="Celular"
@@ -1109,7 +1109,7 @@ export function CheckinPage({ house, user }: Props) {
                       </div>
                     : <>
                         {/* Filtro de lista + busca */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                        <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                           <select value={selPromoList} onChange={e => setSelPromoList(e.target.value)} style={{ ...SL, fontSize: 12 }}>
                             <option value="all">📋 Todas as listas ({promoGuests.length})</option>
                             {promoLists.map(l => (
@@ -1357,7 +1357,7 @@ export function CheckinPage({ house, user }: Props) {
                         <div style={{ padding: '0 16px 16px' }}>
                           {/* Filtro de lista + busca */}
                           {promoGuests.length > 0 && (
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                            <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
                               <select value={selPromoList} onChange={e => setSelPromoList(e.target.value)} style={{ ...SL, fontSize: 12 }}>
                                 <option value="all">📋 Todas as listas ({promoGuests.length})</option>
                                 {promoLists.map(l => {
@@ -1489,7 +1489,7 @@ export function CheckinPage({ house, user }: Props) {
                 </span>
               </div>
             )}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 6 }}>
                   🎫 Comanda <span style={{ fontWeight: 400 }}>(opcional)</span>

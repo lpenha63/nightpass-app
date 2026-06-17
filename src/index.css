@@ -87,6 +87,17 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
   .np-bottom-nav { display: flex !important; }
   /* Hide burger when bottom nav is present */
   .np-burger { display: none !important; }
+
+  /* ── Utilidades responsivas (estilos inline vencem CSS, por isso !important) ── */
+  /* Empilha qualquer grid de múltiplas colunas em coluna única no celular */
+  .r-stack { grid-template-columns: 1fr !important; }
+  /* Divisões lado-a-lado (ex.: formulário 55/45) viram empilhadas e roláveis */
+  .r-split { flex-direction: column !important; overflow-y: auto !important; }
+  .r-split-main { flex: 1 1 auto !important; width: 100% !important; border-right: none !important; }
+  /* Painel secundário (ex.: Produção dentro do cadastro) some no celular — acessível pelo botão próprio */
+  .r-prod-panel { display: none !important; }
+  /* Tabelas/linhas com colunas fixas: rolam horizontalmente em vez de estourar a tela */
+  .r-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
 }
 
 /* Offline banner */

@@ -556,7 +556,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       {/* ── Formulário Reserva ── */}
       <Modal open={formOpen} title={viewOnly ? '🔍 Consultar Reserva' : editing ? 'Editar Reserva' : 'Nova Reserva'} onClose={() => { setFormOpen(false); setEditing(null); setViewOnly(false); setForm(RDEF(selDate)); setFormItems([]) }} wide maxWidth={1100}>
         <fieldset disabled={viewOnly} style={{ border: 'none', padding: 0, margin: 0, opacity: viewOnly ? 0.8 : 1 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
 
           {/* ── Tipo de Celebração — full width ── */}
           <div style={{ gridColumn: 'span 3' }}>
@@ -587,7 +587,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           {/* ── Tipo de Lista — mesmo modelo do Pagamento ── */}
           <div style={{ gridColumn: 'span 3', background: 'rgba(167,139,250,0.05)', border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 16px' }}>
             <div style={{ color: '#a78bfa', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 12 }}>🎟️ TIPO DE LISTA</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
               {/* Botões de tipo — mesma altura/estilo dos botões de pagamento */}
               <div>
@@ -898,7 +898,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
                 {/* Sinal parcial */}
                 {form.payment_status === 'partial' && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
                       <label style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600, display: 'block', marginBottom: 4 }}>💰 Valor do Sinal (R$)</label>
                       <input type="number" step="0.01" min="0" max={String(grandTotal / 100)}
@@ -1378,7 +1378,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, marginBottom: 14, letterSpacing: '0.06em' }}>
               {editingSpace ? 'EDITAR ESPAÇO' : 'ADICIONAR ESPAÇO'}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 140px', gap: 10, marginBottom: 12 }}>
+            <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 100px 140px', gap: 10, marginBottom: 12 }}>
               <div>
                 <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>NOME DO ESPAÇO *</label>
                 <input value={spaceForm.name} onChange={e => setSpaceForm(p => ({ ...p, name: e.target.value }))} placeholder="Ex: Área VIP, Mesa 01, Camarote A..."
@@ -1532,7 +1532,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   onChange={e => setNewGuest(p => ({ ...p, name: e.target.value }))}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) addGuest() }}
                 />
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <input
                     style={{ ...SL, fontSize: 13 }}
                     placeholder="Celular (opcional)"

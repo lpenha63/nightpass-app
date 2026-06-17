@@ -335,7 +335,7 @@ export function ReportsPage({ house }: Props) {
       </div>
 
       {/* Evolução mensal + Formas de pagamento */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card>
           {sectionTitle('📈 Evolução do faturamento')}
           {monthly.length === 0
@@ -441,7 +441,7 @@ export function ReportsPage({ house }: Props) {
       </Card>
 
       {/* Promoters + Equipe */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card>
           {sectionTitle('📣 Desempenho de Promoters')}
           {promoterRank.length === 0
@@ -496,7 +496,7 @@ export function ReportsPage({ house }: Props) {
       </div>
 
       {/* Clientes + Operacional */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card>
           {sectionTitle('🏆 Clientes')}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
@@ -530,7 +530,7 @@ export function ReportsPage({ house }: Props) {
 
         <Card>
           {sectionTitle('⚙️ Operacional')}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+          <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
             <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px' }}>
               <div style={{ color: C.mut, fontSize: 11, marginBottom: 4 }}>📅 Melhor dia</div>
               <div style={{ color: C.txt, fontSize: 18, fontWeight: 900 }}>{ops.bestDayLabel}</div>

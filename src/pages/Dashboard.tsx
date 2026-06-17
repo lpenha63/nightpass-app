@@ -448,7 +448,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Caixa do dia + Resultado da noite ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {/* Caixa do dia */}
         <Card>
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💵 Caixa do dia</div>
@@ -494,7 +494,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Charts: 30 dias + Curva por hora ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card>
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>📈 Check-ins — 30 dias</div>
           <canvas ref={chartRef} style={{ width: '100%', height: 80 }} />
@@ -529,7 +529,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Pendências + Aniversariantes ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {/* Pendências */}
         <Card>
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>⚠️ Pendências do evento</div>
@@ -577,7 +577,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Bottom: pagamento + reservas + recentes + check-in rápido ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {/* Payment breakdown (today) */}
         <Card>
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💳 Formas de pagamento (hoje)</div>
@@ -625,7 +625,7 @@ export function DashboardPage({ house, user }: Props) {
         </Card>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {/* Recent check-ins */}
         <Card>
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>🔵 Últimos Check-ins</div>
