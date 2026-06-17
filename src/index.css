@@ -1,3 +1,25 @@
+/* Tailwind v4 — só utilitários (sem preflight) para não afetar telas existentes */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  --color-bg: #0a0e1a;
+  --color-bg2: #0d1020;
+  --color-card: #111827;
+  --color-brd: #1e2736;
+  --color-acc: #3b82f6;
+  --color-acc2: #60a5fa;
+  --color-grn: #10b981;
+  --color-gold: #f59e0b;
+  --color-cyan: #22d3ee;
+  --color-purp: #a78bfa;
+  --color-pink: #f472b6;
+  --color-txt: #f9fafb;
+  --color-sub: #9ca3af;
+  --color-mut: #6b7280;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {

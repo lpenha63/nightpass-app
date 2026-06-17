@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
-import { Card, Toast, Btn } from '../components/ui'
+import { Toast, Btn } from '../components/ui'
 import { cn, fmtCurrency, payColor, payLabel } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
 import { sendWA, sendWADirect } from '../utils/whatsapp'
@@ -350,110 +350,74 @@ export function DashboardPage({ house, user }: Props) {
   const arrivedCount = dashRes.filter(r => reservaArrived(r.status)).length
 
   return (
-    <div style={{ paddingBottom: 40 }}>
+    <div className="pb-24 md:pb-10 max-w-[1400px] mx-auto">
       <Toast toast={toast} />
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <h1 style={{ fontSize: 28, fontWeight: 900, color: C.txt, letterSpacing: '-0.02em', marginBottom: 4 }}>
-            {house.name || '📊 Dashboard'}
-          </h1>
-          <p style={{ color: C.mut, fontSize: 14, textTransform: 'capitalize' }}>
-            {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
-          </p>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-3xl font-black text-txt tracking-tight truncate">{house.name || 'Dashboard'}</h1>
+          <p className="text-mut text-sm capitalize">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
         </div>
       </div>
 
-      {/* ── HERO: Evento de hoje ── */}
-      <div style={{ marginBottom: 16 }}>
-        {todayEvent ? (
-          <div className="card-3d" style={{
-            background: 'linear-gradient(135deg,rgba(245,158,11,0.10),rgba(20,28,46,0.98))',
-            border: '1px solid rgba(245,158,11,0.25)', borderRadius: 18, padding: '20px 24px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>🔥 Evento de hoje</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: C.txt, lineHeight: 1.1 }}>{todayEvent.name}</div>
-                <div style={{ fontSize: 13, color: C.mut, marginTop: 4 }}>
-                  {todayEvent.start_time ? `🕒 ${todayEvent.start_time.slice(0, 5)}` : ''}
-                  {todayEvent.capacity ? `  ·  Capacidade ${todayEvent.capacity}` : ''}
-                </div>
-              </div>
-              {/* Mini metrics */}
-              <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
-                <div style={{ textAlign: 'center' }} title={evMetrics ? `${evMetrics.resPeople} em reservas + ${evMetrics.listGuests} em listas` : ''}>
-                  <div style={{ fontSize: 26, fontWeight: 900, color: '#f59e0b', lineHeight: 1 }}>{evMetrics?.expectedPeople ?? 0}</div>
-                  <div style={{ fontSize: 10, color: C.mut, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>Previstas</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 26, fontWeight: 900, color: C.grn, lineHeight: 1 }}>{evMetrics?.checkins ?? 0}</div>
-                  <div style={{ fontSize: 10, color: C.mut, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>Check-ins</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 26, fontWeight: 900, color: '#a78bfa', lineHeight: 1 }}>{arrivedCount}/{dashRes.length}</div>
-                  <div style={{ fontSize: 10, color: C.mut, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>Reservas</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 26, fontWeight: 900, color: C.acc, lineHeight: 1 }}>{evMetrics?.ticketsSold ?? 0}</div>
-                  <div style={{ fontSize: 10, color: C.mut, textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>Ingressos</div>
-                </div>
+      {/* ── Evento de hoje ── */}
+      {todayEvent ? (
+        <div className="rounded-2xl bg-card border border-brd p-4 md:p-5 mb-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-gold mb-1">🔥 Evento de hoje</div>
+              <div className="text-xl md:text-2xl font-black text-txt leading-tight">{todayEvent.name}</div>
+              <div className="text-mut text-[13px] mt-1">
+                {todayEvent.start_time ? `🕒 ${todayEvent.start_time.slice(0, 5)}` : ''}
+                {todayEvent.capacity ? `  ·  Capacidade ${todayEvent.capacity}` : ''}
               </div>
             </div>
-            {/* Occupancy bar */}
-            {todayEvent.capacity ? (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.mut, marginBottom: 4 }}>
-                  <span>Lotação</span>
-                  <span style={{ color: occPct >= 90 ? C.red : occPct >= 60 ? C.gold : C.grn, fontWeight: 700 }}>
-                    {evMetrics?.checkins ?? 0} / {todayEvent.capacity} ({occPct}%)
-                  </span>
+            <div className="flex flex-wrap gap-x-6 gap-y-3">
+              {[
+                { v: evMetrics?.expectedPeople ?? 0, l: 'Previstas', c: 'text-gold' },
+                { v: evMetrics?.checkins ?? 0, l: 'Check-ins', c: 'text-grn' },
+                { v: `${arrivedCount}/${dashRes.length}`, l: 'Reservas', c: 'text-purp' },
+                { v: evMetrics?.ticketsSold ?? 0, l: 'Ingressos', c: 'text-acc' },
+              ].map((m, i) => (
+                <div key={i} className="text-center">
+                  <div className={`text-2xl font-black leading-none ${m.c}`}>{m.v}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-mut mt-1">{m.l}</div>
                 </div>
-                <div style={{ height: 8, background: C.brd, borderRadius: 6, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${occPct}%`, borderRadius: 6, transition: 'width .4s', background: occPct >= 90 ? 'linear-gradient(90deg,#ef4444,#f87171)' : occPct >= 60 ? 'linear-gradient(90deg,#d97706,#f59e0b)' : 'linear-gradient(90deg,#059669,#10b981)' }} />
-                </div>
-              </div>
-            ) : null}
+              ))}
+            </div>
           </div>
-        ) : (
-          <Card><div style={{ color: C.mut, textAlign: 'center', padding: '18px 0', fontSize: 14 }}>🌙 Nenhum evento programado para hoje</div></Card>
-        )}
-      </div>
+          {todayEvent.capacity ? (
+            <div className="mt-4">
+              <div className="flex justify-between text-[11px] text-mut mb-1">
+                <span>Lotação</span>
+                <span className="font-bold" style={{ color: occPct >= 90 ? C.red : occPct >= 60 ? C.gold : C.grn }}>{evMetrics?.checkins ?? 0} / {todayEvent.capacity} ({occPct}%)</span>
+              </div>
+              <div className="h-2 rounded-full bg-brd overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${occPct}%`, background: occPct >= 90 ? C.red : occPct >= 60 ? C.gold : C.grn }} />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="rounded-2xl bg-card border border-brd p-4 mb-4 text-center text-mut text-sm">🌙 Nenhum evento programado para hoje</div>
+      )}
 
       {/* KPI Grid */}
-      <div className="kpi-grid-r" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 16 }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mb-4">
         {kpis.map((kpi, i) => (
-          <div key={i} className="card-3d" style={{
-            background: 'linear-gradient(160deg,rgba(20,28,46,0.98),rgba(10,14,26,0.99))',
-            backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-            border: '1px solid rgba(59,130,246,0.12)', borderTop: `3px solid ${kpi.color}`,
-            borderRadius: 16, padding: '20px 22px',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 8px rgba(0,0,0,0.35), 0 16px 32px rgba(0,0,0,0.5)',
-            transform: 'translateY(-3px)',
-            transition: 'transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s cubic-bezier(.4,0,.2,1)',
-          }}>
-            <div>
-              <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>
-                {kpi.label}
-              </div>
-              <div style={{ color: kpi.color, fontSize: 32, fontWeight: 900, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                {kpi.value}
-              </div>
-            </div>
-            <div style={{ fontSize: 40, opacity: 0.85, filter: `drop-shadow(0 0 10px ${kpi.color}55)` }}>
-              {kpi.icon}
-            </div>
+          <div key={i} className="rounded-2xl bg-card border border-brd p-3" style={{ borderTop: `2px solid ${kpi.color}` }}>
+            <span className="text-lg leading-none">{kpi.icon}</span>
+            <div className="text-txt text-[22px] font-black leading-none mt-2 tabular-nums">{kpi.value}</div>
+            <div className="text-mut text-[11px] mt-1 truncate">{kpi.label}</div>
           </div>
         ))}
       </div>
 
       {/* ── Caixa do dia + Resultado da noite ── */}
-      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Caixa do dia */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💵 Caixa do dia</div>
           {[
             { label: '🚪 Portaria (check-ins)', val: cash.door, color: C.grn },
@@ -469,10 +433,10 @@ export function DashboardPage({ house, user }: Props) {
             <span style={{ color: C.mut, fontSize: 13 }}>Total do dia</span>
             <span style={{ color: C.gold, fontSize: 20, fontWeight: 900 }}>{fmtCurrency(cash.total)}</span>
           </div>
-        </Card>
+        </div>
 
         {/* Resultado da noite */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>📊 Resultado da noite</div>
           {!todayEvent || !evMetrics ? (
             <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem evento hoje para apurar resultado.</div>
@@ -493,12 +457,12 @@ export function DashboardPage({ house, user }: Props) {
               <div style={{ fontSize: 11, color: C.mut, marginTop: 8 }}>* Receita parcial (atualiza durante a noite). Custos conforme cadastro do evento.</div>
             </>
           )}
-        </Card>
+        </div>
       </div>
 
       {/* ── Charts: 30 dias + Curva por hora ── */}
-      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>📈 Check-ins — 30 dias</div>
           <canvas ref={chartRef} style={{ width: '100%', height: 80 }} />
           <div style={{ display: 'flex', gap: 4, marginTop: 8, overflowX: 'auto' }}>
@@ -510,10 +474,10 @@ export function DashboardPage({ house, user }: Props) {
               </div>
             ))}
           </div>
-        </Card>
+        </div>
 
         {/* Curva por hora */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>⏱️ Fluxo da porta (por hora)</div>
           {stats.todayCount === 0 ? (
             <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '36px 0' }}>Sem check-ins hoje ainda.</div>
@@ -528,13 +492,13 @@ export function DashboardPage({ house, user }: Props) {
               ))}
             </div>
           )}
-        </Card>
+        </div>
       </div>
 
       {/* ── Pendências + Aniversariantes ── */}
-      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Pendências */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>⚠️ Pendências do evento</div>
           {!evMetrics ? (
             <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem evento hoje.</div>
@@ -555,10 +519,10 @@ export function DashboardPage({ house, user }: Props) {
               </div>
             ))
           })()}
-        </Card>
+        </div>
 
         {/* Aniversariantes hoje */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>🎂 Aniversariantes de hoje</div>
           {birthdays.length === 0
             ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Nenhum aniversariante hoje.</div>
@@ -576,13 +540,13 @@ export function DashboardPage({ house, user }: Props) {
             ))
           }
           {birthdays.length > 6 && <div style={{ fontSize: 11, color: C.mut, marginTop: 8 }}>+{birthdays.length - 6} aniversariantes</div>}
-        </Card>
+        </div>
       </div>
 
       {/* ── Bottom: pagamento + reservas + recentes + check-in rápido ── */}
-      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Payment breakdown (today) */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💳 Formas de pagamento (hoje)</div>
           {payStats.length === 0
             ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem pagamentos hoje.</div>
@@ -601,10 +565,10 @@ export function DashboardPage({ house, user }: Props) {
               </div>
             ))
           }
-        </Card>
+        </div>
 
         {/* Today's reservations */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>🪑 Reservas do dia ({arrivedCount}/{dashRes.length})</div>
           {dashRes.length === 0
             ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem reservas hoje</div>
@@ -625,12 +589,12 @@ export function DashboardPage({ house, user }: Props) {
               )
             })
           }
-        </Card>
+        </div>
       </div>
 
-      <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Recent check-ins */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>🔵 Últimos Check-ins</div>
           {recent.length === 0
             ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Nenhum check-in hoje</div>
@@ -650,10 +614,10 @@ export function DashboardPage({ house, user }: Props) {
               </div>
             ))
           }
-        </Card>
+        </div>
 
         {/* Quick check-in */}
-        <Card>
+        <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>⚡ Check-in Rápido</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             <input
@@ -688,7 +652,7 @@ export function DashboardPage({ house, user }: Props) {
               </div>
             )
           })()}
-        </Card>
+        </div>
       </div>
     </div>
   )
