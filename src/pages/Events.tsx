@@ -34,6 +34,7 @@ interface EventWithCounts extends Event {
 
 interface Guest {
   id?: string
+  list_id?: string
   full_name: string
   phone?: string
   gender?: string
@@ -115,7 +116,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   // Guest modal
   const [guestEv, setGuestEv] = useState<EventWithCounts | null>(null)
   const [guests, setGuests] = useState<Guest[]>([])
-  const [guestFilter, setGuestFilter] = useState('all')
   const [guestListToken, setGuestListToken] = useState<string | null>(null)
   const [guestListId, setGuestListId] = useState<string | null>(null)
   const [guestListPromoId, setGuestListPromoId] = useState<string | null>(null)
@@ -125,8 +125,10 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [listaClients, setListaClients] = useState<FlyerClient[]>([])
   const [listaSearch, setListaSearch] = useState('')
   // Resumo de TODAS as listas geradas para o evento (casa, promoters, aniversário, reservas)
-  interface ListSummaryRow { key: string; icon: string; label: string; count: number; people?: number }
+  interface ListSummaryRow { key: string; kind: 'list' | 'birthday' | 'res'; listId?: string; token?: string; promoterId?: string; isHouse?: boolean; icon: string; label: string; count: number; people?: number }
   const [listSummary, setListSummary] = useState<ListSummaryRow[]>([])
+  const [expandedLists, setExpandedLists] = useState<Set<string>>(new Set())
+  const [remindBusy, setRemindBusy] = useState<string | null>(null)
 
   // House list link in event form
   const [houseListToken, setHouseListToken] = useState<string | null>(null)
@@ -880,7 +882,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   async function loadGuests(ev: EventWithCounts) {
     setGuestEv(ev)
     setGuests([])
-    setGuestFilter('all')
     setGuestListToken(null)
     setGuestListId(null)
     setGuestListPromoId(null)
@@ -889,6 +890,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setListaSearch('')
     setListaClients([])
     setListSummary([])
+    setExpandedLists(new Set())
     reloadGuests(ev.id)
     loadListSummary(ev)
     const [rec, cl] = await Promise.all([
@@ -899,12 +901,13 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       setGuestListToken(rec.token)
       setGuestListId(rec.listId)
       setGuestListPromoId(rec.promoterId)
+      setExpandedLists(new Set([rec.listId]))
     }
     setListaClients((cl.data ?? []) as FlyerClient[])
   }
 
   function reloadGuests(eventId: string) {
-    supabase.from('promoter_list_guests').select('id,full_name,phone,gender,birth_date,list_type,is_vip,checked_in,promoter_id,invite_token,list_value_cents,max_plus_ones,invited_by,confirmed_at')
+    supabase.from('promoter_list_guests').select('id,list_id,full_name,phone,gender,birth_date,list_type,is_vip,checked_in,promoter_id,invite_token,list_value_cents,max_plus_ones,invited_by,confirmed_at')
       .eq('event_id', eventId).order('full_name')
       .then(r => setGuests((r.data ?? []) as Guest[]))
   }
@@ -914,27 +917,27 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setListSummary([])
     try {
       const [plists, blists, rsv] = await Promise.all([
-        supabase.from('promoter_lists').select('id,name,promoter_id,promoters(full_name)').eq('event_id', ev.id),
+        supabase.from('promoter_lists').select('id,name,token,promoter_id,promoters(full_name)').eq('event_id', ev.id),
         supabase.from('birthday_lists').select('id,birthday_person_name').eq('event_id', ev.id).neq('status', 'cancelled'),
         supabase.from('reservations').select('id,people_count,status').eq('event_id', ev.id).neq('status', 'cancelled'),
       ])
       const rows: ListSummaryRow[] = []
-      for (const l of (plists.data ?? []) as Array<{ id: string; name: string; promoters?: { full_name?: string } | null }>) {
-        const { count } = await supabase.from('promoter_list_guests').select('id', { count: 'exact', head: true }).eq('list_id', l.id)
+      for (const l of (plists.data ?? []) as Array<{ id: string; name: string; token?: string; promoter_id?: string; promoters?: { full_name?: string } | null }>) {
         const promoName = l.promoters?.full_name ?? l.name
         const isHouse = promoName === 'Lista da Casa'
         rows.push({
-          key: 'pl_' + l.id, icon: isHouse ? '🏠' : '📣',
+          key: 'pl_' + l.id, kind: 'list', listId: l.id, token: l.token, promoterId: l.promoter_id, isHouse,
+          icon: isHouse ? '🏠' : '📣',
           label: isHouse ? 'Lista da Casa' : `${promoName}${l.name && l.name !== promoName ? ' · ' + l.name : ''}`,
-          count: count ?? 0,
+          count: 0,
         })
       }
       for (const b of (blists.data ?? []) as Array<{ id: string; birthday_person_name: string }>) {
         const { count } = await supabase.from('birthday_guests').select('id', { count: 'exact', head: true }).eq('birthday_list_id', b.id)
-        rows.push({ key: 'bd_' + b.id, icon: '🎂', label: `Aniversário · ${b.birthday_person_name}`, count: count ?? 0 })
+        rows.push({ key: 'bd_' + b.id, kind: 'birthday', icon: '🎂', label: `Aniversário · ${b.birthday_person_name}`, count: count ?? 0 })
       }
       const resData = (rsv.data ?? []) as Array<{ people_count?: number }>
-      if (resData.length) rows.push({ key: 'res', icon: '🪑', label: 'Reservas', count: resData.length, people: resData.reduce((s, r) => s + (r.people_count ?? 0), 0) })
+      if (resData.length) rows.push({ key: 'res', kind: 'res', icon: '🪑', label: 'Reservas', count: resData.length, people: resData.reduce((s, r) => s + (r.people_count ?? 0), 0) })
       setListSummary(rows)
     } catch { /* schema opcional — ignora se alguma tabela não existir */ }
   }
@@ -964,6 +967,28 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     st2(r.viaApi ? '✅ Convite enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
   }
 
+  // Reenvia o link de confirmação só para quem recebeu convite e ainda não confirmou (pendentes)
+  async function remindPending(row: ListSummaryRow) {
+    if (!guestEv || !row.listId) return
+    const pend = guests.filter(g => g.list_id === row.listId && g.invite_token && !g.confirmed_at && g.phone)
+    if (!pend.length) { st2('Sem pendentes com telefone para lembrar.', 'warn'); return }
+    const { data: cfg } = await supabase.from('whatsapp_config').select('active').eq('house_id', house.id).limit(1).single()
+    if (!cfg?.active) { st2('Ative a integração WhatsApp em Configurações para enviar lembretes.', 'error'); return }
+    if (!confirm(`Reenviar lembrete de confirmação para ${pend.length} pendente(s)?`)) return
+    setRemindBusy(row.listId)
+    const dateStr = new Date(guestEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    let ok = 0
+    for (const g of pend) {
+      const confirmLink = `${window.location.origin}/confirmar/${g.invite_token}`
+      const msg = `Olá ${g.full_name.split(' ')[0]}! ⏰ Lembrete: você ainda não confirmou presença em *${guestEv.name}* — ${dateStr}${guestEv.start_time ? ` às ${guestEv.start_time.slice(0, 5)}` : ''}.${eventDetailsText(guestEv)}\n\n✅ Confirme com 1 clique:\n${confirmLink}\n\nTe esperamos! 🔥`
+      const r = await sendWADirect(house.id, g.phone!, msg, { eventId: guestEv.id, type: 'guest_reminder' })
+      if (r.viaApi) ok++
+      await new Promise(res => setTimeout(res, 500))
+    }
+    setRemindBusy(null)
+    st2(`Lembrete enviado para ${ok}/${pend.length} pendente(s).`, ok > 0 ? 'success' : 'warn')
+  }
+
   async function addGuestManually() {
     if (!guestAddForm.name.trim() || !guestEv) return
     setGuestAdding(true)
@@ -986,6 +1011,8 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       list_type: 'promoter',
       is_vip: false,
       promoter_confirmed: true,
+      // Adição manual = o gestor garante a presença → já entra como confirmado na lista
+      confirmed_at: new Date().toISOString(),
     })
     setGuestAdding(false)
     if (error) { st2('Erro ao adicionar: ' + error.message, 'error'); return }
@@ -1001,12 +1028,15 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   }
 
   function doExport() {
-    const rows = [['Nome', 'Gênero', 'Nascimento', 'VIP', 'Check-in']]
-    guests.forEach(g => rows.push([g.full_name, g.gender ?? '', g.birth_date ?? '', g.is_vip ? 'Sim' : '', g.checked_in ? 'Sim' : 'Não']))
+    // Exporta apenas quem efetivou check-in (entrou de fato)
+    const checkedIn = guests.filter(g => g.checked_in)
+    if (checkedIn.length === 0) { st2('Nenhum check-in efetuado ainda para exportar.', 'warn'); return }
+    const rows = [['Nome', 'Gênero', 'Nascimento', 'VIP']]
+    checkedIn.forEach(g => rows.push([g.full_name, g.gender ?? '', g.birth_date ?? '', g.is_vip ? 'Sim' : '']))
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = (guestEv?.name ?? 'guests') + '.csv'
+    const a = document.createElement('a'); a.href = url; a.download = (guestEv?.name ?? 'guests') + '-checkin.csv'
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }
@@ -2174,24 +2204,130 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         {/* ── ABA LISTA ── */}
         {listaTab === 'lista' && (
           <>
-            {/* Resumo de TODAS as listas geradas para o evento */}
-            {listSummary.length > 0 && (() => {
-              const totalPeople = listSummary.reduce((s, r) => s + (r.people ?? r.count), 0)
+            {/* Listas do evento — uma seção por lista, com placar enviados/confirmados/entraram */}
+            {(() => {
+              const listRows = [...listSummary.filter(r => r.kind === 'list')]
+                .sort((a, b) => (a.isHouse ? -1 : b.isHouse ? 1 : a.label.localeCompare(b.label)))
+              const otherRows = listSummary.filter(r => r.kind !== 'list')
+              const statsFor = (listId?: string) => {
+                const gs = guests.filter(g => g.list_id === listId)
+                return {
+                  total: gs.length,
+                  enviados: gs.filter(g => g.invite_token).length,
+                  confirmados: gs.filter(g => g.confirmed_at).length,
+                  entraram: gs.filter(g => g.checked_in).length,
+                  pendentes: gs.filter(g => g.invite_token && !g.confirmed_at).length,
+                  confirmedGuests: gs.filter(g => g.confirmed_at),
+                }
+              }
+              const toggleExpand = (id: string) => setExpandedLists(prev => {
+                const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n
+              })
+              function guestRow(g: Guest, editable: boolean) {
+                return (
+                  <div key={g.id} style={{ background: C.bg, border: `1px solid ${g.is_vip ? C.gold + '44' : C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: editable ? 8 : 0 }}>
+                      <span style={{ fontSize: 18, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {g.full_name}
+                          {g.invited_by && <span style={{ color: C.mut, fontSize: 10, marginLeft: 6 }}>👥 convidado</span>}
+                          {g.is_vip && !editable && <span style={{ color: C.gold, fontSize: 10, marginLeft: 6 }}>⭐ VIP</span>}
+                        </div>
+                        <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {g.phone && <span>📱 {g.phone}</span>}
+                          {g.confirmed_at && <span style={{ color: C.grn }}>✅ Confirmou</span>}
+                          {g.checked_in && <span style={{ color: C.grn, fontWeight: 700 }}>✓ Entrou</span>}
+                        </div>
+                      </div>
+                    </div>
+                    {editable && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button onClick={() => toggleGuestVip(g)}
+                          title={g.is_vip ? 'VIP ativo — clique para lista normal' : 'Lista normal — clique para VIP'}
+                          style={{ display: 'flex', alignItems: 'center', gap: 5, background: g.is_vip ? C.gold + '22' : C.card, border: `1.5px solid ${g.is_vip ? C.gold : C.brd}`, borderRadius: 20, padding: '3px 8px 3px 4px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+                          <span style={{ display: 'inline-flex', width: 28, height: 16, borderRadius: 10, background: g.is_vip ? C.gold : C.brd, position: 'relative', flexShrink: 0, transition: 'background 0.15s' }}>
+                            <span style={{ position: 'absolute', top: 2, left: g.is_vip ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0004' }} />
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: g.is_vip ? C.gold : C.mut, minWidth: 28 }}>
+                            {g.is_vip ? '⭐ VIP' : 'Lista'}
+                          </span>
+                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ color: C.mut, fontSize: 10 }}>R$</span>
+                          <input type="number" min="0" step="0.01"
+                            value={g.list_value_cents ? (g.list_value_cents / 100).toFixed(2) : ''}
+                            onChange={e => updateGuestField(g.id!, { list_value_cents: Math.round(parseFloat(e.target.value || '0') * 100) })}
+                            placeholder="0,00"
+                            style={{ width: 70, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }} />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ color: C.mut, fontSize: 10 }}>👥</span>
+                          <input type="number" min="0" max="20"
+                            value={g.max_plus_ones ?? 0}
+                            onChange={e => updateGuestField(g.id!, { max_plus_ones: parseInt(e.target.value || '0') })}
+                            style={{ width: 45, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }} />
+                        </div>
+                        {g.phone && !g.invited_by && (
+                          <button onClick={() => sendGuestInviteWA(g)}
+                            style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '3px 10px', color: '#25d366', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>
+                            {g.invite_token ? '🔄 Reenviar' : '📲 Convidar'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+              if (listSummary.length === 0) return null
               return (
-                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.06em' }}>📑 LISTAS DO EVENTO</span>
-                    <span style={{ fontSize: 11, color: C.acc, fontWeight: 700 }}>👥 {totalPeople} ligados</span>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {listSummary.map(r => (
-                      <span key={r.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '5px 10px', fontSize: 12, color: C.txt }}>
-                        <span>{r.icon}</span>
-                        <span style={{ fontWeight: 600 }}>{r.label}</span>
-                        <span style={{ color: C.mut, fontWeight: 700 }}>{r.people != null ? `${r.count} (${r.people}p)` : r.count}</span>
-                      </span>
-                    ))}
-                  </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+                  {listRows.map(row => {
+                    const s = statsFor(row.listId)
+                    if (!row.isHouse && s.total === 0) return null
+                    const open = expandedLists.has(row.listId ?? '')
+                    return (
+                      <div key={row.key} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, overflow: 'hidden' }}>
+                        <div onClick={() => row.listId && toggleExpand(row.listId)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer' }}>
+                          <span style={{ fontSize: 16, flexShrink: 0 }}>{row.icon}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</div>
+                            <div style={{ display: 'flex', gap: 10, marginTop: 3, fontSize: 11, fontWeight: 700 }}>
+                              <span style={{ color: '#25d366' }} title="Convites enviados">📨 {s.enviados}</span>
+                              <span style={{ color: C.grn }} title="Confirmados">✅ {s.confirmados}</span>
+                              <span style={{ color: C.acc }} title="Entraram (check-in)">🎟️ {s.entraram}</span>
+                            </div>
+                          </div>
+                          <span style={{ color: C.mut, fontSize: 12, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>▸</span>
+                        </div>
+                        {row.isHouse && s.pendentes > 0 && (
+                          <div style={{ padding: '0 14px 10px' }}>
+                            <button disabled={remindBusy === row.listId} onClick={() => remindPending(row)}
+                              style={{ width: '100%', background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                              {remindBusy === row.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
+                            </button>
+                          </div>
+                        )}
+                        {open && (
+                          <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {s.confirmedGuests.length === 0
+                              ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '12px 0' }}>Nenhum confirmado ainda{s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
+                              : s.confirmedGuests.map(g => guestRow(g, row.isHouse ?? false))
+                            }
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {otherRows.map(row => (
+                    <div key={row.key} onClick={() => { if (row.kind === 'res' && guestEv) { const ev = guestEv; setGuestEv(null); openResView(ev) } }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', cursor: row.kind === 'res' ? 'pointer' : 'default' }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>{row.icon}</span>
+                      <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: C.txt }}>{row.label}</div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.mut }}>{row.people != null ? `${row.count} · ${row.people}p` : `${row.count}`}</span>
+                      {row.kind === 'res' && <span style={{ color: C.mut, fontSize: 13 }}>›</span>}
+                    </div>
+                  ))}
                 </div>
               )
             })()}
@@ -2234,92 +2370,10 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               </div>
             </div>
 
-            {/* Filtros */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-              {(['all', 'present', 'pending'] as const).map(f => (
-                <Btn key={f} onClick={() => setGuestFilter(f)} variant={guestFilter === f ? 'primary' : 'ghost'} small>
-                  {f === 'all' ? `Todos (${guests.length})` : f === 'present' ? `✅ Presentes (${guests.filter(g => g.checked_in).length})` : `⏳ Pendentes (${guests.filter(g => !g.checked_in).length})`}
-                </Btn>
-              ))}
-              <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV</Btn>
+            {/* Exportar somente quem efetivou check-in */}
+            <div style={{ display: 'flex', marginTop: 4 }}>
+              <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV (check-in)</Btn>
             </div>
-
-            {/* Lista de convidados */}
-            {guests.length === 0
-              ? <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhum convidado na lista ainda</div>
-              : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {guests
-                    .filter(g => guestFilter === 'all' ? true : guestFilter === 'present' ? g.checked_in : !g.checked_in)
-                    .map((g, i) => (
-                      <div key={i} style={{ background: C.bg, border: `1px solid ${g.is_vip ? C.gold + '44' : C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
-                        {/* Linha 1: avatar + nome + status */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <span style={{ fontSize: 18, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {g.full_name}
-                              {g.invited_by && <span style={{ color: C.mut, fontSize: 10, marginLeft: 6 }}>👥 convidado</span>}
-                            </div>
-                            <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                              {g.phone && <span>📱 {g.phone}</span>}
-                              {g.confirmed_at && <span style={{ color: C.grn }}>✅ Confirmou</span>}
-                              {g.checked_in && <span style={{ color: C.grn, fontWeight: 700 }}>✓ Entrou</span>}
-                            </div>
-                          </div>
-                        </div>
-                        {/* Linha 2: controles */}
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                          {/* VIP ON/OFF toggle */}
-                          <button onClick={() => toggleGuestVip(g)}
-                            title={g.is_vip ? 'VIP ativo — clique para lista normal' : 'Lista normal — clique para VIP'}
-                            style={{ display: 'flex', alignItems: 'center', gap: 5, background: g.is_vip ? C.gold + '22' : C.card, border: `1.5px solid ${g.is_vip ? C.gold : C.brd}`, borderRadius: 20, padding: '3px 8px 3px 4px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
-                            {/* pill switch */}
-                            <span style={{ display: 'inline-flex', width: 28, height: 16, borderRadius: 10, background: g.is_vip ? C.gold : C.brd, position: 'relative', flexShrink: 0, transition: 'background 0.15s' }}>
-                              <span style={{ position: 'absolute', top: 2, left: g.is_vip ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0004' }} />
-                            </span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: g.is_vip ? C.gold : C.mut, minWidth: 28 }}>
-                              {g.is_vip ? '⭐ VIP' : 'Lista'}
-                            </span>
-                          </button>
-                          {/* Valor lista */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ color: C.mut, fontSize: 10 }}>R$</span>
-                            <input
-                              type="number" min="0" step="0.01"
-                              value={g.list_value_cents ? (g.list_value_cents / 100).toFixed(2) : ''}
-                              onChange={e => {
-                                const v = Math.round(parseFloat(e.target.value || '0') * 100)
-                                updateGuestField(g.id!, { list_value_cents: v })
-                              }}
-                              placeholder="0,00"
-                              style={{ width: 70, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }}
-                            />
-                          </div>
-                          {/* Limite de amigos */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ color: C.mut, fontSize: 10 }}>👥</span>
-                            <input
-                              type="number" min="0" max="20"
-                              value={g.max_plus_ones ?? 0}
-                              onChange={e => updateGuestField(g.id!, { max_plus_ones: parseInt(e.target.value || '0') })}
-                              style={{ width: 45, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }}
-                            />
-                          </div>
-                          {/* Enviar convite */}
-                          {g.phone && !g.invited_by && (
-                            <button onClick={() => sendGuestInviteWA(g)}
-                              style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '3px 10px', color: '#25d366', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>
-                              {g.invite_token ? '🔄 Reenviar' : '📲 Convidar'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  }
-                </div>
-              )
-            }
           </>
         )}
 
