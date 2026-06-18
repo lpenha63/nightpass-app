@@ -404,7 +404,7 @@ export function DashboardPage({ house, user }: Props) {
       )}
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
         {kpis.map((kpi, i) => (
           <div key={i} className="rounded-2xl bg-card border border-brd px-4 py-3.5">
             <i className={'bi ' + kpi.icon} style={{ color: kpi.color, fontSize: 19 }} aria-hidden="true" />
@@ -415,7 +415,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Caixa do dia + Resultado da noite ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Caixa do dia */}
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💵 Caixa do dia</div>
@@ -461,7 +461,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Charts: 30 dias + Curva por hora ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>📈 Check-ins — 30 dias</div>
           <canvas ref={chartRef} style={{ width: '100%', height: 80 }} />
@@ -496,7 +496,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Pendências + Aniversariantes ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Pendências */}
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>⚠️ Pendências do evento</div>
@@ -544,7 +544,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Bottom: pagamento + reservas + recentes + check-in rápido ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Payment breakdown (today) */}
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💳 Formas de pagamento (hoje)</div>
