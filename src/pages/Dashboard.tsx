@@ -357,7 +357,7 @@ export function DashboardPage({ house, user }: Props) {
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="min-w-0">
           <h1 className="text-2xl md:text-3xl font-black text-txt tracking-tight truncate">{house.name || 'Dashboard'}</h1>
-          <p className="text-mut text-sm capitalize">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+          <p className="text-mut text-sm first-letter:uppercase">{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
         </div>
       </div>
 
@@ -406,12 +406,10 @@ export function DashboardPage({ house, user }: Props) {
       {/* KPI Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
         {kpis.map((kpi, i) => (
-          <div key={i} className="rounded-2xl bg-card border border-brd p-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl mb-3" style={{ background: kpi.color + '1f' }}>
-              <i className={'bi ' + kpi.icon} style={{ color: kpi.color, fontSize: 18 }} aria-hidden="true" />
-            </div>
-            <div className="text-txt text-[20px] font-bold leading-none tabular-nums">{kpi.value}</div>
-            <div className="text-mut text-xs mt-1.5 truncate">{kpi.label}</div>
+          <div key={i} className="rounded-2xl bg-card border border-brd px-4 py-3.5">
+            <i className={'bi ' + kpi.icon} style={{ color: kpi.color, fontSize: 19 }} aria-hidden="true" />
+            <div className="text-txt text-[22px] font-semibold leading-none mt-2.5 tabular-nums">{kpi.value}</div>
+            <div className="text-mut text-[11px] mt-1.5 truncate">{kpi.label}</div>
           </div>
         ))}
       </div>

@@ -118,6 +118,7 @@ export default function App() {
 
   useEffect(() => {
     if (!session?.house) return
+    if (window.location.hostname === 'localhost') return // realtime só em produção (em dev não é necessário)
     const ch = supabase
       .channel(`app-ci-${session.house.id}`)
       .on('postgres_changes', {
