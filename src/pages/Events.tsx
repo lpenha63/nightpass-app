@@ -663,6 +663,15 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   useEffect(() => { load() }, [house.id])
 
+  // Carrega os convidados da reserva selecionada (ou da primeira) ao abrir a visão Reservas
+  useEffect(() => {
+    if (!guestEv || listaView !== 'reservas') return
+    const id = selReserva ?? listReservas[0]?.id
+    if (!id || reservaGuests[id]) return
+    supabase.from('reservation_guests').select('id,name,phone,checked_in,confirmed').eq('reservation_id', id).order('name')
+      .then(r => setReservaGuests(prev => prev[id] ? prev : ({ ...prev, [id]: (r.data ?? []) as RGuestRow[] })))
+  }, [guestEv, listaView, selReserva, listReservas, reservaGuests])
+
   useEffect(() => {
     supabase.from('freelancers').select('*').eq('house_id', house.id).eq('status', 'ativo').order('full_name')
       .then(r => setAllFreelancers((r.data ?? []) as Freelancer[]))
@@ -1001,13 +1010,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       .order('expected_arrival')
       .then(r => setListReservas((r.data ?? []) as RReserva[]))
   }
-  async function openReservaGuests(resId: string) {
-    setSelReserva(prev => (prev === resId ? null : resId))
+  function selectReserva(resId: string) {
+    setSelReserva(resId)
     setReservaGuestForm({ name: '', phone: '' })
-    if (!reservaGuests[resId]) {
-      const { data } = await supabase.from('reservation_guests').select('id,name,phone,checked_in,confirmed').eq('reservation_id', resId).order('name')
-      setReservaGuests(prev => ({ ...prev, [resId]: (data ?? []) as RGuestRow[] }))
-    }
   }
   async function toggleReservaGuestCheckin(resId: string, g: RGuestRow) {
     const v = !g.checked_in
@@ -2337,209 +2342,154 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           )
         })()}
 
-        {/* ── VISÃO: CASA ── */}
-        {listaView === 'casa' && (
-          <>
-            {/* Cabeçalho da Lista da Casa: placar + lembrete de pendentes */}
-            {(() => {
-              const s = listStats(guestListId ?? undefined)
-              const houseRow = listSummary.find(r => r.isHouse)
-              return (
-                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+        {/* ── CORPO ÚNICO: a moldura não muda, só os dados da lista selecionada ── */}
+        {(() => {
+          const promoterLists = listSummary.filter(r => r.kind === 'list' && !r.isHouse)
+          const isReservas = listaView === 'reservas'
+          const houseRow = listSummary.find(r => r.isHouse)
+          const promoSel = selPromoter ?? promoterLists[0]?.listId ?? null
+          const activeListRow = listaView === 'casa' ? houseRow : promoterLists.find(r => r.listId === promoSel)
+          const activeListId = listaView === 'casa' ? (guestListId ?? undefined) : (promoSel ?? undefined)
+          const s = !isReservas ? listStats(activeListId) : null
+          const resSel = selReserva ?? listReservas[0]?.id ?? null
+          const activeRes = listReservas.find(r => r.id === resSel)
+          const rgs = resSel ? (reservaGuests[resSel] ?? []) : []
+          const selStyle = { width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 12, boxSizing: 'border-box' as const }
+          return (
+            <>
+              {/* Sub-seleção compacta (Promoters / Reservas) */}
+              {listaView === 'promoters' && (promoterLists.length === 0
+                ? <div style={{ color: C.mut, textAlign: 'center', padding: '24px 0' }}>Nenhum promoter com lista neste evento.</div>
+                : <select value={promoSel ?? ''} onChange={e => setSelPromoter(e.target.value)} style={selStyle}>
+                    {promoterLists.map(r => <option key={r.key} value={r.listId}>{r.label} — {listStats(r.listId).confirmados} confirmados</option>)}
+                  </select>
+              )}
+              {isReservas && (listReservas.length === 0
+                ? <div style={{ color: C.mut, textAlign: 'center', padding: '24px 0' }}>Nenhuma reserva neste evento.</div>
+                : <select value={resSel ?? ''} onChange={e => selectReserva(e.target.value)} style={selStyle}>
+                    {listReservas.map(r => <option key={r.id} value={r.id}>{r.location ? `${r.location} · ` : ''}{r.name}{r.people_count ? ` (${r.people_count}p)` : ''}</option>)}
+                  </select>
+              )}
+
+              {/* Placar — mesma posição em todas as visões */}
+              {!isReservas && activeListRow && s && (
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 18 }}>🏠</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>Lista da Casa</div>
+                    <span style={{ fontSize: 18 }}>{listaView === 'casa' ? '🏠' : '📣'}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeListRow.label}</div>
                       <div style={{ marginTop: 3 }}>{listScore(s)}</div>
                     </div>
                   </div>
-                  {houseRow && s.pendentes > 0 && (
-                    <button disabled={remindBusy === houseRow.listId} onClick={() => remindPending(houseRow)}
+                  {s.pendentes > 0 && (
+                    <button disabled={remindBusy === activeListRow.listId} onClick={() => remindPending(activeListRow)}
                       style={{ width: '100%', marginTop: 10, background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-                      {remindBusy === houseRow.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
+                      {remindBusy === activeListRow.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
                     </button>
                   )}
                 </div>
-              )
-            })()}
-
-            {/* Valor da lista (cadastrado no evento) */}
-            {guestEv && ((guestEv.price_male_list_cents ?? 0) > 0 || (guestEv.price_female_list_cents ?? 0) > 0) && (
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 130, background: '#3b82f610', border: '1px solid #3b82f633', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 16 }}>♂</span>
-                  <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA MASC</div><div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>{fmtCurrency(guestEv.price_male_list_cents ?? 0)}</div></div>
-                </div>
-                <div style={{ flex: 1, minWidth: 130, background: '#ec489910', border: '1px solid #ec489933', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 16 }}>♀</span>
-                  <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA FEM</div><div style={{ fontSize: 15, fontWeight: 800, color: '#f472b6' }}>{fmtCurrency(guestEv.price_female_list_cents ?? 0)}</div></div>
-                </div>
-              </div>
-            )}
-
-            {/* Adicionar manualmente */}
-            <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 8, letterSpacing: '0.06em' }}>➕ ADICIONAR MANUALMENTE</div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input placeholder="Nome *" value={guestAddForm.name} onChange={e => setGuestAddForm(p => ({ ...p, name: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && addGuestManually()}
-                  style={{ flex: '2 1 160px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-                <input placeholder="Telefone" value={guestAddForm.phone} onChange={e => setGuestAddForm(p => ({ ...p, phone: e.target.value }))}
-                  style={{ flex: '1 1 130px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-                <select value={guestAddForm.gender} onChange={e => setGuestAddForm(p => ({ ...p, gender: e.target.value }))}
-                  style={{ flex: '0 0 100px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
-                  <option value="">Gênero</option>
-                  <option value="M">♂ Masc</option>
-                  <option value="F">♀ Fem</option>
-                </select>
-                <input type="date" placeholder="Nascimento" value={guestAddForm.birth_date} onChange={e => setGuestAddForm(p => ({ ...p, birth_date: e.target.value }))}
-                  title="Data de nascimento (cadastra o cliente automaticamente no check-in)"
-                  style={{ flex: '0 0 140px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: guestAddForm.birth_date ? C.txt : C.mut, fontSize: 13, fontFamily: 'inherit' }} />
-                <Btn onClick={addGuestManually} disabled={!guestAddForm.name.trim() || guestAdding} small>
-                  {guestAdding ? '...' : 'Adicionar'}
-                </Btn>
-              </div>
-            </div>
-
-            {/* Confirmados na Lista da Casa */}
-            {(() => {
-              const s = listStats(guestListId ?? undefined)
-              if (s.confirmedGuests.length === 0) {
-                return <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum confirmado ainda{s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
-              }
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-                  {s.confirmedGuests.map(g => renderGuestRow(g, true))}
-                </div>
-              )
-            })()}
-
-            {/* Exportar somente quem efetivou check-in */}
-            <div style={{ display: 'flex', marginTop: 4 }}>
-              <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV (check-in)</Btn>
-            </div>
-          </>
-        )}
-
-        {/* ── VISÃO: PROMOTERS ── */}
-        {listaView === 'promoters' && (() => {
-          const promoterLists = listSummary.filter(r => r.kind === 'list' && !r.isHouse)
-          if (promoterLists.length === 0) {
-            return <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhum promoter com lista neste evento.</div>
-          }
-          const sel = selPromoter ?? promoterLists[0]?.listId ?? null
-          const selRow = promoterLists.find(r => r.listId === sel)
-          const s = sel ? listStats(sel) : null
-          return (
-            <>
-              {/* Seletor de promoter */}
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                {promoterLists.map(r => {
-                  const ps = listStats(r.listId)
-                  const active = r.listId === sel
-                  return (
-                    <button key={r.key} onClick={() => setSelPromoter(r.listId ?? null)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 8, border: `1px solid ${active ? '#a855f7' : C.brd}`, background: active ? '#a855f722' : 'transparent', color: active ? '#a855f7' : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      📣 {r.label.replace(/^Lista da Casa$/, '')} <span style={{ color: C.grn }}>✅ {ps.confirmados}</span>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {selRow && s && (
-                <>
-                  <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>{selRow.label}</div>
-                    <div style={{ marginTop: 3 }}>{listScore(s)}</div>
-                    {s.pendentes > 0 && (
-                      <button disabled={remindBusy === selRow.listId} onClick={() => remindPending(selRow)}
-                        style={{ width: '100%', marginTop: 10, background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-                        {remindBusy === selRow.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
+              )}
+              {isReservas && activeRes && (
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 18 }}>🪑</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>{activeRes.location ? `${activeRes.location} · ` : ''}{activeRes.name}</div>
+                      <div style={{ display: 'flex', gap: 10, marginTop: 3, fontSize: 11, fontWeight: 700 }}>
+                        {activeRes.people_count ? <span style={{ color: C.acc }}>👥 {activeRes.people_count}p</span> : null}
+                        <span style={{ color: C.grn }}>✓ {rgs.filter(g => g.checked_in).length} entraram</span>
+                        <span style={{ color: C.mut }}>📝 {rgs.length} na lista</span>
+                      </div>
+                    </div>
+                    {activeRes.phone && (
+                      <button onClick={() => sendReservaWA(activeRes)} title="Mandar mensagem ao responsável"
+                        style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '6px 10px', color: '#25d366', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>
+                        <i className="bi bi-whatsapp" />
                       </button>
                     )}
                   </div>
-                  {s.confirmedGuests.length === 0
-                    ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum confirmado ainda{s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
+                </div>
+              )}
+
+              {/* Valor da lista (só Casa) */}
+              {listaView === 'casa' && guestEv && ((guestEv.price_male_list_cents ?? 0) > 0 || (guestEv.price_female_list_cents ?? 0) > 0) && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 130, background: '#3b82f610', border: '1px solid #3b82f633', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>♂</span>
+                    <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA MASC</div><div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>{fmtCurrency(guestEv.price_male_list_cents ?? 0)}</div></div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 130, background: '#ec489910', border: '1px solid #ec489933', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>♀</span>
+                    <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA FEM</div><div style={{ fontSize: 15, fontWeight: 800, color: '#f472b6' }}>{fmtCurrency(guestEv.price_female_list_cents ?? 0)}</div></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Adicionar pessoa — Casa adiciona na lista da casa; Reservas na reserva selecionada */}
+              {listaView === 'casa' && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                  <input placeholder="Nome *" value={guestAddForm.name} onChange={e => setGuestAddForm(p => ({ ...p, name: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && addGuestManually()}
+                    style={{ flex: '2 1 160px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                  <input placeholder="Telefone" value={guestAddForm.phone} onChange={e => setGuestAddForm(p => ({ ...p, phone: e.target.value }))}
+                    style={{ flex: '1 1 120px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                  <select value={guestAddForm.gender} onChange={e => setGuestAddForm(p => ({ ...p, gender: e.target.value }))}
+                    style={{ flex: '0 0 100px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
+                    <option value="">Gênero</option>
+                    <option value="M">♂ Masc</option>
+                    <option value="F">♀ Fem</option>
+                  </select>
+                  <Btn onClick={addGuestManually} disabled={!guestAddForm.name.trim() || guestAdding} small>{guestAdding ? '...' : 'Adicionar'}</Btn>
+                </div>
+              )}
+              {isReservas && activeRes && (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <input placeholder="Nome do convidado" value={reservaGuestForm.name} onChange={e => setReservaGuestForm(p => ({ ...p, name: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && addReservaGuest(activeRes.id)}
+                    style={{ flex: '2 1 140px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                  <input placeholder="Telefone" value={reservaGuestForm.phone} onChange={e => setReservaGuestForm(p => ({ ...p, phone: e.target.value }))}
+                    style={{ flex: '1 1 120px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                  <Btn onClick={() => addReservaGuest(activeRes.id)} disabled={!reservaGuestForm.name.trim()} small>Adicionar</Btn>
+                </div>
+              )}
+
+              {/* CORPO: linhas de pessoas — só os dados mudam entre as visões */}
+              {!isReservas
+                ? (!s || s.confirmedGuests.length === 0
+                    ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum confirmado ainda{s && s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
                     : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{s.confirmedGuests.map(g => renderGuestRow(g, true))}</div>
-                  }
-                </>
+                  )
+                : (!activeRes ? null
+                    : rgs.length === 0
+                      ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum convidado nesta reserva ainda</div>
+                      : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {rgs.map(g => (
+                            <div key={g.id} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 18, flexShrink: 0 }}>{g.checked_in ? '✅' : '👤'}</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
+                                {g.phone && <div style={{ color: C.mut, fontSize: 11 }}>📱 {g.phone}</div>}
+                              </div>
+                              <button onClick={() => toggleReservaGuestCheckin(activeRes.id, g)}
+                                style={{ background: g.checked_in ? C.grn + '22' : 'transparent', border: `1px solid ${g.checked_in ? C.grn : C.brd}`, borderRadius: 7, padding: '4px 12px', color: g.checked_in ? C.grn : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+                                {g.checked_in ? '✓ Entrou' : 'Check-in'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                  )
+              }
+
+              {/* CSV (só Casa) */}
+              {listaView === 'casa' && (
+                <div style={{ display: 'flex', marginTop: 10 }}>
+                  <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV (check-in)</Btn>
+                </div>
               )}
             </>
           )
         })()}
 
-        {/* ── VISÃO: RESERVAS (interação completa) ── */}
-        {listaView === 'reservas' && (
-          <>
-            {listReservas.length === 0
-              ? <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhuma reserva neste evento.</div>
-              : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {listReservas.map(res => {
-                    const open = selReserva === res.id
-                    const rgs = reservaGuests[res.id] ?? []
-                    const entered = rgs.filter(g => g.checked_in).length
-                    return (
-                      <div key={res.id} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, overflow: 'hidden' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
-                          <span style={{ background: (STATUS_COLOR[res.status] ?? C.mut) + '22', color: STATUS_COLOR[res.status] ?? C.mut, borderRadius: 6, padding: '2px 8px', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
-                            {STATUS_LABEL[res.status] ?? res.status}
-                          </span>
-                          <div onClick={() => openReservaGuests(res.id)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {res.location ? `${res.location} · ` : ''}{res.name}
-                            </div>
-                            <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                              {res.people_count ? <span>👥 {res.people_count}p</span> : null}
-                              {res.expected_arrival && <span>🕐 {res.expected_arrival.slice(0, 5)}</span>}
-                              {open && <span style={{ color: C.grn }}>✓ {entered} entraram</span>}
-                            </div>
-                          </div>
-                          {res.phone && (
-                            <button onClick={() => sendReservaWA(res)} title="Mandar mensagem ao responsável"
-                              style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '5px 9px', color: '#25d366', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>
-                              <i className="bi bi-whatsapp" />
-                            </button>
-                          )}
-                          <span onClick={() => openReservaGuests(res.id)} style={{ color: C.mut, fontSize: 12, cursor: 'pointer', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>▸</span>
-                        </div>
-                        {open && (
-                          <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {/* Adicionar convidado à reserva */}
-                            <div style={{ display: 'flex', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
-                              <input placeholder="Nome do convidado" value={reservaGuestForm.name} onChange={e => setReservaGuestForm(p => ({ ...p, name: e.target.value }))}
-                                onKeyDown={e => e.key === 'Enter' && addReservaGuest(res.id)}
-                                style={{ flex: '2 1 140px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
-                              <input placeholder="Telefone" value={reservaGuestForm.phone} onChange={e => setReservaGuestForm(p => ({ ...p, phone: e.target.value }))}
-                                style={{ flex: '1 1 110px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
-                              <Btn onClick={() => addReservaGuest(res.id)} disabled={!reservaGuestForm.name.trim()} small>Add</Btn>
-                            </div>
-                            {rgs.length === 0
-                              ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '10px 0' }}>Nenhum convidado nesta reserva ainda</div>
-                              : rgs.map(g => (
-                                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 9, padding: '7px 10px' }}>
-                                  <span style={{ fontSize: 15, flexShrink: 0 }}>{g.checked_in ? '✅' : '👤'}</span>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
-                                    {g.phone && <div style={{ color: C.mut, fontSize: 10 }}>📱 {g.phone}</div>}
-                                  </div>
-                                  <button onClick={() => toggleReservaGuestCheckin(res.id, g)}
-                                    style={{ background: g.checked_in ? C.grn + '22' : 'transparent', border: `1px solid ${g.checked_in ? C.grn : C.brd}`, borderRadius: 7, padding: '3px 10px', color: g.checked_in ? C.grn : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                                    {g.checked_in ? '✓ Entrou' : 'Check-in'}
-                                  </button>
-                                </div>
-                              ))
-                            }
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            }
-          </>
-        )}
       </Modal>
 
       {/* Montagem modal — todas as reservas do dia para um montador */}
