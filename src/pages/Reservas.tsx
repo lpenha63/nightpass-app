@@ -1200,7 +1200,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                     </div>
 
                     {/* ── Linha de detalhes: chips compactos ── */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginBottom: r.observations ? 8 : 10, paddingLeft: 60, alignItems: 'center' }}>
+                    <div className="r-noindent" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginBottom: r.observations ? 8 : 10, paddingLeft: 60, alignItems: 'center' }}>
                       {viewPeriod !== 'day' && (
                         <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                           <i className="bi bi-calendar3" style={{ color: C.acc }} />
@@ -1235,14 +1235,14 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
                     {/* ── Observações ── */}
                     {r.observations && (
-                      <div style={{ marginBottom: 10, marginLeft: 60, display: 'flex', alignItems: 'flex-start', gap: 6, background: '#ffffff07', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px' }}>
+                      <div className="r-noindent" style={{ marginBottom: 10, marginLeft: 60, display: 'flex', alignItems: 'flex-start', gap: 6, background: '#ffffff07', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px' }}>
                         <i className="bi bi-chat-left-text" style={{ color: C.mut, fontSize: 13, flexShrink: 0, marginTop: 1 }} />
                         <span style={{ fontSize: 12, color: C.sub, fontStyle: 'italic', lineHeight: 1.5 }}>{r.observations}</span>
                       </div>
                     )}
 
                     {/* ── Ações ── */}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 60 }}>
+                    <div className="r-noindent" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 60 }}>
                       {r.status === 'pending' && (
                         <Btn onClick={() => markArrived(r.id)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` }}>
                           <i className="bi bi-check-circle-fill" /> Chegou

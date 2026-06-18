@@ -135,6 +135,8 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
   .r-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
   /* Cabeçalho de página (título + ações) empilha no celular em vez de sobrepor */
   .r-head { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
+  /* Remove indentação lateral (usada p/ alinhar sob avatar no desktop) no celular */
+  .r-noindent { margin-left: 0 !important; padding-left: 0 !important; }
 }
 
 /* Offline banner */
