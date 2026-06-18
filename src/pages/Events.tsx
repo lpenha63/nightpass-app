@@ -121,13 +121,19 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [guestListPromoId, setGuestListPromoId] = useState<string | null>(null)
   const [guestAddForm, setGuestAddForm] = useState({ name: '', phone: '', gender: '', birth_date: '' })
   const [guestAdding, setGuestAdding] = useState(false)
-  const [listaTab, setListaTab] = useState<'lista' | 'convidar'>('lista')
-  const [listaClients, setListaClients] = useState<FlyerClient[]>([])
-  const [listaSearch, setListaSearch] = useState('')
+  // Mini-dashboard da aba Lista: corpo mostra só a visão selecionada
+  const [listaView, setListaView] = useState<'casa' | 'promoters' | 'reservas'>('casa')
+  const [selPromoter, setSelPromoter] = useState<string | null>(null) // promoter_list id selecionado
+  // Reservas dentro do modal de listas (interação completa)
+  interface RReserva { id: string; name: string; phone?: string; location?: string; people_count?: number; status: string; expected_arrival?: string; observations?: string }
+  interface RGuestRow { id: string; name: string; phone?: string; checked_in?: boolean; confirmed?: boolean }
+  const [listReservas, setListReservas] = useState<RReserva[]>([])
+  const [selReserva, setSelReserva] = useState<string | null>(null)
+  const [reservaGuests, setReservaGuests] = useState<Record<string, RGuestRow[]>>({})
+  const [reservaGuestForm, setReservaGuestForm] = useState({ name: '', phone: '' })
   // Resumo de TODAS as listas geradas para o evento (casa, promoters, aniversário, reservas)
   interface ListSummaryRow { key: string; kind: 'list' | 'birthday' | 'res'; listId?: string; token?: string; promoterId?: string; isHouse?: boolean; icon: string; label: string; count: number; people?: number }
   const [listSummary, setListSummary] = useState<ListSummaryRow[]>([])
-  const [expandedLists, setExpandedLists] = useState<Set<string>>(new Set())
   const [remindBusy, setRemindBusy] = useState<string | null>(null)
 
   // House list link in event form
@@ -886,24 +892,22 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setGuestListId(null)
     setGuestListPromoId(null)
     setGuestAddForm({ name: '', phone: '', gender: '', birth_date: '' })
-    setListaTab('lista')
-    setListaSearch('')
-    setListaClients([])
+    setListaView('casa')
+    setSelPromoter(null)
+    setSelReserva(null)
+    setReservaGuests({})
+    setReservaGuestForm({ name: '', phone: '' })
     setListSummary([])
-    setExpandedLists(new Set())
+    setListReservas([])
     reloadGuests(ev.id)
     loadListSummary(ev)
-    const [rec, cl] = await Promise.all([
-      ensureHouseListRecord(ev),
-      supabase.from('clients').select('id,full_name,phone,gender').eq('house_id', house.id).order('full_name'),
-    ])
+    loadListReservas(ev)
+    const rec = await ensureHouseListRecord(ev)
     if (rec) {
       setGuestListToken(rec.token)
       setGuestListId(rec.listId)
       setGuestListPromoId(rec.promoterId)
-      setExpandedLists(new Set([rec.listId]))
     }
-    setListaClients((cl.data ?? []) as FlyerClient[])
   }
 
   function reloadGuests(eventId: string) {
@@ -987,6 +991,125 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     }
     setRemindBusy(null)
     st2(`Lembrete enviado para ${ok}/${pend.length} pendente(s).`, ok > 0 ? 'success' : 'warn')
+  }
+
+  // ── Reservas dentro do modal de listas ──
+  function loadListReservas(ev: EventWithCounts) {
+    supabase.from('reservations')
+      .select('id,name,phone,location,people_count,status,expected_arrival,observations')
+      .eq('house_id', house.id).eq('event_id', ev.id).neq('status', 'cancelled')
+      .order('expected_arrival')
+      .then(r => setListReservas((r.data ?? []) as RReserva[]))
+  }
+  async function openReservaGuests(resId: string) {
+    setSelReserva(prev => (prev === resId ? null : resId))
+    setReservaGuestForm({ name: '', phone: '' })
+    if (!reservaGuests[resId]) {
+      const { data } = await supabase.from('reservation_guests').select('id,name,phone,checked_in,confirmed').eq('reservation_id', resId).order('name')
+      setReservaGuests(prev => ({ ...prev, [resId]: (data ?? []) as RGuestRow[] }))
+    }
+  }
+  async function toggleReservaGuestCheckin(resId: string, g: RGuestRow) {
+    const v = !g.checked_in
+    await supabase.from('reservation_guests').update({ checked_in: v, checked_in_at: v ? new Date().toISOString() : null }).eq('id', g.id)
+    setReservaGuests(prev => ({ ...prev, [resId]: (prev[resId] ?? []).map(x => x.id === g.id ? { ...x, checked_in: v } : x) }))
+  }
+  async function addReservaGuest(resId: string) {
+    if (!reservaGuestForm.name.trim()) return
+    const { data, error } = await supabase.from('reservation_guests').insert({
+      reservation_id: resId, house_id: house.id,
+      name: reservaGuestForm.name.trim(), phone: reservaGuestForm.phone.replace(/\D/g, '') || null, confirmed: true,
+    }).select('id,name,phone,checked_in,confirmed').single()
+    if (error) { st2('Erro ao adicionar: ' + error.message, 'error'); return }
+    setReservaGuests(prev => ({ ...prev, [resId]: [...(prev[resId] ?? []), data as RGuestRow] }))
+    setReservaGuestForm({ name: '', phone: '' })
+  }
+  async function sendReservaWA(res: RReserva) {
+    if (!res.phone) { st2('Reserva sem telefone cadastrado', 'warn'); return }
+    if (!guestEv) return
+    const dateStr = new Date(guestEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    const msg = `Olá ${res.name.split(' ')[0]}! 🎉 Sua reserva${res.location ? ` em *${res.location}*` : ''} para *${guestEv.name}* — ${dateStr}${guestEv.start_time ? ` às ${guestEv.start_time.slice(0, 5)}` : ''} está confirmada.${res.people_count ? `\n👥 ${res.people_count} pessoas` : ''}${eventDetailsText(guestEv)}\n\nTe esperamos! 🔥`
+    const r = await sendWADirect(house.id, res.phone, msg, { eventId: guestEv.id, type: 'reservation_invite' })
+    st2(r.viaApi ? '✅ Mensagem enviada pela API' : '📲 Abrindo WhatsApp...', 'success')
+  }
+
+  // ── Helpers de lista reutilizados nas visões Casa e Promoters ──
+  function listStats(listId?: string) {
+    const gs = guests.filter(g => g.list_id === listId)
+    return {
+      total: gs.length,
+      enviados: gs.filter(g => g.invite_token).length,
+      confirmados: gs.filter(g => g.confirmed_at).length,
+      entraram: gs.filter(g => g.checked_in).length,
+      pendentes: gs.filter(g => g.invite_token && !g.confirmed_at).length,
+      confirmedGuests: gs.filter(g => g.confirmed_at),
+    }
+  }
+  function renderGuestRow(g: Guest, editable: boolean) {
+    return (
+      <div key={g.id} style={{ background: C.bg, border: `1px solid ${g.is_vip ? C.gold + '44' : C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: editable ? 8 : 0 }}>
+          <span style={{ fontSize: 18, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {g.full_name}
+              {g.invited_by && <span style={{ color: C.mut, fontSize: 10, marginLeft: 6 }}>👥 convidado</span>}
+              {g.is_vip && <span style={{ color: C.gold, fontSize: 10, marginLeft: 6 }}>⭐ VIP</span>}
+            </div>
+            <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {g.phone && <span>📱 {g.phone}</span>}
+              {g.confirmed_at && <span style={{ color: C.grn }}>✅ Confirmou</span>}
+              {g.checked_in && <span style={{ color: C.grn, fontWeight: 700 }}>✓ Entrou</span>}
+            </div>
+          </div>
+        </div>
+        {editable && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button onClick={() => toggleGuestVip(g)}
+              title={g.is_vip ? 'VIP ativo — clique para lista normal' : 'Lista normal — clique para VIP'}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, background: g.is_vip ? C.gold + '22' : C.card, border: `1.5px solid ${g.is_vip ? C.gold : C.brd}`, borderRadius: 20, padding: '3px 8px 3px 4px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+              <span style={{ display: 'inline-flex', width: 28, height: 16, borderRadius: 10, background: g.is_vip ? C.gold : C.brd, position: 'relative', flexShrink: 0, transition: 'background 0.15s' }}>
+                <span style={{ position: 'absolute', top: 2, left: g.is_vip ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0004' }} />
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: g.is_vip ? C.gold : C.mut, minWidth: 28 }}>
+                {g.is_vip ? '⭐ VIP' : 'Lista'}
+              </span>
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: C.mut, fontSize: 10 }}>R$</span>
+              <input type="number" min="0" step="0.01"
+                value={g.list_value_cents ? (g.list_value_cents / 100).toFixed(2) : ''}
+                onChange={e => updateGuestField(g.id!, { list_value_cents: Math.round(parseFloat(e.target.value || '0') * 100) })}
+                placeholder="0,00"
+                style={{ width: 70, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: C.mut, fontSize: 10 }}>👥</span>
+              <input type="number" min="0" max="20"
+                value={g.max_plus_ones ?? 0}
+                onChange={e => updateGuestField(g.id!, { max_plus_ones: parseInt(e.target.value || '0') })}
+                style={{ width: 45, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }} />
+            </div>
+            {g.phone && !g.invited_by && (
+              <button onClick={() => sendGuestInviteWA(g)}
+                style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '3px 10px', color: '#25d366', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>
+                {g.invite_token ? '🔄 Reenviar' : '📲 Convidar'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+  // Placar (enviados/confirmados/entraram) reutilizado nos cabeçalhos de lista
+  function listScore(s: { enviados: number; confirmados: number; entraram: number }) {
+    return (
+      <div style={{ display: 'flex', gap: 10, fontSize: 11, fontWeight: 700 }}>
+        <span style={{ color: '#25d366' }} title="Convites enviados">📨 {s.enviados}</span>
+        <span style={{ color: C.grn }} title="Confirmados">✅ {s.confirmados}</span>
+        <span style={{ color: C.acc }} title="Entraram (check-in)">🎟️ {s.entraram}</span>
+      </div>
+    )
   }
 
   async function addGuestManually() {
@@ -2167,10 +2290,10 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       )}{/* end overlay */}
 
       {/* Guest list modal — large, two-tab layout */}
-      <Modal open={!!guestEv} title={`👥 Listas — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListaClients([]); setListSummary([]) }}>
+      <Modal open={!!guestEv} title={`👥 Listas — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListSummary([]) }}>
 
-        {/* Link compartilhável */}
-        {guestListToken && (
+        {/* Link compartilhável (Lista da Casa) — só na visão Casa */}
+        {guestListToken && listaView === 'casa' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
             <i className="bi bi-link-45deg" style={{ color: '#10b981', fontSize: 18, flexShrink: 0 }} />
             <span style={{ color: '#10b981', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -2183,151 +2306,59 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           </div>
         )}
 
-        {/* Tabs — Lista (todas as listas) + Convidar Clientes (abre Enviar Flyer) */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-          <button onClick={() => setListaTab('lista')} style={{
-            padding: '8px 18px', borderRadius: 8, border: `1px solid ${C.acc}`,
-            background: C.acc + '22', color: C.acc, fontSize: 13, fontWeight: 700,
+        {/* Mini-dashboard das listas: seletor de visão (corpo mostra só a selecionada) */}
+        {(() => {
+          const houseConf = listStats(guestListId ?? undefined).confirmados
+          const promoterLists = listSummary.filter(r => r.kind === 'list' && !r.isHouse)
+          const navBtn = (active: boolean, color: string) => ({
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 16px', borderRadius: 8,
+            border: `1px solid ${active ? color : C.brd}`,
+            background: active ? color + '22' : 'transparent',
+            color: active ? color : C.mut, fontSize: 13, fontWeight: 700,
             cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-            📋 Lista ({guests.length})
-          </button>
-          <button onClick={() => { if (guestEv) { const ev = guestEv; setGuestEv(null); openFlyer(ev) } }} style={{
-            padding: '8px 18px', borderRadius: 8, border: `1px solid ${C.brd}`,
-            background: 'transparent', color: C.mut, fontSize: 13, fontWeight: 700,
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-            📨 Convidar Clientes
-          </button>
-        </div>
+          } as const)
+          return (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+              <button onClick={() => setListaView('casa')} style={navBtn(listaView === 'casa', '#3b82f6')}>
+                🏠 Casa <span style={{ opacity: 0.8 }}>{houseConf}</span>
+              </button>
+              <button onClick={() => setListaView('promoters')} style={navBtn(listaView === 'promoters', '#a855f7')}>
+                📣 Promoters <span style={{ opacity: 0.8 }}>{promoterLists.length}</span>
+              </button>
+              <button onClick={() => setListaView('reservas')} style={navBtn(listaView === 'reservas', '#a78bfa')}>
+                🪑 Reservas <span style={{ opacity: 0.8 }}>{listReservas.length}</span>
+              </button>
+              <button onClick={() => { if (guestEv) { const ev = guestEv; setGuestEv(null); openFlyer(ev) } }}
+                style={{ ...navBtn(false, '#25d366'), color: '#25d366', borderColor: '#25d36644', marginLeft: 'auto' }}>
+                📨 Convidar Clientes
+              </button>
+            </div>
+          )
+        })()}
 
-        {/* ── ABA LISTA ── */}
-        {listaTab === 'lista' && (
+        {/* ── VISÃO: CASA ── */}
+        {listaView === 'casa' && (
           <>
-            {/* Listas do evento — uma seção por lista, com placar enviados/confirmados/entraram */}
+            {/* Cabeçalho da Lista da Casa: placar + lembrete de pendentes */}
             {(() => {
-              const listRows = [...listSummary.filter(r => r.kind === 'list')]
-                .sort((a, b) => (a.isHouse ? -1 : b.isHouse ? 1 : a.label.localeCompare(b.label)))
-              const otherRows = listSummary.filter(r => r.kind !== 'list')
-              const statsFor = (listId?: string) => {
-                const gs = guests.filter(g => g.list_id === listId)
-                return {
-                  total: gs.length,
-                  enviados: gs.filter(g => g.invite_token).length,
-                  confirmados: gs.filter(g => g.confirmed_at).length,
-                  entraram: gs.filter(g => g.checked_in).length,
-                  pendentes: gs.filter(g => g.invite_token && !g.confirmed_at).length,
-                  confirmedGuests: gs.filter(g => g.confirmed_at),
-                }
-              }
-              const toggleExpand = (id: string) => setExpandedLists(prev => {
-                const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n
-              })
-              function guestRow(g: Guest, editable: boolean) {
-                return (
-                  <div key={g.id} style={{ background: C.bg, border: `1px solid ${g.is_vip ? C.gold + '44' : C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: editable ? 8 : 0 }}>
-                      <span style={{ fontSize: 18, flexShrink: 0 }}>{g.checked_in ? '✅' : g.gender === 'F' ? '♀' : g.gender === 'M' ? '♂' : '👤'}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {g.full_name}
-                          {g.invited_by && <span style={{ color: C.mut, fontSize: 10, marginLeft: 6 }}>👥 convidado</span>}
-                          {g.is_vip && !editable && <span style={{ color: C.gold, fontSize: 10, marginLeft: 6 }}>⭐ VIP</span>}
-                        </div>
-                        <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          {g.phone && <span>📱 {g.phone}</span>}
-                          {g.confirmed_at && <span style={{ color: C.grn }}>✅ Confirmou</span>}
-                          {g.checked_in && <span style={{ color: C.grn, fontWeight: 700 }}>✓ Entrou</span>}
-                        </div>
-                      </div>
-                    </div>
-                    {editable && (
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <button onClick={() => toggleGuestVip(g)}
-                          title={g.is_vip ? 'VIP ativo — clique para lista normal' : 'Lista normal — clique para VIP'}
-                          style={{ display: 'flex', alignItems: 'center', gap: 5, background: g.is_vip ? C.gold + '22' : C.card, border: `1.5px solid ${g.is_vip ? C.gold : C.brd}`, borderRadius: 20, padding: '3px 8px 3px 4px', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
-                          <span style={{ display: 'inline-flex', width: 28, height: 16, borderRadius: 10, background: g.is_vip ? C.gold : C.brd, position: 'relative', flexShrink: 0, transition: 'background 0.15s' }}>
-                            <span style={{ position: 'absolute', top: 2, left: g.is_vip ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0004' }} />
-                          </span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: g.is_vip ? C.gold : C.mut, minWidth: 28 }}>
-                            {g.is_vip ? '⭐ VIP' : 'Lista'}
-                          </span>
-                        </button>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ color: C.mut, fontSize: 10 }}>R$</span>
-                          <input type="number" min="0" step="0.01"
-                            value={g.list_value_cents ? (g.list_value_cents / 100).toFixed(2) : ''}
-                            onChange={e => updateGuestField(g.id!, { list_value_cents: Math.round(parseFloat(e.target.value || '0') * 100) })}
-                            placeholder="0,00"
-                            style={{ width: 70, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }} />
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ color: C.mut, fontSize: 10 }}>👥</span>
-                          <input type="number" min="0" max="20"
-                            value={g.max_plus_ones ?? 0}
-                            onChange={e => updateGuestField(g.id!, { max_plus_ones: parseInt(e.target.value || '0') })}
-                            style={{ width: 45, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 7, padding: '3px 7px', color: C.txt, fontSize: 11, fontFamily: 'inherit', outline: 'none' }} />
-                        </div>
-                        {g.phone && !g.invited_by && (
-                          <button onClick={() => sendGuestInviteWA(g)}
-                            style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '3px 10px', color: '#25d366', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>
-                            {g.invite_token ? '🔄 Reenviar' : '📲 Convidar'}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )
-              }
-              if (listSummary.length === 0) return null
+              const s = listStats(guestListId ?? undefined)
+              const houseRow = listSummary.find(r => r.isHouse)
               return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-                  {listRows.map(row => {
-                    const s = statsFor(row.listId)
-                    if (!row.isHouse && s.total === 0) return null
-                    const open = expandedLists.has(row.listId ?? '')
-                    return (
-                      <div key={row.key} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, overflow: 'hidden' }}>
-                        <div onClick={() => row.listId && toggleExpand(row.listId)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer' }}>
-                          <span style={{ fontSize: 16, flexShrink: 0 }}>{row.icon}</span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</div>
-                            <div style={{ display: 'flex', gap: 10, marginTop: 3, fontSize: 11, fontWeight: 700 }}>
-                              <span style={{ color: '#25d366' }} title="Convites enviados">📨 {s.enviados}</span>
-                              <span style={{ color: C.grn }} title="Confirmados">✅ {s.confirmados}</span>
-                              <span style={{ color: C.acc }} title="Entraram (check-in)">🎟️ {s.entraram}</span>
-                            </div>
-                          </div>
-                          <span style={{ color: C.mut, fontSize: 12, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>▸</span>
-                        </div>
-                        {row.isHouse && s.pendentes > 0 && (
-                          <div style={{ padding: '0 14px 10px' }}>
-                            <button disabled={remindBusy === row.listId} onClick={() => remindPending(row)}
-                              style={{ width: '100%', background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-                              {remindBusy === row.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
-                            </button>
-                          </div>
-                        )}
-                        {open && (
-                          <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {s.confirmedGuests.length === 0
-                              ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '12px 0' }}>Nenhum confirmado ainda{s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
-                              : s.confirmedGuests.map(g => guestRow(g, row.isHouse ?? false))
-                            }
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                  {otherRows.map(row => (
-                    <div key={row.key} onClick={() => { if (row.kind === 'res' && guestEv) { const ev = guestEv; setGuestEv(null); openResView(ev) } }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', cursor: row.kind === 'res' ? 'pointer' : 'default' }}>
-                      <span style={{ fontSize: 16, flexShrink: 0 }}>{row.icon}</span>
-                      <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: C.txt }}>{row.label}</div>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: C.mut }}>{row.people != null ? `${row.count} · ${row.people}p` : `${row.count}`}</span>
-                      {row.kind === 'res' && <span style={{ color: C.mut, fontSize: 13 }}>›</span>}
+                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 18 }}>🏠</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>Lista da Casa</div>
+                      <div style={{ marginTop: 3 }}>{listScore(s)}</div>
                     </div>
-                  ))}
+                  </div>
+                  {houseRow && s.pendentes > 0 && (
+                    <button disabled={remindBusy === houseRow.listId} onClick={() => remindPending(houseRow)}
+                      style={{ width: '100%', marginTop: 10, background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                      {remindBusy === houseRow.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
+                    </button>
+                  )}
                 </div>
               )
             })()}
@@ -2370,6 +2401,19 @@ export function EventsPage({ house, onGoToReservas }: Props) {
               </div>
             </div>
 
+            {/* Confirmados na Lista da Casa */}
+            {(() => {
+              const s = listStats(guestListId ?? undefined)
+              if (s.confirmedGuests.length === 0) {
+                return <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum confirmado ainda{s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
+              }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                  {s.confirmedGuests.map(g => renderGuestRow(g, true))}
+                </div>
+              )
+            })()}
+
             {/* Exportar somente quem efetivou check-in */}
             <div style={{ display: 'flex', marginTop: 4 }}>
               <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV (check-in)</Btn>
@@ -2377,88 +2421,125 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           </>
         )}
 
-        {/* ── ABA CONVIDAR CLIENTES ── */}
-        {listaTab === 'convidar' && (() => {
-          const baseLink = guestListToken ? `${window.location.origin}/lista/${guestListToken}` : ''
-          const q = listaSearch.toLowerCase()
-          const filtered = listaClients.filter(c =>
-            c.full_name.toLowerCase().includes(q) || (c.phone ?? '').includes(q)
-          )
-
-          function makePersonalLink(c: FlyerClient) {
-            return `${baseLink}?nome=${encodeURIComponent(c.full_name)}${c.phone ? `&tel=${c.phone.replace(/\D/g, '')}` : ''}`
+        {/* ── VISÃO: PROMOTERS ── */}
+        {listaView === 'promoters' && (() => {
+          const promoterLists = listSummary.filter(r => r.kind === 'list' && !r.isHouse)
+          if (promoterLists.length === 0) {
+            return <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhum promoter com lista neste evento.</div>
           }
-
-          async function openWhatsApp(c: FlyerClient) {
-            if (!c.phone) { st2('Cliente sem telefone cadastrado', 'warn'); return }
-            const ev = guestEv!
-            const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
-            const link = makePersonalLink(c)
-            const msg = `Olá ${c.full_name.split(' ')[0]}! 🎉 Você está convidado(a) para *${ev.name}* — ${dateStr}${ev.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}.${eventDetailsText(ev)}\n\n✅ Confirme sua presença na lista da casa:\n${link}\n\nTe esperamos! 🔥`
-            const r = await sendWADirect(house.id, c.phone, msg, { eventId: ev.id, type: 'list_invite' })
-            st2(r.viaApi ? '✅ Convite enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
-          }
-
+          const sel = selPromoter ?? promoterLists[0]?.listId ?? null
+          const selRow = promoterLists.find(r => r.listId === sel)
+          const s = sel ? listStats(sel) : null
           return (
             <>
-              <div style={{ marginBottom: 12 }}>
-                <input
-                  placeholder="🔍 Buscar cliente por nome ou telefone..."
-                  value={listaSearch}
-                  onChange={e => setListaSearch(e.target.value)}
-                  style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' as const }}
-                />
+              {/* Seletor de promoter */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+                {promoterLists.map(r => {
+                  const ps = listStats(r.listId)
+                  const active = r.listId === sel
+                  return (
+                    <button key={r.key} onClick={() => setSelPromoter(r.listId ?? null)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 8, border: `1px solid ${active ? '#a855f7' : C.brd}`, background: active ? '#a855f722' : 'transparent', color: active ? '#a855f7' : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      📣 {r.label.replace(/^Lista da Casa$/, '')} <span style={{ color: C.grn }}>✅ {ps.confirmados}</span>
+                    </button>
+                  )
+                })}
               </div>
 
-              {!baseLink && (
-                <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>
-                  Ative a Lista da Casa no cadastro do evento para gerar o link de convite.
-                </div>
-              )}
-
-              {baseLink && filtered.length === 0 && (
-                <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>
-                  {listaSearch ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado'}
-                </div>
-              )}
-
-              {baseLink && filtered.length > 0 && (
+              {selRow && s && (
                 <>
-                  <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 10, letterSpacing: '0.06em' }}>
-                    {filtered.length} CLIENTE{filtered.length !== 1 ? 'S' : ''} — clique para enviar convite via WhatsApp
+                  <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>{selRow.label}</div>
+                    <div style={{ marginTop: 3 }}>{listScore(s)}</div>
+                    {s.pendentes > 0 && (
+                      <button disabled={remindBusy === selRow.listId} onClick={() => remindPending(selRow)}
+                        style={{ width: '100%', marginTop: 10, background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                        {remindBusy === selRow.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
+                      </button>
+                    )}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
-                    {filtered.map(c => (
-                      <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px' }}>
-                        <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.acc + '22', border: `1px solid ${C.acc}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0, color: C.acc, fontWeight: 800 }}>
-                          {c.full_name.charAt(0).toUpperCase()}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ color: C.txt, fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.full_name}</div>
-                          <div style={{ color: C.mut, fontSize: 11 }}>{c.phone ?? 'Sem telefone'}</div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
-                          <button
-                            onClick={() => { navigator.clipboard.writeText(makePersonalLink(c)); st2('Link copiado!', 'success') }}
-                            title="Copiar link personalizado"
-                            style={{ background: C.acc + '22', border: `1px solid ${C.acc}44`, borderRadius: 7, padding: '5px 8px', color: C.acc, fontSize: 13, cursor: 'pointer' }}>
-                            <i className="bi bi-link-45deg" />
-                          </button>
-                          <button
-                            onClick={() => openWhatsApp(c)}
-                            title="Enviar via WhatsApp"
-                            style={{ background: '#25D36622', border: '1px solid #25D36644', borderRadius: 7, padding: '5px 8px', color: '#25D366', fontSize: 13, cursor: 'pointer' }}>
-                            <i className="bi bi-whatsapp" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  {s.confirmedGuests.length === 0
+                    ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum confirmado ainda{s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
+                    : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{s.confirmedGuests.map(g => renderGuestRow(g, true))}</div>
+                  }
                 </>
               )}
             </>
           )
         })()}
+
+        {/* ── VISÃO: RESERVAS (interação completa) ── */}
+        {listaView === 'reservas' && (
+          <>
+            {listReservas.length === 0
+              ? <div style={{ color: C.mut, textAlign: 'center', padding: '32px 0' }}>Nenhuma reserva neste evento.</div>
+              : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {listReservas.map(res => {
+                    const open = selReserva === res.id
+                    const rgs = reservaGuests[res.id] ?? []
+                    const entered = rgs.filter(g => g.checked_in).length
+                    return (
+                      <div key={res.id} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
+                          <span style={{ background: (STATUS_COLOR[res.status] ?? C.mut) + '22', color: STATUS_COLOR[res.status] ?? C.mut, borderRadius: 6, padding: '2px 8px', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+                            {STATUS_LABEL[res.status] ?? res.status}
+                          </span>
+                          <div onClick={() => openReservaGuests(res.id)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {res.location ? `${res.location} · ` : ''}{res.name}
+                            </div>
+                            <div style={{ color: C.mut, fontSize: 11, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {res.people_count ? <span>👥 {res.people_count}p</span> : null}
+                              {res.expected_arrival && <span>🕐 {res.expected_arrival.slice(0, 5)}</span>}
+                              {open && <span style={{ color: C.grn }}>✓ {entered} entraram</span>}
+                            </div>
+                          </div>
+                          {res.phone && (
+                            <button onClick={() => sendReservaWA(res)} title="Mandar mensagem ao responsável"
+                              style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '5px 9px', color: '#25d366', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>
+                              <i className="bi bi-whatsapp" />
+                            </button>
+                          )}
+                          <span onClick={() => openReservaGuests(res.id)} style={{ color: C.mut, fontSize: 12, cursor: 'pointer', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>▸</span>
+                        </div>
+                        {open && (
+                          <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {/* Adicionar convidado à reserva */}
+                            <div style={{ display: 'flex', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                              <input placeholder="Nome do convidado" value={reservaGuestForm.name} onChange={e => setReservaGuestForm(p => ({ ...p, name: e.target.value }))}
+                                onKeyDown={e => e.key === 'Enter' && addReservaGuest(res.id)}
+                                style={{ flex: '2 1 140px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
+                              <input placeholder="Telefone" value={reservaGuestForm.phone} onChange={e => setReservaGuestForm(p => ({ ...p, phone: e.target.value }))}
+                                style={{ flex: '1 1 110px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
+                              <Btn onClick={() => addReservaGuest(res.id)} disabled={!reservaGuestForm.name.trim()} small>Add</Btn>
+                            </div>
+                            {rgs.length === 0
+                              ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '10px 0' }}>Nenhum convidado nesta reserva ainda</div>
+                              : rgs.map(g => (
+                                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 9, padding: '7px 10px' }}>
+                                  <span style={{ fontSize: 15, flexShrink: 0 }}>{g.checked_in ? '✅' : '👤'}</span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ color: g.checked_in ? C.grn : C.txt, fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
+                                    {g.phone && <div style={{ color: C.mut, fontSize: 10 }}>📱 {g.phone}</div>}
+                                  </div>
+                                  <button onClick={() => toggleReservaGuestCheckin(res.id, g)}
+                                    style={{ background: g.checked_in ? C.grn + '22' : 'transparent', border: `1px solid ${g.checked_in ? C.grn : C.brd}`, borderRadius: 7, padding: '3px 10px', color: g.checked_in ? C.grn : C.mut, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+                                    {g.checked_in ? '✓ Entrou' : 'Check-in'}
+                                  </button>
+                                </div>
+                              ))
+                            }
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            }
+          </>
+        )}
       </Modal>
 
       {/* Montagem modal — todas as reservas do dia para um montador */}
