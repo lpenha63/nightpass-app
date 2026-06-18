@@ -1140,67 +1140,57 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
                   <div style={{ flex: 1, padding: '14px 18px 14px 16px', minWidth: 0 }}>
 
-                    {/* ── Cabeçalho: ícone + nome + tipo + status ── */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                    {/* ── Cabeçalho: avatar + nome + valor (alinhados ao topo) ── */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
                       {/* Ícone / flyer thumb */}
                       {r.flyer_url
-                        ? <div style={{ width: 48, height: 48, borderRadius: 10, overflow: 'hidden', flexShrink: 0 }}>
+                        ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: 'hidden', flexShrink: 0 }}>
                             <img src={r.flyer_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                               onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }} />
                           </div>
-                        : <div style={{ width: 48, height: 48, borderRadius: 10, background: resType ? resType.color + '18' : '#ffffff0a', border: `2px solid ${resType ? resType.color + '44' : C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
+                        : <div style={{ width: 44, height: 44, borderRadius: 10, background: resType ? resType.color + '18' : '#ffffff0a', border: `2px solid ${resType ? resType.color + '44' : C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
                             {resType ? resType.icon : '🪑'}
                           </div>
                       }
-
-                      {/* Nome + meta info */}
+                      {/* Nome + tipo/evento */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-                          <span style={{ color: C.txt, fontWeight: 900, fontSize: 18, lineHeight: 1 }}>{r.name}</span>
-                          {resType && (
-                            <span style={{ color: resType.color, fontSize: 12, fontWeight: 600, opacity: 0.9 }}>
-                              {resType.icon} {resType.name}
-                            </span>
-                          )}
-                          {r.events && (
-                            <span style={{ color: C.mut, fontSize: 12 }}>
-                              · 🎉 {(r.events as { name: string }).name}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Badges de status, pagamento e lista — compactos */}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-                          <span style={{ background: statusCol + '20', color: statusCol, border: `1px solid ${statusCol}44`, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 800, letterSpacing: '0.03em' }}>
-                            {STATUS_LABEL[r.status] ?? r.status}
-                          </span>
-                          <span style={{ background: payCol + '18', color: payCol, border: `1px solid ${payCol}33`, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            {PAY_ICON[ps]} {PAY_LABEL[ps]}
-                            {ps === 'partial' && remaining > 0 && <span style={{ opacity: 0.8 }}>· falta {fmtCurrency(remaining)}</span>}
-                          </span>
-                          <span style={{ background: listCol + '18', color: listCol, border: `1px solid ${listCol}33`, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            {LIST_ICON[lt]} {LIST_LABEL[lt]}
-                            {lt === 'custom' && (lm > 0 || lf > 0) && <span style={{ opacity: 0.85 }}>{lm > 0 && ` · 👨 ${fmtCurrency(lm)}`}{lf > 0 && ` · 👩 ${fmtCurrency(lf)}`}</span>}
-                          </span>
-                          {r.list_link_sent_at && (
-                            <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                              <i className="bi bi-check2-circle" /> link enviado
-                            </span>
-                          )}
+                        <div style={{ color: C.txt, fontWeight: 800, fontSize: 17, lineHeight: 1.2 }}>{r.name}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 8px', marginTop: 2, fontSize: 12 }}>
+                          {resType && <span style={{ color: resType.color, fontWeight: 600 }}>{resType.icon} {resType.name}</span>}
+                          {r.events && <span style={{ color: C.mut }}>🎉 {(r.events as { name: string }).name}</span>}
                         </div>
                       </div>
-
-                      {/* Valor total — destaque à direita */}
+                      {/* Valor total */}
                       {total > 0 && (
                         <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                          <div style={{ color: C.gold, fontWeight: 900, fontSize: 18, lineHeight: 1 }}>{fmtCurrency(total)}</div>
+                          <div style={{ color: C.gold, fontWeight: 900, fontSize: 17, lineHeight: 1 }}>{fmtCurrency(total)}</div>
                           {items.length > 0 && <div style={{ color: C.mut, fontSize: 10, marginTop: 2 }}>📦 {items.length} item{items.length > 1 ? 's' : ''}</div>}
                         </div>
                       )}
                     </div>
 
+                    {/* ── Badges (largura cheia, alinhados à esquerda) ── */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ background: statusCol + '20', color: statusCol, border: `1px solid ${statusCol}44`, borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 800, letterSpacing: '0.03em' }}>
+                        {STATUS_LABEL[r.status] ?? r.status}
+                      </span>
+                      <span style={{ background: payCol + '18', color: payCol, border: `1px solid ${payCol}33`, borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        {PAY_ICON[ps]} {PAY_LABEL[ps]}
+                        {ps === 'partial' && remaining > 0 && <span style={{ opacity: 0.8 }}>· falta {fmtCurrency(remaining)}</span>}
+                      </span>
+                      <span style={{ background: listCol + '18', color: listCol, border: `1px solid ${listCol}33`, borderRadius: 6, padding: '3px 8px', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        {LIST_ICON[lt]} {LIST_LABEL[lt]}
+                        {lt === 'custom' && (lm > 0 || lf > 0) && <span style={{ opacity: 0.85 }}>{lm > 0 && ` · 👨 ${fmtCurrency(lm)}`}{lf > 0 && ` · 👩 ${fmtCurrency(lf)}`}</span>}
+                      </span>
+                      {r.list_link_sent_at && (
+                        <span style={{ color: C.grn, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          <i className="bi bi-check2-circle" /> link enviado
+                        </span>
+                      )}
+                    </div>
+
                     {/* ── Linha de detalhes: chips compactos ── */}
-                    <div className="r-noindent" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginBottom: r.observations ? 8 : 10, paddingLeft: 60, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginBottom: r.observations ? 8 : 10, alignItems: 'center' }}>
                       {viewPeriod !== 'day' && (
                         <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                           <i className="bi bi-calendar3" style={{ color: C.acc }} />
@@ -1235,14 +1225,14 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
                     {/* ── Observações ── */}
                     {r.observations && (
-                      <div className="r-noindent" style={{ marginBottom: 10, marginLeft: 60, display: 'flex', alignItems: 'flex-start', gap: 6, background: '#ffffff07', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px' }}>
+                      <div style={{ marginBottom: 10, display: 'flex', alignItems: 'flex-start', gap: 6, background: '#ffffff07', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px' }}>
                         <i className="bi bi-chat-left-text" style={{ color: C.mut, fontSize: 13, flexShrink: 0, marginTop: 1 }} />
                         <span style={{ fontSize: 12, color: C.sub, fontStyle: 'italic', lineHeight: 1.5 }}>{r.observations}</span>
                       </div>
                     )}
 
                     {/* ── Ações ── */}
-                    <div className="r-noindent" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginLeft: 60 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {r.status === 'pending' && (
                         <Btn onClick={() => markArrived(r.id)} small style={{ background: C.grn + '22', color: C.grn, border: `1px solid ${C.grn}44` }}>
                           <i className="bi bi-check-circle-fill" /> Chegou
