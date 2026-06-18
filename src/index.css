@@ -97,6 +97,8 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
 
 /* Bottom nav — hidden on desktop, shown on mobile */
 .np-bottom-nav { display: none; }
+/* O componente usa display:flex inline; força esconder no desktop (>=769px) */
+@media (min-width: 769px) { .np-bottom-nav { display: none !important; } }
 
 /* KPI grid responsive */
 @media (max-width: 768px) {

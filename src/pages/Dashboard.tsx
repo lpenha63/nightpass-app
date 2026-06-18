@@ -88,12 +88,12 @@ interface CashDay { door: number; tickets: number; reservations: number; total: 
 interface Birthday { id: string; full_name: string; phone?: string }
 
 const KPIS = (s: Stats, cash: number) => [
-  { icon: '👥', label: 'Clientes', value: s.clients.toLocaleString('pt-BR'), color: C.acc },
-  { icon: '🆕', label: 'Novos Hoje', value: s.newClients.toLocaleString('pt-BR'), color: '#22d3ee' },
-  { icon: '🎉', label: 'Eventos Ativos', value: s.events.toLocaleString('pt-BR'), color: C.mut },
-  { icon: '✅', label: 'Check-ins Hoje', value: s.todayCount.toLocaleString('pt-BR'), color: C.grn },
-  { icon: '💰', label: 'Caixa Hoje', value: fmtCurrency(cash), color: C.gold },
-  { icon: '🪑', label: 'Reservas Hoje', value: s.reservations.toLocaleString('pt-BR'), color: '#a78bfa' },
+  { icon: 'bi-people-fill', label: 'Clientes', value: s.clients.toLocaleString('pt-BR'), color: C.acc },
+  { icon: 'bi-person-plus-fill', label: 'Novos hoje', value: s.newClients.toLocaleString('pt-BR'), color: '#22d3ee' },
+  { icon: 'bi-calendar-event-fill', label: 'Eventos ativos', value: s.events.toLocaleString('pt-BR'), color: '#a78bfa' },
+  { icon: 'bi-door-open-fill', label: 'Check-ins hoje', value: s.todayCount.toLocaleString('pt-BR'), color: C.grn },
+  { icon: 'bi-cash-stack', label: 'Caixa hoje', value: fmtCurrency(cash), color: C.gold },
+  { icon: 'bi-bookmark-check-fill', label: 'Reservas hoje', value: s.reservations.toLocaleString('pt-BR'), color: '#f472b6' },
 ]
 
 const PAY_METHODS = ['pix', 'cartao', 'dinheiro', 'cortesia', 'credito', 'debito']
@@ -404,18 +404,20 @@ export function DashboardPage({ house, user }: Props) {
       )}
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
         {kpis.map((kpi, i) => (
-          <div key={i} className="rounded-2xl bg-card border border-brd p-3" style={{ borderTop: `2px solid ${kpi.color}` }}>
-            <span className="text-lg leading-none">{kpi.icon}</span>
-            <div className="text-txt text-[22px] font-black leading-none mt-2 tabular-nums">{kpi.value}</div>
-            <div className="text-mut text-[11px] mt-1 truncate">{kpi.label}</div>
+          <div key={i} className="rounded-2xl bg-card border border-brd p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl mb-3" style={{ background: kpi.color + '1f' }}>
+              <i className={'bi ' + kpi.icon} style={{ color: kpi.color, fontSize: 18 }} aria-hidden="true" />
+            </div>
+            <div className="text-txt text-[20px] font-bold leading-none tabular-nums">{kpi.value}</div>
+            <div className="text-mut text-xs mt-1.5 truncate">{kpi.label}</div>
           </div>
         ))}
       </div>
 
       {/* ── Caixa do dia + Resultado da noite ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         {/* Caixa do dia */}
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💵 Caixa do dia</div>
@@ -461,7 +463,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Charts: 30 dias + Curva por hora ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>📈 Check-ins — 30 dias</div>
           <canvas ref={chartRef} style={{ width: '100%', height: 80 }} />
@@ -496,7 +498,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Pendências + Aniversariantes ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         {/* Pendências */}
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>⚠️ Pendências do evento</div>
@@ -544,7 +546,7 @@ export function DashboardPage({ house, user }: Props) {
       </div>
 
       {/* ── Bottom: pagamento + reservas + recentes + check-in rápido ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         {/* Payment breakdown (today) */}
         <div className="rounded-2xl bg-card border border-brd p-4">
           <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 16 }}>💳 Formas de pagamento (hoje)</div>
