@@ -567,7 +567,7 @@ export function ClientsPage({ house, user }: Props) {
       </Modal>
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+      <div className="r-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, marginBottom: 4 }}>👥 Clientes</h1>
           <p style={{ color: C.mut, fontSize: 14 }}>{total.toLocaleString('pt-BR')} clientes cadastrados</p>

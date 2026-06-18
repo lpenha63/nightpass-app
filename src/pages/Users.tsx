@@ -180,7 +180,7 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
       <Toast toast={toast} />
 
       {/* ─── Header ─── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+      <div className="r-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, margin: 0 }}>Usuários do Sistema</h1>
           <p style={{ color: C.mut, fontSize: 14, marginTop: 4 }}>{users.length} colaborador{users.length !== 1 ? 'es' : ''} com acesso</p>

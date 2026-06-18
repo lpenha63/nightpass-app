@@ -3138,7 +3138,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
         })()}
       </Modal>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+      <div className="r-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <h1 style={{ color: C.txt, fontSize: 28, fontWeight: 900, margin: 0, letterSpacing: '-0.02em' }}>🎉 Eventos</h1>
         <Btn onClick={openNew} icon="➕">Novo Evento</Btn>
       </div>

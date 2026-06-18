@@ -133,6 +133,8 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
   .r-prod-panel { display: none !important; }
   /* Tabelas/linhas com colunas fixas: rolam horizontalmente em vez de estourar a tela */
   .r-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+  /* Cabeçalho de página (título + ações) empilha no celular em vez de sobrepor */
+  .r-head { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
 }
 
 /* Offline banner */

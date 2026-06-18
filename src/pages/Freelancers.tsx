@@ -368,7 +368,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       </Modal>
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
+      <div className="r-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ color: C.txt, fontSize: 28, fontWeight: 900, margin: 0, letterSpacing: '-0.02em' }}>👷 Equipe</h1>
           <div style={{ color: C.mut, fontSize: 13, marginTop: 4 }}>{freelancers.filter(f => f.status === 'ativo').length} ativos · {areas.length} áreas</div>

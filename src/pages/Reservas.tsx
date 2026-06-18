@@ -1040,7 +1040,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
       {/* ── Header ── */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
+        <div className="r-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, marginBottom: 4 }}>🪑 Reservas</h1>
             <p style={{ color: C.mut, fontSize: 14 }}>
