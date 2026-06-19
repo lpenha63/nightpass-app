@@ -5,6 +5,7 @@ import { Card, Toast, Btn, Modal, FAB } from '../components/ui'
 import { ftel, fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
 import { sendWADirect } from '../utils/whatsapp'
+import { parseGuestsXlsx } from '../utils/importGuests'
 import type { House } from '../types'
 
 interface Props {
@@ -83,6 +84,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   const [guestList, setGuestList] = useState<ReservationGuest[]>([])
   const [guestLoading, setGuestLoading] = useState(false)
   const [newGuest, setNewGuest] = useState({ name: '', phone: '', birth_date: '' })
+  const [importingRes, setImportingRes] = useState(false)
   const [savingGuest, setSavingGuest] = useState(false)
 
   // ── Espaços da casa ──
@@ -495,6 +497,25 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
     setGuestList(p => [...p, data as ReservationGuest])
     setNewGuest({ name: '', phone: '', birth_date: '' })
+  }
+
+  // Importa convidados de uma planilha (.xlsx/.xls/.csv) para a reserva aberta
+  async function importReservaXlsx(file: File) {
+    if (!guestPanel) return
+    setImportingRes(true)
+    try {
+      const parsed = await parseGuestsXlsx(file)
+      if (!parsed.length) { sT(setToast, 'Nenhum convidado encontrado na planilha.', 'warn'); return }
+      const rows = parsed.map(g => ({ reservation_id: guestPanel.id, house_id: house.id, name: g.name, phone: g.phone, birth_date: g.birth_date, confirmed: true }))
+      for (let i = 0; i < rows.length; i += 200) await supabase.from('reservation_guests').insert(rows.slice(i, i + 200))
+      const { data } = await supabase.from('reservation_guests').select('*').eq('reservation_id', guestPanel.id).order('name')
+      setGuestList((data ?? []) as ReservationGuest[])
+      sT(setToast, `✅ ${parsed.length} convidado(s) importado(s)!`, 'success')
+    } catch (e) {
+      sT(setToast, 'Erro ao importar: ' + ((e as Error)?.message ?? 'planilha inválida'), 'error')
+    } finally {
+      setImportingRes(false)
+    }
   }
 
   async function removeGuest(id: string) {
@@ -1543,17 +1564,26 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={addGuest}
-                  disabled={savingGuest || !newGuest.name.trim()}
-                  style={{
-                    background: newGuest.name.trim() ? 'linear-gradient(135deg,#7c3aed,#a78bfa)' : C.brd,
-                    color: '#fff', border: 'none', borderRadius: 10, padding: '10px', fontSize: 13,
-                    fontWeight: 700, cursor: newGuest.name.trim() ? 'pointer' : 'not-allowed',
-                    fontFamily: 'inherit', opacity: savingGuest ? 0.6 : 1,
-                  }}>
-                  {savingGuest ? 'Salvando...' : '➕ Adicionar à lista'}
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={addGuest}
+                    disabled={savingGuest || !newGuest.name.trim()}
+                    style={{
+                      flex: 1,
+                      background: newGuest.name.trim() ? 'linear-gradient(135deg,#7c3aed,#a78bfa)' : C.brd,
+                      color: '#fff', border: 'none', borderRadius: 10, padding: '10px', fontSize: 13,
+                      fontWeight: 700, cursor: newGuest.name.trim() ? 'pointer' : 'not-allowed',
+                      fontFamily: 'inherit', opacity: savingGuest ? 0.6 : 1,
+                    }}>
+                    {savingGuest ? 'Salvando...' : '➕ Adicionar à lista'}
+                  </button>
+                  <label title="Importar planilha .xlsx/.xls/.csv (colunas: nome, telefone, nascimento)"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#22c55e14', border: '1px solid #22c55e44', borderRadius: 10, padding: '0 14px', color: '#22c55e', fontSize: 13, fontWeight: 700, cursor: importingRes ? 'default' : 'pointer', fontFamily: 'inherit', opacity: importingRes ? 0.6 : 1 }}>
+                    {importingRes ? '...' : '📥 XLS'}
+                    <input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" disabled={importingRes} style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; e.currentTarget.value = ''; if (f) importReservaXlsx(f) }} />
+                  </label>
+                </div>
               </div>
               {guestPanel.token && (
                 <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>

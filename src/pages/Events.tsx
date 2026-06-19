@@ -4,6 +4,7 @@ import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, FAB, Pill } from '../components/ui'
 import { fd, fmtCurrency } from '../utils/format'
 import { fmtWAPhone, sendWADirect } from '../utils/whatsapp'
+import { parseGuestsXlsx } from '../utils/importGuests'
 import { sT, _err, type ToastState } from '../utils/toast'
 import type { House, Event, ArtistEntry, PromotionEntry, PromoterPriceMode, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
@@ -131,6 +132,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [selReserva, setSelReserva] = useState<string | null>(null)
   const [reservaGuests, setReservaGuests] = useState<Record<string, RGuestRow[]>>({})
   const [reservaGuestForm, setReservaGuestForm] = useState({ name: '', phone: '' })
+  const [importingList, setImportingList] = useState(false)
   // Resumo de TODAS as listas geradas para o evento (casa, promoters, aniversário, reservas)
   interface ListSummaryRow { key: string; kind: 'list' | 'birthday' | 'res'; listId?: string; token?: string; promoterId?: string; isHouse?: boolean; icon: string; label: string; count: number; people?: number; entryFee?: number; consumacao?: number; minEntries?: number }
   const [listSummary, setListSummary] = useState<ListSummaryRow[]>([])
@@ -1057,6 +1059,31 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     if (error) { st2('Erro ao adicionar: ' + error.message, 'error'); return }
     setReservaGuests(prev => ({ ...prev, [resId]: [...(prev[resId] ?? []), data as RGuestRow] }))
     setReservaGuestForm({ name: '', phone: '' })
+  }
+
+  // Importa convidados de uma planilha (.xlsx/.xls/.csv) para a lista atual (Casa/Promoter/Reserva)
+  async function importListXlsx(file: File, opts: { reservaId?: string; listId?: string; promoterId?: string }) {
+    if (!guestEv) return
+    setImportingList(true)
+    try {
+      const parsed = await parseGuestsXlsx(file)
+      if (!parsed.length) { st2('Nenhum convidado encontrado na planilha.', 'warn'); return }
+      if (opts.reservaId) {
+        const rows = parsed.map(g => ({ reservation_id: opts.reservaId, house_id: house.id, name: g.name, phone: g.phone, birth_date: g.birth_date, confirmed: true }))
+        for (let i = 0; i < rows.length; i += 200) await supabase.from('reservation_guests').insert(rows.slice(i, i + 200))
+        const { data } = await supabase.from('reservation_guests').select('id,name,phone,checked_in,confirmed').eq('reservation_id', opts.reservaId).order('name')
+        setReservaGuests(prev => ({ ...prev, [opts.reservaId!]: (data ?? []) as RGuestRow[] }))
+      } else if (opts.listId && opts.promoterId) {
+        const rows = parsed.map(g => ({ list_id: opts.listId, house_id: house.id, event_id: guestEv.id, promoter_id: opts.promoterId, full_name: g.name, phone: g.phone, gender: g.gender, birth_date: g.birth_date, list_type: 'promoter', is_vip: false, promoter_confirmed: true, confirmed_at: new Date().toISOString() }))
+        for (let i = 0; i < rows.length; i += 200) await supabase.from('promoter_list_guests').insert(rows.slice(i, i + 200))
+        reloadGuests(guestEv.id)
+      } else { st2('Selecione a lista de destino antes de importar.', 'warn'); return }
+      st2(`✅ ${parsed.length} convidado(s) importado(s)!`, 'success')
+    } catch (e) {
+      st2('Erro ao importar: ' + ((e as Error)?.message ?? 'planilha inválida'), 'error')
+    } finally {
+      setImportingList(false)
+    }
   }
   async function sendReservaWA(res: RReserva) {
     if (!res.phone) { st2('Reserva sem telefone cadastrado', 'warn'); return }
@@ -2602,6 +2629,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   onChange={e => isReservas ? setReservaGuestForm(p => ({ ...p, phone: e.target.value })) : setGuestAddForm(p => ({ ...p, phone: e.target.value }))}
                   style={{ flex: '1 1 120px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
                 <Btn onClick={onAdd} disabled={(isReservas ? !reservaGuestForm.name.trim() : !guestAddForm.name.trim()) || guestAdding} small>{guestAdding ? '...' : 'Adicionar'}</Btn>
+                <label title="Importar planilha .xlsx/.xls/.csv (colunas: nome, telefone, gênero, nascimento)"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#22c55e14', border: '1px solid #22c55e44', borderRadius: 8, padding: '0 12px', color: '#22c55e', fontSize: 12, fontWeight: 700, cursor: importingList ? 'default' : 'pointer', fontFamily: 'inherit', opacity: importingList ? 0.6 : 1 }}>
+                  {importingList ? '...' : '📥 XLS'}
+                  <input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" disabled={importingList} style={{ display: 'none' }}
+                    onChange={e => { const f = e.target.files?.[0]; e.currentTarget.value = ''; if (f) importListXlsx(f, isReservas ? { reservaId: activeRes?.id } : { listId: activeListId, promoterId: activeListRow?.promoterId }) }} />
+                </label>
               </div>
 
               {/* 5) CORPO: linhas de pessoas — só os dados mudam */}
