@@ -1014,6 +1014,17 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     st2(next[type] ? '🔴 Lista suspensa — novos cadastros bloqueados.' : '🟢 Lista reaberta.', next[type] ? 'warn' : 'success')
   }
 
+  // Suspende/reabre as TRÊS listas de uma vez (gatilho de lotação)
+  async function setAllLocks(value: boolean) {
+    if (!guestEv) return
+    const next = { casa: value, promoters: value, reservas: value }
+    setGuestEv(p => (p ? { ...p, list_locks: next } : p))
+    setEvents(prev => prev.map(e => e.id === guestEv.id ? { ...e, list_locks: next } : e))
+    const { error } = await supabase.from('events').update({ list_locks: next }).eq('id', guestEv.id)
+    if (error) { st2('Erro ao atualizar: ' + error.message, 'error'); return }
+    st2(value ? '🔴 Todas as listas suspensas (lotação).' : '🟢 Todas as listas reabertas.', value ? 'warn' : 'success')
+  }
+
   // ── Reservas dentro do modal de listas ──
   function loadListReservas(ev: EventWithCounts) {
     supabase.from('reservations')
@@ -2279,6 +2290,42 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       {/* Guest list modal — large, two-tab layout */}
       <Modal open={!!guestEv} title={`👥 Listas — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListSummary([]) }}>
 
+
+        {/* Lotação do evento: ocupação prevista (confirmados + pessoas em reservas) vs capacidade */}
+        {guestEv && (guestEv.capacity ?? 0) > 0 && (() => {
+          const confirmados = guests.filter(g => g.confirmed_at).length
+          const reservasPeople = listReservas.reduce((sum, r) => sum + (r.people_count ?? 0), 0)
+          const ocup = confirmados + reservasPeople
+          const cap = guestEv.capacity ?? 0
+          const pct = Math.round((ocup / cap) * 100)
+          const barPct = Math.min(100, pct)
+          const color = pct >= 100 ? C.red : pct >= 90 ? C.gold : C.grn
+          const lk = guestEv.list_locks ?? {}
+          const allLocked = !!(lk.casa && lk.promoters && lk.reservas)
+          return (
+            <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${pct >= 90 ? color + '55' : C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.05em' }}>🎟️ LOTAÇÃO</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color }}>{ocup} / {cap} · {pct}%</span>
+              </div>
+              <div style={{ height: 7, background: C.brd, borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${barPct}%`, background: color, borderRadius: 4, transition: 'width .3s' }} />
+              </div>
+              {pct >= 90 && !allLocked && (
+                <button onClick={() => setAllLocks(true)}
+                  style={{ width: '100%', marginTop: 10, background: color + '14', border: `1px solid ${color}55`, borderRadius: 8, padding: '7px 12px', color, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {pct >= 100 ? '🔴 Lotação atingida — suspender todas as listas' : '⚠️ Perto da lotação — suspender todas as listas'}
+                </button>
+              )}
+              {allLocked && (
+                <button onClick={() => setAllLocks(false)}
+                  style={{ width: '100%', marginTop: 10, background: '#10b98114', border: '1px solid #10b98155', borderRadius: 8, padding: '7px 12px', color: C.grn, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  🟢 Reabrir todas as listas
+                </button>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Mini-dashboard das listas: seletor de visão (corpo mostra só a selecionada) */}
         {(() => {
