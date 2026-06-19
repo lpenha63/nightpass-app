@@ -125,14 +125,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [listaView, setListaView] = useState<'casa' | 'promoters' | 'reservas'>('casa')
   const [selPromoter, setSelPromoter] = useState<string | null>(null) // promoter_list id selecionado
   // Reservas dentro do modal de listas (interação completa)
-  interface RReserva { id: string; name: string; phone?: string; location?: string; people_count?: number; status: string; expected_arrival?: string; observations?: string }
+  interface RReserva { id: string; name: string; phone?: string; location?: string; people_count?: number; status: string; expected_arrival?: string; observations?: string; amount_cents?: number; list_type?: string; list_male_value_cents?: number; list_female_value_cents?: number; list_custom_value_cents?: number }
   interface RGuestRow { id: string; name: string; phone?: string; checked_in?: boolean; confirmed?: boolean }
   const [listReservas, setListReservas] = useState<RReserva[]>([])
   const [selReserva, setSelReserva] = useState<string | null>(null)
   const [reservaGuests, setReservaGuests] = useState<Record<string, RGuestRow[]>>({})
   const [reservaGuestForm, setReservaGuestForm] = useState({ name: '', phone: '' })
   // Resumo de TODAS as listas geradas para o evento (casa, promoters, aniversário, reservas)
-  interface ListSummaryRow { key: string; kind: 'list' | 'birthday' | 'res'; listId?: string; token?: string; promoterId?: string; isHouse?: boolean; icon: string; label: string; count: number; people?: number }
+  interface ListSummaryRow { key: string; kind: 'list' | 'birthday' | 'res'; listId?: string; token?: string; promoterId?: string; isHouse?: boolean; icon: string; label: string; count: number; people?: number; entryFee?: number; consumacao?: number; minEntries?: number }
   const [listSummary, setListSummary] = useState<ListSummaryRow[]>([])
   const [remindBusy, setRemindBusy] = useState<string | null>(null)
 
@@ -930,12 +930,12 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setListSummary([])
     try {
       const [plists, blists, rsv] = await Promise.all([
-        supabase.from('promoter_lists').select('id,name,token,promoter_id,promoters(full_name)').eq('event_id', ev.id),
+        supabase.from('promoter_lists').select('id,name,token,promoter_id,entry_fee_cents,consumacao_cents,min_entries,promoters(full_name)').eq('event_id', ev.id),
         supabase.from('birthday_lists').select('id,birthday_person_name').eq('event_id', ev.id).neq('status', 'cancelled'),
         supabase.from('reservations').select('id,people_count,status').eq('event_id', ev.id).neq('status', 'cancelled'),
       ])
       const rows: ListSummaryRow[] = []
-      for (const l of (plists.data ?? []) as Array<{ id: string; name: string; token?: string; promoter_id?: string; promoters?: { full_name?: string } | null }>) {
+      for (const l of (plists.data ?? []) as Array<{ id: string; name: string; token?: string; promoter_id?: string; entry_fee_cents?: number; consumacao_cents?: number; min_entries?: number; promoters?: { full_name?: string } | null }>) {
         const promoName = l.promoters?.full_name ?? l.name
         const isHouse = promoName === 'Lista da Casa'
         rows.push({
@@ -943,6 +943,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           icon: isHouse ? '🏠' : '📣',
           label: isHouse ? 'Lista da Casa' : `${promoName}${l.name && l.name !== promoName ? ' · ' + l.name : ''}`,
           count: 0,
+          entryFee: l.entry_fee_cents ?? 0, consumacao: l.consumacao_cents ?? 0, minEntries: l.min_entries ?? 0,
         })
       }
       for (const b of (blists.data ?? []) as Array<{ id: string; birthday_person_name: string }>) {
@@ -1005,7 +1006,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   // ── Reservas dentro do modal de listas ──
   function loadListReservas(ev: EventWithCounts) {
     supabase.from('reservations')
-      .select('id,name,phone,location,people_count,status,expected_arrival,observations')
+      .select('id,name,phone,location,people_count,status,expected_arrival,observations,amount_cents,list_type,list_male_value_cents,list_female_value_cents,list_custom_value_cents')
       .eq('house_id', house.id).eq('event_id', ev.id).neq('status', 'cancelled')
       .order('expected_arrival')
       .then(r => setListReservas((r.data ?? []) as RReserva[]))
@@ -1106,27 +1107,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       </div>
     )
   }
-  // Placar (enviados/confirmados/entraram) reutilizado nos cabeçalhos de lista
-  function listScore(s: { enviados: number; confirmados: number; entraram: number }) {
-    return (
-      <div style={{ display: 'flex', gap: 10, fontSize: 11, fontWeight: 700 }}>
-        <span style={{ color: '#25d366' }} title="Convites enviados">📨 {s.enviados}</span>
-        <span style={{ color: C.grn }} title="Confirmados">✅ {s.confirmados}</span>
-        <span style={{ color: C.acc }} title="Entraram (check-in)">🎟️ {s.entraram}</span>
-      </div>
-    )
-  }
-
-  async function addGuestManually() {
+  async function addGuestManually(targetListId?: string, targetPromoterId?: string) {
     if (!guestAddForm.name.trim() || !guestEv) return
     setGuestAdding(true)
-    // Garante que a lista da casa exista (corrige caso o registro ainda não tenha carregado)
-    let listId = guestListId, promoId = guestListPromoId
+    // Lista alvo: a passada (Casa ou promoter selecionado) ou, na falta, garante a lista da casa
+    let listId = targetListId ?? guestListId, promoId = targetPromoterId ?? guestListPromoId
     if (!listId || !promoId) {
       const rec = await ensureHouseListRecord(guestEv)
       if (rec) { listId = rec.listId; promoId = rec.promoterId; setGuestListId(rec.listId); setGuestListPromoId(rec.promoterId); setGuestListToken(rec.token) }
     }
-    if (!listId || !promoId) { setGuestAdding(false); st2('Erro: lista da casa não pôde ser criada', 'error'); return }
+    if (!listId || !promoId) { setGuestAdding(false); st2('Erro: lista não pôde ser criada', 'error'); return }
     const { error } = await supabase.from('promoter_list_guests').insert({
       list_id: listId,
       house_id: house.id,
@@ -1155,16 +1145,16 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     reloadGuests(guestEv.id)
   }
 
-  function doExport() {
-    // Exporta apenas quem efetivou check-in (entrou de fato)
-    const checkedIn = guests.filter(g => g.checked_in)
+  // Exporta apenas quem efetivou check-in (entrou de fato) na visão atual
+  function doExport(people: Array<{ name: string; gender?: string; birth_date?: string; is_vip?: boolean; checked_in?: boolean }>, suffix: string) {
+    const checkedIn = people.filter(g => g.checked_in)
     if (checkedIn.length === 0) { st2('Nenhum check-in efetuado ainda para exportar.', 'warn'); return }
     const rows = [['Nome', 'Gênero', 'Nascimento', 'VIP']]
-    checkedIn.forEach(g => rows.push([g.full_name, g.gender ?? '', g.birth_date ?? '', g.is_vip ? 'Sim' : '']))
+    checkedIn.forEach(g => rows.push([g.name, g.gender ?? '', g.birth_date ?? '', g.is_vip ? 'Sim' : '']))
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = (guestEv?.name ?? 'guests') + '-checkin.csv'
+    const a = document.createElement('a'); a.href = url; a.download = `${guestEv?.name ?? 'lista'}-${suffix}-checkin.csv`
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }
@@ -2342,7 +2332,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           )
         })()}
 
-        {/* ── CORPO ÚNICO: a moldura não muda, só os dados da lista selecionada ── */}
+        {/* ── MOLDURA FIXA: dropdown → condições → placar → adicionar → corpo → CSV. Só os dados mudam. ── */}
         {(() => {
           const promoterLists = listSummary.filter(r => r.kind === 'list' && !r.isHouse)
           const isReservas = listaView === 'reservas'
@@ -2350,116 +2340,118 @@ export function EventsPage({ house, onGoToReservas }: Props) {
           const promoSel = selPromoter ?? promoterLists[0]?.listId ?? null
           const activeListRow = listaView === 'casa' ? houseRow : promoterLists.find(r => r.listId === promoSel)
           const activeListId = listaView === 'casa' ? (guestListId ?? undefined) : (promoSel ?? undefined)
-          const s = !isReservas ? listStats(activeListId) : null
+          const s = listStats(activeListId)
           const resSel = selReserva ?? listReservas[0]?.id ?? null
           const activeRes = listReservas.find(r => r.id === resSel)
           const rgs = resSel ? (reservaGuests[resSel] ?? []) : []
-          const selStyle = { width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 12, boxSizing: 'border-box' as const }
+          const ctrl = { width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit', marginBottom: 12, boxSizing: 'border-box' as const }
+
+          // Condições da lista selecionada (valor ♂/♀, consumação, VIP/cortesia)
+          const cond: Array<[string, string]> = (() => {
+            const ent = (c?: number) => fmtCurrency(c ?? 0)
+            if (isReservas) {
+              if (!activeRes) return []
+              const m = activeRes.list_male_value_cents ?? 0, f = activeRes.list_female_value_cents ?? 0, c = activeRes.list_custom_value_cents ?? 0, a = activeRes.amount_cents ?? 0
+              if (m > 0 || f > 0) return [['♂ Masc', ent(m)], ['♀ Fem', ent(f)]]
+              if (c > 0) return [['Lista', ent(c)]]
+              if (a > 0) return [['Reserva', ent(a)]]
+              return [['⭐ VIP / Cortesia', '—']]
+            }
+            if (listaView === 'casa') {
+              const m = guestEv?.price_male_list_cents ?? 0, f = guestEv?.price_female_list_cents ?? 0
+              return (m > 0 || f > 0) ? [['♂ Masc', ent(m)], ['♀ Fem', ent(f)]] : [['⭐ Cortesia', 'sem valor']]
+            }
+            if (activeListRow) {
+              const out: Array<[string, string]> = []
+              if ((activeListRow.entryFee ?? 0) > 0) out.push(['Entrada', ent(activeListRow.entryFee)])
+              if ((activeListRow.consumacao ?? 0) > 0) out.push(['Consumação', ent(activeListRow.consumacao)])
+              if ((activeListRow.minEntries ?? 0) > 0) out.push(['Mín. nomes', String(activeListRow.minEntries)])
+              return out.length ? out : [['⭐ Cortesia', 'sem valor']]
+            }
+            return []
+          })()
+
+          // Placar (3 números) — mesma forma em todas as visões
+          const score: Array<[string, number]> = isReservas
+            ? [['pessoas', activeRes?.people_count ?? 0], ['na lista', rgs.length], ['entraram', rgs.filter(g => g.checked_in).length]]
+            : [['enviados', s.enviados], ['confirmados', s.confirmados], ['entraram', s.entraram]]
+
+          function onAdd() {
+            if (isReservas) { if (activeRes) addReservaGuest(activeRes.id) }
+            else addGuestManually(activeListId, activeListRow?.promoterId)
+          }
+
           return (
             <>
-              {/* Sub-seleção compacta (Promoters / Reservas) */}
-              {listaView === 'promoters' && (promoterLists.length === 0
-                ? <div style={{ color: C.mut, textAlign: 'center', padding: '24px 0' }}>Nenhum promoter com lista neste evento.</div>
-                : <select value={promoSel ?? ''} onChange={e => setSelPromoter(e.target.value)} style={selStyle}>
-                    {promoterLists.map(r => <option key={r.key} value={r.listId}>{r.label} — {listStats(r.listId).confirmados} confirmados</option>)}
-                  </select>
+              {/* 1) Dropdown — sempre no mesmo lugar */}
+              <select
+                value={listaView === 'casa' ? (guestListId ?? '') : isReservas ? (resSel ?? '') : (promoSel ?? '')}
+                onChange={e => { if (listaView === 'promoters') setSelPromoter(e.target.value); else if (isReservas) selectReserva(e.target.value) }}
+                disabled={listaView === 'casa'}
+                style={ctrl}
+              >
+                {listaView === 'casa' && <option value={guestListId ?? ''}>🏠 Lista da Casa</option>}
+                {listaView === 'promoters' && (promoterLists.length === 0
+                  ? <option value="">Nenhum promoter com lista</option>
+                  : promoterLists.map(r => <option key={r.key} value={r.listId}>{r.label} — {listStats(r.listId).confirmados} conf.</option>))}
+                {isReservas && (listReservas.length === 0
+                  ? <option value="">Nenhuma reserva</option>
+                  : listReservas.map(r => <option key={r.id} value={r.id}>{r.location ? `${r.location} · ` : ''}{r.name}{r.people_count ? ` (${r.people_count}p)` : ''}</option>))}
+              </select>
+
+              {/* 2) Condições da lista — logo abaixo do dropdown */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                {cond.map(([label, val], i) => (
+                  <div key={i} style={{ flex: '1 1 110px', background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '8px 12px' }}>
+                    <div style={{ fontSize: 10, color: C.mut, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: C.txt }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 3) Placar — 3 números, sempre a mesma forma */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                {score.map(([label, val], i) => (
+                  <div key={i} style={{ flex: 1, background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: i === 1 ? C.grn : i === 2 ? C.acc : C.txt }}>{val}</div>
+                    <div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Ação contextual (mesmo lugar): lembrete (Casa/Promoter) ou msg ao responsável (Reservas) */}
+              {!isReservas && s.pendentes > 0 && activeListRow && (
+                <button disabled={remindBusy === activeListRow.listId} onClick={() => remindPending(activeListRow)}
+                  style={{ width: '100%', marginBottom: 12, background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                  {remindBusy === activeListRow.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
+                </button>
               )}
-              {isReservas && (listReservas.length === 0
-                ? <div style={{ color: C.mut, textAlign: 'center', padding: '24px 0' }}>Nenhuma reserva neste evento.</div>
-                : <select value={resSel ?? ''} onChange={e => selectReserva(e.target.value)} style={selStyle}>
-                    {listReservas.map(r => <option key={r.id} value={r.id}>{r.location ? `${r.location} · ` : ''}{r.name}{r.people_count ? ` (${r.people_count}p)` : ''}</option>)}
-                  </select>
+              {isReservas && activeRes && activeRes.phone && (
+                <button onClick={() => sendReservaWA(activeRes)}
+                  style={{ width: '100%', marginBottom: 12, background: '#25d36614', border: '1px solid #25d36640', borderRadius: 8, padding: '7px 12px', color: '#25d366', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <i className="bi bi-whatsapp" /> Mensagem ao responsável
+                </button>
               )}
 
-              {/* Placar — mesma posição em todas as visões */}
-              {!isReservas && activeListRow && s && (
-                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 18 }}>{listaView === 'casa' ? '🏠' : '📣'}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeListRow.label}</div>
-                      <div style={{ marginTop: 3 }}>{listScore(s)}</div>
-                    </div>
-                  </div>
-                  {s.pendentes > 0 && (
-                    <button disabled={remindBusy === activeListRow.listId} onClick={() => remindPending(activeListRow)}
-                      style={{ width: '100%', marginTop: 10, background: '#f59e0b14', border: '1px solid #f59e0b40', borderRadius: 8, padding: '7px 12px', color: '#f59e0b', fontSize: 12, fontWeight: 700, cursor: remindBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-                      {remindBusy === activeListRow.listId ? 'Enviando lembretes…' : `⏰ Lembrar ${s.pendentes} pendente(s) sem confirmação`}
-                    </button>
-                  )}
-                </div>
-              )}
-              {isReservas && activeRes && (
-                <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 18 }}>🪑</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>{activeRes.location ? `${activeRes.location} · ` : ''}{activeRes.name}</div>
-                      <div style={{ display: 'flex', gap: 10, marginTop: 3, fontSize: 11, fontWeight: 700 }}>
-                        {activeRes.people_count ? <span style={{ color: C.acc }}>👥 {activeRes.people_count}p</span> : null}
-                        <span style={{ color: C.grn }}>✓ {rgs.filter(g => g.checked_in).length} entraram</span>
-                        <span style={{ color: C.mut }}>📝 {rgs.length} na lista</span>
-                      </div>
-                    </div>
-                    {activeRes.phone && (
-                      <button onClick={() => sendReservaWA(activeRes)} title="Mandar mensagem ao responsável"
-                        style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '6px 10px', color: '#25d366', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>
-                        <i className="bi bi-whatsapp" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
+              {/* 4) Adicionar pessoa — Nome · Telefone · + (igual em todas as visões) */}
+              <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+                <input placeholder="Nome" value={isReservas ? reservaGuestForm.name : guestAddForm.name}
+                  onChange={e => isReservas ? setReservaGuestForm(p => ({ ...p, name: e.target.value })) : setGuestAddForm(p => ({ ...p, name: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && onAdd()}
+                  style={{ flex: '2 1 150px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                <input placeholder="Telefone" value={isReservas ? reservaGuestForm.phone : guestAddForm.phone}
+                  onChange={e => isReservas ? setReservaGuestForm(p => ({ ...p, phone: e.target.value })) : setGuestAddForm(p => ({ ...p, phone: e.target.value }))}
+                  style={{ flex: '1 1 120px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+                <Btn onClick={onAdd} disabled={(isReservas ? !reservaGuestForm.name.trim() : !guestAddForm.name.trim()) || guestAdding} small>{guestAdding ? '...' : 'Adicionar'}</Btn>
+              </div>
 
-              {/* Valor da lista (só Casa) */}
-              {listaView === 'casa' && guestEv && ((guestEv.price_male_list_cents ?? 0) > 0 || (guestEv.price_female_list_cents ?? 0) > 0) && (
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 130, background: '#3b82f610', border: '1px solid #3b82f633', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 16 }}>♂</span>
-                    <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA MASC</div><div style={{ fontSize: 15, fontWeight: 800, color: '#60a5fa' }}>{fmtCurrency(guestEv.price_male_list_cents ?? 0)}</div></div>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 130, background: '#ec489910', border: '1px solid #ec489933', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 16 }}>♀</span>
-                    <div><div style={{ fontSize: 10, color: C.mut, fontWeight: 600 }}>LISTA FEM</div><div style={{ fontSize: 15, fontWeight: 800, color: '#f472b6' }}>{fmtCurrency(guestEv.price_female_list_cents ?? 0)}</div></div>
-                  </div>
-                </div>
-              )}
-
-              {/* Adicionar pessoa — Casa adiciona na lista da casa; Reservas na reserva selecionada */}
-              {listaView === 'casa' && (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-                  <input placeholder="Nome *" value={guestAddForm.name} onChange={e => setGuestAddForm(p => ({ ...p, name: e.target.value }))}
-                    onKeyDown={e => e.key === 'Enter' && addGuestManually()}
-                    style={{ flex: '2 1 160px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-                  <input placeholder="Telefone" value={guestAddForm.phone} onChange={e => setGuestAddForm(p => ({ ...p, phone: e.target.value }))}
-                    style={{ flex: '1 1 120px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-                  <select value={guestAddForm.gender} onChange={e => setGuestAddForm(p => ({ ...p, gender: e.target.value }))}
-                    style={{ flex: '0 0 100px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
-                    <option value="">Gênero</option>
-                    <option value="M">♂ Masc</option>
-                    <option value="F">♀ Fem</option>
-                  </select>
-                  <Btn onClick={addGuestManually} disabled={!guestAddForm.name.trim() || guestAdding} small>{guestAdding ? '...' : 'Adicionar'}</Btn>
-                </div>
-              )}
-              {isReservas && activeRes && (
-                <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-                  <input placeholder="Nome do convidado" value={reservaGuestForm.name} onChange={e => setReservaGuestForm(p => ({ ...p, name: e.target.value }))}
-                    onKeyDown={e => e.key === 'Enter' && addReservaGuest(activeRes.id)}
-                    style={{ flex: '2 1 140px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-                  <input placeholder="Telefone" value={reservaGuestForm.phone} onChange={e => setReservaGuestForm(p => ({ ...p, phone: e.target.value }))}
-                    style={{ flex: '1 1 120px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-                  <Btn onClick={() => addReservaGuest(activeRes.id)} disabled={!reservaGuestForm.name.trim()} small>Adicionar</Btn>
-                </div>
-              )}
-
-              {/* CORPO: linhas de pessoas — só os dados mudam entre as visões */}
+              {/* 5) CORPO: linhas de pessoas — só os dados mudam */}
               {!isReservas
-                ? (!s || s.confirmedGuests.length === 0
-                    ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum confirmado ainda{s && s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
+                ? (s.confirmedGuests.length === 0
+                    ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum confirmado ainda{s.enviados > 0 ? ` · ${s.enviados} convite(s) enviado(s)` : ''}</div>
                     : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{s.confirmedGuests.map(g => renderGuestRow(g, true))}</div>
                   )
-                : (!activeRes ? null
+                : (!activeRes ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Selecione uma reserva</div>
                     : rgs.length === 0
                       ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '16px 0' }}>Nenhum convidado nesta reserva ainda</div>
                       : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2480,12 +2472,15 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   )
               }
 
-              {/* CSV (só Casa) */}
-              {listaView === 'casa' && (
-                <div style={{ display: 'flex', marginTop: 10 }}>
-                  <Btn onClick={doExport} small variant="secondary" style={{ marginLeft: 'auto' }}>📥 CSV (check-in)</Btn>
-                </div>
-              )}
+              {/* 6) CSV — exporta os check-in da visão atual */}
+              <div style={{ display: 'flex', marginTop: 10 }}>
+                <Btn small variant="secondary" style={{ marginLeft: 'auto' }}
+                  onClick={() => isReservas
+                    ? doExport(rgs.map(g => ({ name: g.name, checked_in: g.checked_in })), 'reserva')
+                    : doExport(s.confirmedGuests.map(g => ({ name: g.full_name, gender: g.gender, birth_date: g.birth_date, is_vip: g.is_vip, checked_in: g.checked_in })), listaView)}>
+                  📥 CSV (check-in)
+                </Btn>
+              </div>
             </>
           )
         })()}
