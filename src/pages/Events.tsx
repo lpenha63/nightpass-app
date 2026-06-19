@@ -2287,19 +2287,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       {/* Guest list modal — large, two-tab layout */}
       <Modal open={!!guestEv} title={`👥 Listas — ${guestEv?.name ?? ''}`} maxWidth={960} onClose={() => { setGuestEv(null); setGuests([]); setGuestListToken(null); setGuestListId(null); setGuestListPromoId(null); setListSummary([]) }}>
 
-        {/* Link compartilhável (Lista da Casa) — só na visão Casa */}
-        {guestListToken && listaView === 'casa' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#10b98111', border: '1px solid #10b98133', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
-            <i className="bi bi-link-45deg" style={{ color: '#10b981', fontSize: 18, flexShrink: 0 }} />
-            <span style={{ color: '#10b981', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {`${window.location.origin}/lista/${guestListToken}`}
-            </span>
-            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista/${guestListToken}`); st2('Link copiado!', 'success') }}
-              style={{ background: '#10b98133', border: '1px solid #10b98166', borderRadius: 7, padding: '5px 14px', color: '#10b981', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-              Copiar Link
-            </button>
-          </div>
-        )}
 
         {/* Mini-dashboard das listas: seletor de visão (corpo mostra só a selecionada) */}
         {(() => {
@@ -2383,21 +2370,30 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
           return (
             <>
-              {/* 1) Dropdown — sempre no mesmo lugar */}
-              <select
-                value={listaView === 'casa' ? (guestListId ?? '') : isReservas ? (resSel ?? '') : (promoSel ?? '')}
-                onChange={e => { if (listaView === 'promoters') setSelPromoter(e.target.value); else if (isReservas) selectReserva(e.target.value) }}
-                disabled={listaView === 'casa'}
-                style={ctrl}
-              >
-                {listaView === 'casa' && <option value={guestListId ?? ''}>🏠 Lista da Casa</option>}
-                {listaView === 'promoters' && (promoterLists.length === 0
-                  ? <option value="">Nenhum promoter com lista</option>
-                  : promoterLists.map(r => <option key={r.key} value={r.listId}>{r.label} — {listStats(r.listId).confirmados} conf.</option>))}
-                {isReservas && (listReservas.length === 0
-                  ? <option value="">Nenhuma reserva</option>
-                  : listReservas.map(r => <option key={r.id} value={r.id}>{r.location ? `${r.location} · ` : ''}{r.name}{r.people_count ? ` (${r.people_count}p)` : ''}</option>))}
-              </select>
+              {/* 1) Dropdown — sempre no mesmo lugar (+ link público discreto na Casa) */}
+              <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                <select
+                  value={listaView === 'casa' ? (guestListId ?? '') : isReservas ? (resSel ?? '') : (promoSel ?? '')}
+                  onChange={e => { if (listaView === 'promoters') setSelPromoter(e.target.value); else if (isReservas) selectReserva(e.target.value) }}
+                  disabled={listaView === 'casa'}
+                  style={{ ...ctrl, marginBottom: 0, flex: 1, minWidth: 0 }}
+                >
+                  {listaView === 'casa' && <option value={guestListId ?? ''}>🏠 Lista da Casa</option>}
+                  {listaView === 'promoters' && (promoterLists.length === 0
+                    ? <option value="">Nenhum promoter com lista</option>
+                    : promoterLists.map(r => <option key={r.key} value={r.listId}>{r.label} — {listStats(r.listId).confirmados} conf.</option>))}
+                  {isReservas && (listReservas.length === 0
+                    ? <option value="">Nenhuma reserva</option>
+                    : listReservas.map(r => <option key={r.id} value={r.id}>{r.location ? `${r.location} · ` : ''}{r.name}{r.people_count ? ` (${r.people_count}p)` : ''}</option>))}
+                </select>
+                {listaView === 'casa' && guestListToken && (
+                  <button title="Copiar link público de auto-cadastro da Lista da Casa"
+                    onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista/${guestListToken}`); st2('Link público copiado!', 'success') }}
+                    style={{ flexShrink: 0, background: '#10b98114', border: '1px solid #10b98140', borderRadius: 10, padding: '0 12px', color: '#10b981', fontSize: 16, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    <i className="bi bi-link-45deg" />
+                  </button>
+                )}
+              </div>
 
               {/* 2) Condições da lista — logo abaixo do dropdown */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
