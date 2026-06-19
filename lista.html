@@ -114,6 +114,11 @@ function render(){
   }
   if(!data){app.innerHTML='<div class="loading">Carregando...</div>';return;}
 
+  if(mode==='reservation'&&event&&event.list_locks&&event.list_locks.reservas){
+    app.innerHTML='<div class="closed"><h2>🔒 Reservas encerradas</h2><p>A lista deste evento atingiu a lotação e não está aceitando novos nomes no momento.</p></div>';
+    return;
+  }
+
   var isBday=mode==='birthday';
   var evName=event?event.name:'';
   var dateStr=isBday?data.birthday_date:data.reservation_date;
@@ -276,6 +281,7 @@ window.addGuest=function(){
   var bdate=(document.getElementById('gBdate').value||'').trim();
   if(!name){showToast('Digite o nome do convidado','error');return;}
   if(name.length>100){showToast('Nome muito longo','error');return;}
+  if(mode==='reservation'&&event&&event.list_locks&&event.list_locks.reservas){showToast('Reservas encerradas (lotação atingida)','error');return;}
   _lastAdd=now;_addCount++;
 
   var table=mode==='birthday'?'birthday_guests':'reservation_guests';
@@ -327,7 +333,7 @@ function init(){
     SB.from('reservations').select('*').eq('token',token).single().then(function(r){
       if(r.error||!r.data){app.innerHTML='<div class="closed"><h2>Reserva não encontrada</h2><p>Este link pode ter expirado ou ser inválido.</p></div>';return;}
       data=r.data;
-      if(data.event_id){SB.from('events').select('name').eq('id',data.event_id).single().then(function(er){event=er.data||null;loadGuests();subscribeRealtime();});}
+      if(data.event_id){SB.from('events').select('name,list_locks').eq('id',data.event_id).single().then(function(er){event=er.data||null;loadGuests();subscribeRealtime();});}
       else{loadGuests();subscribeRealtime();}
     });
   }

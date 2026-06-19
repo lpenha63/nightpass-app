@@ -80,6 +80,7 @@ export interface Event {
   consumption_cents?: number
   production_cost_cents?: number
   staffing_needs?: Record<string, number>
+  list_locks?: { casa?: boolean; promoters?: boolean; reservas?: boolean }
   status: string
   created_at: string
 }

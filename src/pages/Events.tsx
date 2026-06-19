@@ -137,7 +137,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const [remindBusy, setRemindBusy] = useState<string | null>(null)
 
   // House list link in event form
-  const [houseListToken, setHouseListToken] = useState<string | null>(null)
 
   // Freelancers
   const [allFreelancers, setAllFreelancers] = useState<Freelancer[]>([])
@@ -1003,6 +1002,18 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     st2(`Lembrete enviado para ${ok}/${pend.length} pendente(s).`, ok > 0 ? 'success' : 'warn')
   }
 
+  // Suspende/reabre o cadastro público de um tipo de lista (Casa / Promoters / Reservas)
+  async function toggleListLock(type: 'casa' | 'promoters' | 'reservas') {
+    if (!guestEv) return
+    const cur = guestEv.list_locks ?? {}
+    const next = { ...cur, [type]: !cur[type] }
+    setGuestEv(p => (p ? { ...p, list_locks: next } : p))
+    setEvents(prev => prev.map(e => e.id === guestEv.id ? { ...e, list_locks: next } : e))
+    const { error } = await supabase.from('events').update({ list_locks: next }).eq('id', guestEv.id)
+    if (error) { st2('Erro ao atualizar: ' + error.message, 'error'); return }
+    st2(next[type] ? '🔴 Lista suspensa — novos cadastros bloqueados.' : '🟢 Lista reaberta.', next[type] ? 'warn' : 'success')
+  }
+
   // ── Reservas dentro do modal de listas ──
   function loadListReservas(ev: EventWithCounts) {
     supabase.from('reservations')
@@ -1163,7 +1174,6 @@ export function EventsPage({ house, onGoToReservas }: Props) {
 
   function openEdit(ev: EventWithCounts) {
     setEditing(ev.id)
-    setHouseListToken(null)
     // Carrega o MESMO painel de Produção (tarefas, reservas, equipe e checklist) inline no cadastro
     openProd(ev)
     setForm({
@@ -1189,7 +1199,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       setPromos([])
     }
     if (ev.house_list_enabled) {
-      ensureHouseListRecord(ev).then(rec => { if (rec) setHouseListToken(rec.token) })
+      ensureHouseListRecord(ev)
     }
     // Load artists: from new column or migrate from old single fields
     const saved = ev.artists ?? []
@@ -2088,12 +2098,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       setF('house_list_enabled', next)
                       if (next && editing) {
                         const ev = events.find(e => e.id === editing)
-                        if (ev) {
-                          const rec = await ensureHouseListRecord({ ...ev, house_list_enabled: true })
-                          if (rec) setHouseListToken(rec.token)
-                        }
-                      } else if (!next) {
-                        setHouseListToken(null)
+                        if (ev) await ensureHouseListRecord({ ...ev, house_list_enabled: true })
                       }
                     }}
                     style={{
@@ -2111,20 +2116,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                 </div>
               )
             })()}
-            {/* Link da lista (visível ao editar com toggle ON) */}
-            {editing && !!form.house_list_enabled && houseListToken && (
-              <div style={{ background: '#10b98111', border: '1px solid #10b98133', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <i className="bi bi-link-45deg" style={{ color: '#10b981', fontSize: 16, flexShrink: 0 }} />
-                <span style={{ color: '#10b981', fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {`${window.location.origin}/lista/${houseListToken}`}
-                </span>
-                <button
-                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista/${houseListToken}`); st2('Link copiado!', 'success') }}
-                  style={{ background: '#10b98133', border: '1px solid #10b98166', borderRadius: 6, padding: '3px 10px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-                  Copiar
-                </button>
-              </div>
-            )}
+            {/* O link público da Lista da Casa agora fica na aba 👥 Lista (visão Casa), não aqui */}
             {/* Liberar evento para Promoter */}
             {(() => {
               const pe = !!form.promoter_enabled
@@ -2394,6 +2386,24 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                   </button>
                 )}
               </div>
+
+              {/* 1b) Suspender / reabrir cadastro público deste tipo de lista */}
+              {(() => {
+                const locked = !!(guestEv?.list_locks?.[listaView])
+                const scopeLabel = listaView === 'casa' ? 'Lista da Casa' : listaView === 'promoters' ? 'Listas de promoters' : 'Reservas'
+                return (
+                  <button onClick={() => toggleListLock(listaView)}
+                    title={locked ? 'Cadastro público bloqueado — toque para reabrir' : 'Cadastro público aberto — toque para suspender (lotação)'}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, background: locked ? '#f8717112' : '#10b98112', border: `1px solid ${locked ? '#f8717140' : '#10b98140'}`, borderRadius: 10, padding: '8px 12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                    <span style={{ display: 'inline-flex', width: 34, height: 18, borderRadius: 10, background: locked ? C.brd : C.grn, position: 'relative', flexShrink: 0, transition: 'background 0.15s' }}>
+                      <span style={{ position: 'absolute', top: 2, left: locked ? 2 : 18, width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px #0004' }} />
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: locked ? C.red : C.grn, textAlign: 'left' }}>
+                      {locked ? `🔴 ${scopeLabel} suspensa — toque para reabrir` : `🟢 ${scopeLabel} aberta — toque para suspender`}
+                    </span>
+                  </button>
+                )
+              })()}
 
               {/* 2) Condições da lista — logo abaixo do dropdown */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
