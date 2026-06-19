@@ -69,6 +69,7 @@ export interface Event {
   promotions?: string
   promotions_list?: PromotionEntry[]
   promoter_enabled?: boolean
+  promoter_invites?: string[]
   promoter_price_mode?: PromoterPriceMode
   promoter_price_cents?: number
   flyer_url?: string

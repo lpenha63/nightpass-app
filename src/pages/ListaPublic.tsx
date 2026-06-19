@@ -24,6 +24,7 @@ interface PromoterList {
     list_locks?: { casa?: boolean; promoters?: boolean; reservas?: boolean }
     house_list_enabled?: boolean
     promoter_enabled?: boolean
+    promoter_invites?: string[]
   }
   houses?: { name: string; logo_url?: string }
 }
@@ -77,7 +78,7 @@ export function ListaPublicPage({ token }: { token: string }) {
     // Não carregamos a lista de convidados existente: o cliente não deve ver
     // a contagem nem os nomes de quem já confirmou.
     supabase.from('promoter_lists')
-      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists,promotions,promotions_list,list_locks,house_list_enabled,promoter_enabled),houses(name,logo_url)')
+      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists,promotions,promotions_list,list_locks,house_list_enabled,promoter_enabled,promoter_invites),houses(name,logo_url)')
       .eq('token', token).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
@@ -90,7 +91,8 @@ export function ListaPublicPage({ token }: { token: string }) {
   // Aberta só se HABILITADA no evento E NÃO suspensa.
   const isHouseList = lista?.promoters?.full_name === 'Lista da Casa'
   const evL = lista?.events
-  const enabled = isHouseList ? (evL?.house_list_enabled !== false) : (evL?.promoter_enabled === true)
+  const promoterAllowed = evL?.promoter_enabled === true || (Array.isArray(evL?.promoter_invites) && !!lista?.promoter_id && evL!.promoter_invites!.includes(lista.promoter_id))
+  const enabled = isHouseList ? (evL?.house_list_enabled !== false) : promoterAllowed
   const suspended = !!(isHouseList ? evL?.list_locks?.casa : evL?.list_locks?.promoters)
   const listLocked = !enabled || suspended
 

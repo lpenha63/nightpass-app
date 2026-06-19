@@ -90,7 +90,7 @@ const DEF = {
   name: '', event_date: '', genre: 'Sertanejo', start_time: '22:00', end_time: '04:00',
   price_male_cents: 0, price_female_cents: 0, price_male_list_cents: 0, price_female_list_cents: 0,
   promotions: '', repeat_rule: 'none', capacity: '', birthday_list_enabled: false, house_list_enabled: false,
-  promoter_enabled: false, promoter_price_mode: 'list', promoter_price_cents: 0,
+  promoter_enabled: false, promoter_invites: [] as string[], promoter_price_mode: 'list', promoter_price_cents: 0,
   attractions: '', flyer_url: '', observations: '',
   artist_fee_cents: 0, artist_fee_type: 'fixed', artist_fee_percent: 0,
   consumption_cents: 0, production_cost_cents: 0, status: 'ativo',
@@ -144,6 +144,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
   const wlabel = (key: string) => { const m = areaMeta(workAreas, key); return `${m.icon} ${m.label}` }
   const [evFreelancers, setEvFreelancers] = useState<EventFreelancer[]>([])
   const [frModal, setFrModal] = useState<EventWithCounts | null>(null)
+  // Promoters da casa (para convidar específicos a um evento)
+  const [housePromoters, setHousePromoters] = useState<Array<{ id: string; full_name: string; phone?: string }>>([])
+  const [invitingPromoter, setInvitingPromoter] = useState<string | null>(null)
 
   // ── Montagem: envia todas as reservas do dia a um montador ──
   const [montagemEv, setMontagemEv] = useState<EventWithCounts | null>(null)
@@ -676,6 +679,9 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       .then(r => setAllFreelancers((r.data ?? []) as Freelancer[]))
     supabase.from('work_areas').select('*').eq('house_id', house.id).order('sort_order').order('label')
       .then(r => { if (r.data && r.data.length) setWorkAreas(r.data as WorkArea[]) })
+    // Promoters reais da casa (exclui o pseudo-promoter "Lista da Casa")
+    supabase.from('promoters').select('id,full_name,phone').eq('house_id', house.id).neq('full_name', 'Lista da Casa').order('full_name')
+      .then(r => setHousePromoters((r.data ?? []) as Array<{ id: string; full_name: string; phone?: string }>))
   }, [house.id])
 
   function loadEvFreelancers(ev: EventWithCounts) {
@@ -1347,6 +1353,46 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     st2(`Flyer enviado para ${ok}/${sel.length} contato(s).`, ok > 0 ? 'success' : 'error')
   }
 
+  // Convida/desconvida um promoter específico para o evento (no formulário)
+  function togglePromoterInvite(id: string) {
+    setForm(f => {
+      const cur = Array.isArray((f as Record<string, unknown>).promoter_invites) ? ((f as Record<string, unknown>).promoter_invites as string[]) : []
+      const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]
+      return { ...f, promoter_invites: next }
+    })
+  }
+
+  // Envia o link do portal do promoter (garante que ele está convidado e persistido)
+  async function sendPromoterEventLink(pr: { id: string; full_name: string; phone?: string }) {
+    if (!editing) { st2('Salve o evento antes de enviar o link.', 'warn'); return }
+    if (!pr.phone) { st2('Promoter sem telefone cadastrado', 'warn'); return }
+    setInvitingPromoter(pr.id)
+    // Garante convite salvo no evento
+    const cur = Array.isArray(form.promoter_invites) ? (form.promoter_invites as string[]) : []
+    if (!cur.includes(pr.id)) {
+      const next = [...cur, pr.id]
+      setF('promoter_invites', next)
+      await supabase.from('events').update({ promoter_invites: next }).eq('id', editing)
+    }
+    // Garante token do portal
+    let token: string | null = null
+    const { data: ex } = await supabase.from('promoter_tokens').select('token').eq('promoter_id', pr.id).eq('house_id', house.id).eq('active', true).limit(1).maybeSingle()
+    token = ex?.token ?? null
+    if (!token) {
+      const t = crypto.randomUUID()
+      const { error } = await supabase.from('promoter_tokens').insert({ promoter_id: pr.id, house_id: house.id, token: t, active: true })
+      if (error) { setInvitingPromoter(null); st2('Erro ao gerar portal: ' + error.message, 'error'); return }
+      token = t
+    }
+    const link = `${window.location.origin}/p/${token}`
+    const evName = String(form.name || 'nosso evento')
+    const dateStr = form.event_date ? new Date(String(form.event_date) + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }) : ''
+    const msg = `Olá ${pr.full_name.split(' ')[0]}! 🎭\n\nVocê foi convidado(a) para montar lista no evento *${evName}*${dateStr ? ` — ${dateStr}` : ''}.\n\nAcesse seu portal:\n${link}\n\n_Link pessoal — guarde com você._`
+    const r = await sendWADirect(house.id, pr.phone, msg, { eventId: editing, type: 'promoter_portal' })
+    setInvitingPromoter(null)
+    st2(r.viaApi ? '✅ Link enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
+  }
+
   // Cada promoção vira automaticamente um item na Produção (área 🎉 Promoções). Dedupe por título.
   async function syncPromoTasks(eventId: string, promoList: PromotionEntry[]) {
     const valid = promoList.filter(p => p.label.trim())
@@ -1380,6 +1426,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       artists: artists.map(a => ({ ...a, fee_cents: Math.round((a.fee_cents ?? 0) * 100), consumption_cents: Math.round((a.consumption_cents ?? 0) * 100) })),
       production_cost_cents: Math.round((parseFloat(String(form.production_cost_cents)) || 0) * 100),
       promoter_enabled: !!form.promoter_enabled,
+      promoter_invites: Array.isArray(form.promoter_invites) ? (form.promoter_invites as string[]) : [],
       promoter_price_mode: String(form.promoter_price_mode ?? 'list'),
       promoter_price_cents: Math.round((parseFloat(String(form.promoter_price_cents)) || 0) * 100),
       promotions_list: promos.filter(p => p.label.trim() || p.value_cents > 0).map(p => ({ label: p.label.trim(), value_cents: Math.round((p.value_cents ?? 0) * 100) })),
@@ -2156,12 +2203,13 @@ export function EventsPage({ house, onGoToReservas }: Props) {
             {(() => {
               const pe = !!form.promoter_enabled
               const mode = String(form.promoter_price_mode ?? 'list') as PromoterPriceMode
+              const invites = Array.isArray(form.promoter_invites) ? (form.promoter_invites as string[]) : []
               return (
-                <div style={{ padding: '10px 12px', borderRadius: 8, background: pe ? '#a78bfa11' : 'rgba(255,255,255,0.03)', border: `1px solid ${pe ? '#a78bfa44' : C.brd}` }}>
+                <div style={{ padding: '10px 12px', borderRadius: 8, background: (pe || invites.length > 0) ? '#a78bfa11' : 'rgba(255,255,255,0.03)', border: `1px solid ${(pe || invites.length > 0) ? '#a78bfa44' : C.brd}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>📣 Liberar para Promoter</div>
-                      <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Permite que promoters montem listas para este evento</div>
+                      <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Liga para TODOS os promoters; ou convide específicos abaixo</div>
                     </div>
                     <button
                       type="button"
@@ -2171,7 +2219,7 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       <span style={{ position: 'absolute', top: 3, left: pe ? 26 : 4, width: 22, height: 22, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', display: 'block' }} />
                     </button>
                   </div>
-                  {pe && (
+                  {(pe || invites.length > 0) && (
                     <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: mode === 'other' ? '1fr 130px' : '1fr', gap: 8 }}>
                       <div>
                         <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor da entrada do promoter</label>
@@ -2189,6 +2237,40 @@ export function EventsPage({ house, onGoToReservas }: Props) {
                       )}
                     </div>
                   )}
+                  {/* Promoters específicos (funciona mesmo com o toggle desligado) */}
+                  <div style={{ marginTop: 12, borderTop: `1px solid ${C.brd}`, paddingTop: 10 }}>
+                    <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 6, letterSpacing: '0.05em' }}>
+                      👤 PROMOTERS ESPECÍFICOS{invites.length > 0 ? ` (${invites.length})` : ''}
+                    </div>
+                    {housePromoters.length === 0
+                      ? <div style={{ fontSize: 11, color: C.mut }}>Nenhum promoter cadastrado na casa.</div>
+                      : <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 200, overflowY: 'auto' }}>
+                          {housePromoters.map(pr => {
+                            const on = invites.includes(pr.id)
+                            return (
+                              <div key={pr.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: on ? '#a78bfa14' : C.bg, border: `1px solid ${on ? '#a78bfa44' : C.brd}`, borderRadius: 8, padding: '6px 10px' }}>
+                                <button type="button" onClick={() => togglePromoterInvite(pr.id)}
+                                  style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${on ? '#a78bfa' : C.brd}`, background: on ? '#a78bfa' : 'transparent', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }}>
+                                  {on ? '✓' : ''}
+                                </button>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pr.full_name}</div>
+                                  {!pr.phone && <div style={{ fontSize: 10, color: C.mut }}>sem telefone</div>}
+                                </div>
+                                {on && pr.phone && (
+                                  <button type="button" onClick={() => sendPromoterEventLink(pr)} disabled={invitingPromoter === pr.id || !editing}
+                                    title={editing ? 'Enviar link do portal por WhatsApp' : 'Salve o evento para enviar'}
+                                    style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 7, padding: '4px 9px', color: '#25d366', fontSize: 11, fontWeight: 700, cursor: editing ? 'pointer' : 'not-allowed', opacity: editing ? 1 : 0.5, fontFamily: 'inherit', flexShrink: 0 }}>
+                                    {invitingPromoter === pr.id ? '...' : '📲 Link'}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                    }
+                    <div style={{ fontSize: 10, color: C.mut, marginTop: 6 }}>Convidados veem o evento no portal mesmo com "liberar para todos" desligado.{!editing && ' Salve para poder enviar o link.'}</div>
+                  </div>
                 </div>
               )
             })()}

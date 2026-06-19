@@ -94,17 +94,17 @@ export function PromoterPortal({ token }: { token: string }) {
   async function loadLists(pId: string, hId: string) {
     const { data } = await supabase
       .from('promoter_lists')
-      .select('id, name, token, event_id, house_id, promoter_id, events(promoter_enabled)')
+      .select('id, name, token, event_id, house_id, promoter_id, events(promoter_enabled,promoter_invites)')
       .eq('promoter_id', pId)
       .eq('house_id', hId)
 
     if (!data) { setLists([]); return }
 
-    // Não mostra listas de eventos que não estão (ou deixaram de estar) liberados para promoter
-    type Joined = PromoterListItem & { events?: { promoter_enabled?: boolean } | Array<{ promoter_enabled?: boolean }> | null }
+    // Mostra listas de eventos liberados a todos OU que convidaram este promoter
+    type Joined = PromoterListItem & { events?: { promoter_enabled?: boolean; promoter_invites?: string[] } | Array<{ promoter_enabled?: boolean; promoter_invites?: string[] }> | null }
     const liberadas = (data as unknown as Joined[]).filter(l => {
       const e = Array.isArray(l.events) ? l.events[0] : l.events
-      return e?.promoter_enabled === true
+      return e?.promoter_enabled === true || (Array.isArray(e?.promoter_invites) && e!.promoter_invites!.includes(pId))
     })
 
     const withCounts = await Promise.all(
@@ -157,18 +157,19 @@ export function PromoterPortal({ token }: { token: string }) {
         .single()
       if (hData) setHouse(hData)
 
-      // 4. Load upcoming events LIBERADOS para promoter (promoter_enabled = true)
+      // 4. Eventos futuros liberados a TODOS (promoter_enabled) OU que convidaram este promoter
       const today = new Date().toISOString().slice(0, 10)
       const { data: evData } = await supabase
         .from('events')
-        .select('id, name, event_date, start_time, flyer_url, status, genre')
+        .select('id, name, event_date, start_time, flyer_url, status, genre, promoter_enabled, promoter_invites')
         .eq('house_id', hId)
-        .eq('promoter_enabled', true)
         .neq('status', 'cancelado')
         .gte('event_date', today)
         .order('event_date', { ascending: true })
 
-      setEvents((evData ?? []) as EventItem[])
+      const visibleEvents = (evData ?? []).filter((e: { promoter_enabled?: boolean; promoter_invites?: string[] }) =>
+        e.promoter_enabled === true || (Array.isArray(e.promoter_invites) && e.promoter_invites.includes(pId)))
+      setEvents(visibleEvents as EventItem[])
 
       // 5. Load existing promoter lists
       await loadLists(pId, hId)
