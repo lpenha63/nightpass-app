@@ -499,18 +499,27 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     setNewGuest({ name: '', phone: '', birth_date: '' })
   }
 
-  // Importa convidados de uma planilha (.xlsx/.xls/.csv) para a reserva aberta
+  // Importa convidados de uma planilha (.xlsx/.xls/.csv) para a reserva aberta.
+  // Sempre ignora duplicados (no arquivo e contra quem já está na reserva).
   async function importReservaXlsx(file: File) {
     if (!guestPanel) return
     setImportingRes(true)
     try {
       const parsed = await parseGuestsXlsx(file)
       if (!parsed.length) { sT(setToast, 'Nenhum convidado encontrado na planilha.', 'warn'); return }
-      const rows = parsed.map(g => ({ reservation_id: guestPanel.id, house_id: house.id, name: g.name, phone: g.phone, birth_date: g.birth_date, confirmed: true }))
+      const dedupKey = (name: string, phone: string | null) => {
+        const ph = (phone ?? '').replace(/\D/g, '')
+        return ph.length >= 8 ? 'p:' + ph : 'n:' + (name ?? '').trim().toLowerCase()
+      }
+      const { data: ex } = await supabase.from('reservation_guests').select('name,phone').eq('reservation_id', guestPanel.id)
+      const seen = new Set((ex ?? []).map((g: { name?: string; phone?: string }) => dedupKey(g.name ?? '', g.phone ?? null)))
+      const uniq = parsed.filter(g => { const k = dedupKey(g.name, g.phone); if (seen.has(k)) return false; seen.add(k); return true })
+      const rows = uniq.map(g => ({ reservation_id: guestPanel.id, house_id: house.id, name: g.name, phone: g.phone, birth_date: g.birth_date, confirmed: true }))
       for (let i = 0; i < rows.length; i += 200) await supabase.from('reservation_guests').insert(rows.slice(i, i + 200))
       const { data } = await supabase.from('reservation_guests').select('*').eq('reservation_id', guestPanel.id).order('name')
       setGuestList((data ?? []) as ReservationGuest[])
-      sT(setToast, `✅ ${parsed.length} convidado(s) importado(s)!`, 'success')
+      const dup = parsed.length - uniq.length
+      sT(setToast, `✅ ${uniq.length} importado(s)${dup ? ` · ${dup} duplicado(s) ignorado(s)` : ''}`, 'success')
     } catch (e) {
       sT(setToast, 'Erro ao importar: ' + ((e as Error)?.message ?? 'planilha inválida'), 'error')
     } finally {

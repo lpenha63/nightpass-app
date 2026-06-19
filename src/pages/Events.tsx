@@ -1061,7 +1061,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     setReservaGuestForm({ name: '', phone: '' })
   }
 
-  // Importa convidados de uma planilha (.xlsx/.xls/.csv) para a lista atual (Casa/Promoter/Reserva)
+  // Chave de deduplicação: telefone (se houver) ou nome normalizado
+  function dedupKey(name: string, phone: string | null): string {
+    const ph = (phone ?? '').replace(/\D/g, '')
+    return ph.length >= 8 ? 'p:' + ph : 'n:' + (name ?? '').trim().toLowerCase()
+  }
+
+  // Importa convidados de uma planilha (.xlsx/.xls/.csv) para a lista atual (Casa/Promoter/Reserva).
+  // Sempre ignora duplicados (no arquivo e contra quem já está na lista).
   async function importListXlsx(file: File, opts: { reservaId?: string; listId?: string; promoterId?: string }) {
     if (!guestEv) return
     setImportingList(true)
@@ -1069,16 +1076,25 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       const parsed = await parseGuestsXlsx(file)
       if (!parsed.length) { st2('Nenhum convidado encontrado na planilha.', 'warn'); return }
       if (opts.reservaId) {
-        const rows = parsed.map(g => ({ reservation_id: opts.reservaId, house_id: house.id, name: g.name, phone: g.phone, birth_date: g.birth_date, confirmed: true }))
+        const { data: ex } = await supabase.from('reservation_guests').select('name,phone').eq('reservation_id', opts.reservaId)
+        const seen = new Set((ex ?? []).map(g => dedupKey(g.name ?? '', g.phone ?? null)))
+        const uniq = parsed.filter(g => { const k = dedupKey(g.name, g.phone); if (seen.has(k)) return false; seen.add(k); return true })
+        const rows = uniq.map(g => ({ reservation_id: opts.reservaId, house_id: house.id, name: g.name, phone: g.phone, birth_date: g.birth_date, confirmed: true }))
         for (let i = 0; i < rows.length; i += 200) await supabase.from('reservation_guests').insert(rows.slice(i, i + 200))
         const { data } = await supabase.from('reservation_guests').select('id,name,phone,checked_in,confirmed').eq('reservation_id', opts.reservaId).order('name')
         setReservaGuests(prev => ({ ...prev, [opts.reservaId!]: (data ?? []) as RGuestRow[] }))
+        const dup = parsed.length - uniq.length
+        st2(`✅ ${uniq.length} importado(s)${dup ? ` · ${dup} duplicado(s) ignorado(s)` : ''}`, 'success')
       } else if (opts.listId && opts.promoterId) {
-        const rows = parsed.map(g => ({ list_id: opts.listId, house_id: house.id, event_id: guestEv.id, promoter_id: opts.promoterId, full_name: g.name, phone: g.phone, gender: g.gender, birth_date: g.birth_date, list_type: 'promoter', is_vip: false, promoter_confirmed: true, confirmed_at: new Date().toISOString() }))
+        const { data: ex } = await supabase.from('promoter_list_guests').select('full_name,phone').eq('list_id', opts.listId)
+        const seen = new Set((ex ?? []).map(g => dedupKey((g as { full_name?: string }).full_name ?? '', (g as { phone?: string }).phone ?? null)))
+        const uniq = parsed.filter(g => { const k = dedupKey(g.name, g.phone); if (seen.has(k)) return false; seen.add(k); return true })
+        const rows = uniq.map(g => ({ list_id: opts.listId, house_id: house.id, event_id: guestEv.id, promoter_id: opts.promoterId, full_name: g.name, phone: g.phone, gender: g.gender, birth_date: g.birth_date, list_type: 'promoter', is_vip: false, promoter_confirmed: true, confirmed_at: new Date().toISOString() }))
         for (let i = 0; i < rows.length; i += 200) await supabase.from('promoter_list_guests').insert(rows.slice(i, i + 200))
         reloadGuests(guestEv.id)
+        const dup = parsed.length - uniq.length
+        st2(`✅ ${uniq.length} importado(s)${dup ? ` · ${dup} duplicado(s) ignorado(s)` : ''}`, 'success')
       } else { st2('Selecione a lista de destino antes de importar.', 'warn'); return }
-      st2(`✅ ${parsed.length} convidado(s) importado(s)!`, 'success')
     } catch (e) {
       st2('Erro ao importar: ' + ((e as Error)?.message ?? 'planilha inválida'), 'error')
     } finally {
