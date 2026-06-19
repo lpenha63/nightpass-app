@@ -1347,6 +1347,25 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     st2(`Flyer enviado para ${ok}/${sel.length} contato(s).`, ok > 0 ? 'success' : 'error')
   }
 
+  // Cada promoção vira automaticamente um item na Produção (área 🎉 Promoções). Dedupe por título.
+  async function syncPromoTasks(eventId: string, promoList: PromotionEntry[]) {
+    const valid = promoList.filter(p => p.label.trim())
+    if (!valid.length) return
+    const { data: existing } = await supabase.from('event_tasks').select('id,title').eq('event_id', eventId).eq('area', 'Promoções')
+    const have = new Set((existing ?? []).map(t => String((t as { title?: string }).title ?? '').trim().toLowerCase()))
+    let sort = (existing ?? []).length
+    const toAdd = valid.filter(p => !have.has(p.label.trim().toLowerCase()))
+    if (!toAdd.length) return
+    const rows = toAdd.map(p => ({
+      event_id: eventId, house_id: house.id,
+      area: 'Promoções', area_icon: '🎉',
+      title: p.label.trim(),
+      estimated_cost_cents: (p.value_cents ?? 0) > 0 ? Math.round((p.value_cents ?? 0) * 100) : null,
+      sort_order: sort++, status: 'pending',
+    }))
+    await supabase.from('event_tasks').insert(rows)
+  }
+
   function save() {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { checkinCount, resCount, resPeople, listGuests, tasksTotal, tasksDone, id, created_at, artist_fee_cents, artist_fee_type, artist_fee_percent, consumption_cents: _cc, ...formRest } = form as Record<string, unknown>
@@ -1369,9 +1388,11 @@ export function EventsPage({ house, onGoToReservas }: Props) {
       updated_at: new Date().toISOString(),
     }
     if (editing) {
-      supabase.from('events').update(d).eq('id', editing).then(r => {
-        if (r.error) st2('Erro: ' + r.error.message, 'error')
-        else { st2('Atualizado!'); setModal(false); load() }
+      const eid = editing
+      supabase.from('events').update(d).eq('id', eid).then(async r => {
+        if (r.error) { st2('Erro: ' + r.error.message, 'error'); return }
+        await syncPromoTasks(eid, promos)
+        st2('Atualizado!'); setModal(false); load()
       })
       return
     }
@@ -1379,11 +1400,14 @@ export function EventsPage({ house, onGoToReservas }: Props) {
     const rule = String(form.repeat_rule ?? 'none')
     const extras = repeatDates(String(form.event_date ?? ''), rule).filter(dt => !eventDates.has(dt))
     const rows = [d, ...extras.map(dt => ({ ...d, event_date: dt, repeat_rule: 'none' }))]
-    supabase.from('events').insert(rows).select().then(r => {
+    supabase.from('events').insert(rows).select().then(async r => {
       if (r.error) { st2('Erro: ' + r.error.message, 'error'); return }
       st2(extras.length > 0 ? `Criado! +${extras.length} eventos repetidos` : 'Criado!')
       load()
-      const created = (r.data ?? [])[0] as EventWithCounts | undefined
+      const createdRows = (r.data ?? []) as EventWithCounts[]
+      // Cria os itens de Produção das promoções para cada evento criado (inclui repetições)
+      for (const ev of createdRows) await syncPromoTasks(ev.id, promos)
+      const created = createdRows[0]
       if (created) {
         // Mantém o cadastro aberto em modo edição e já ativa a Produção do evento criado
         setEditing(created.id)
