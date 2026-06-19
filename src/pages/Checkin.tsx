@@ -173,6 +173,9 @@ export function CheckinPage({ house, user }: Props) {
   const [pendingCI, setPendingCI] = useState<{ type: 'reserva' | 'promo'; guest: ReservationGuest | PromoterGuest; reservation?: Reservation } | null>(null)
   const [listComanda, setListComanda] = useState('')
   const [listAmount, setListAmount] = useState('')
+  // Recebimento do valor pendente da reserva (cai no caixa)
+  const [payRes, setPayRes] = useState<Reservation | null>(null)
+  const [payForm, setPayForm] = useState({ amount: '', method: 'dinheiro' })
 
   useEffect(() => {
     if (!house) return
@@ -318,6 +321,22 @@ export function CheckinPage({ house, user }: Props) {
   async function confirmReservation(id: string) {
     await supabase.from('reservations').update({ status: 'arrived', arrived_at: new Date().toISOString() }).eq('id', id)
     sT(setToast, '✅ Reserva confirmada!', 'success')
+    loadLists()
+  }
+
+  // Registra o recebimento do valor pendente da reserva (atualiza sinal/status + forma de pgto → caixa)
+  async function receberReserva() {
+    if (!payRes) return
+    const total = payRes.amount_cents ?? 0
+    const already = payRes.deposit_cents ?? 0
+    const received = Math.round((parseFloat(payForm.amount.replace(',', '.')) || 0) * 100)
+    if (received <= 0) { sT(setToast, 'Informe o valor recebido', 'warn'); return }
+    const newDeposit = Math.min(total, already + received)
+    const status = newDeposit >= total ? 'paid' : 'partial'
+    const { error } = await supabase.from('reservations').update({ deposit_cents: newDeposit, payment_status: status, payment_method: payForm.method }).eq('id', payRes.id)
+    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    sT(setToast, status === 'paid' ? '✅ Reserva quitada — entrou no caixa!' : '✅ Pagamento parcial registrado', 'success')
+    setPayRes(null)
     loadLists()
   }
 
@@ -1029,9 +1048,11 @@ export function CheckinPage({ house, user }: Props) {
                                   const open = (res.payment_status === 'unpaid' || res.payment_status === 'partial') && remaining > 0
                                   if (!open) return null
                                   return (
-                                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, background: '#f8717118', border: '1px solid #f8717155', borderRadius: 8, padding: '6px 10px' }}>
+                                    <div onClick={() => { setPayRes(res); setPayForm({ amount: (remaining / 100).toFixed(2), method: 'dinheiro' }) }}
+                                      title="Registrar recebimento" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, background: '#f8717118', border: '1px solid #f8717155', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}>
                                       <span style={{ color: C.red, fontSize: 13, fontWeight: 800 }}>⚠️ A receber: {fmtCurrency(remaining)}</span>
                                       {(res.deposit_cents ?? 0) > 0 && <span style={{ color: C.mut, fontSize: 11 }}>sinal {fmtCurrency(res.deposit_cents ?? 0)} pago</span>}
+                                      <span style={{ marginLeft: 'auto', color: C.grn, fontSize: 12, fontWeight: 800 }}>💵 Receber ›</span>
                                     </div>
                                   )
                                 })()}
@@ -1270,9 +1291,11 @@ export function CheckinPage({ house, user }: Props) {
                                           const open = (r.payment_status === 'unpaid' || r.payment_status === 'partial') && remaining > 0
                                           if (!open) return null
                                           return (
-                                            <div style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f8717118', border: '1px solid #f8717155', borderRadius: 8, padding: '4px 10px' }}>
+                                            <div onClick={() => { setPayRes(r); setPayForm({ amount: (remaining / 100).toFixed(2), method: 'dinheiro' }) }}
+                                              title="Registrar recebimento" style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f8717118', border: '1px solid #f8717155', borderRadius: 8, padding: '4px 10px', cursor: 'pointer' }}>
                                               <span style={{ color: C.red, fontSize: 12, fontWeight: 800 }}>⚠️ A receber: {fmtCurrency(remaining)}</span>
                                               {(r.deposit_cents ?? 0) > 0 && <span style={{ color: C.mut, fontSize: 11 }}>(sinal {fmtCurrency(r.deposit_cents ?? 0)} pago)</span>}
+                                              <span style={{ color: C.grn, fontSize: 11, fontWeight: 800 }}>💵 Receber ›</span>
                                             </div>
                                           )
                                         })()}
@@ -1539,6 +1562,52 @@ export function CheckinPage({ house, user }: Props) {
           </div>
         </div>
       )}
+
+      {/* ── Modal Receber valor da reserva ── */}
+      {payRes && (() => {
+        const total = payRes.amount_cents ?? 0
+        const already = payRes.deposit_cents ?? 0
+        const remaining = total - already
+        const methods: Array<[string, string]> = [['dinheiro', '💵 Dinheiro'], ['pix', '⚡ Pix'], ['cartao', '💳 Cartão']]
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+            onClick={() => setPayRes(null)}>
+            <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 20, width: '100%', maxWidth: 380, padding: 24 }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ fontWeight: 800, fontSize: 17, color: C.txt, marginBottom: 2 }}>💵 Receber reserva</div>
+              <div style={{ color: C.acc, fontWeight: 700, fontSize: 15, marginBottom: 12 }}>{payRes.name}</div>
+              <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.mut }}><span>Total da reserva</span><span style={{ fontWeight: 700, color: C.txt }}>{fmtCurrency(total)}</span></div>
+                {already > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.mut }}><span>Sinal pago</span><span style={{ fontWeight: 700 }}>{fmtCurrency(already)}</span></div>}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span style={{ color: C.red, fontWeight: 700 }}>A receber</span><span style={{ fontWeight: 800, color: C.red }}>{fmtCurrency(remaining)}</span></div>
+              </div>
+              <label style={{ fontSize: 12, color: C.gold, fontWeight: 600, display: 'block', marginBottom: 6 }}>💰 Valor recebido (R$)</label>
+              <input type="number" min="0" step="0.01" autoFocus value={payForm.amount}
+                onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
+                style={{ ...SL, fontSize: 18, fontWeight: 700, textAlign: 'center', borderColor: C.gold + '55', marginBottom: 16 }} placeholder="0,00" />
+              <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 6 }}>Forma de pagamento</label>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
+                {methods.map(([k, lbl]) => (
+                  <button key={k} onClick={() => setPayForm(p => ({ ...p, method: k }))}
+                    style={{ flex: 1, padding: '9px 0', borderRadius: 10, border: `2px solid ${payForm.method === k ? C.acc : C.brd}`, background: payForm.method === k ? C.acc + '22' : 'transparent', color: payForm.method === k ? C.acc : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={receberReserva}
+                  style={{ flex: 1, background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none', borderRadius: 12, padding: '12px', fontSize: 15, fontWeight: 800, color: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
+                  ✅ Confirmar recebimento
+                </button>
+                <button onClick={() => setPayRes(null)}
+                  style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 12, padding: '12px 16px', color: C.mut, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Modal Completar Cadastro ── */}
       {completeGuest && (
