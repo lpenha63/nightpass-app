@@ -94,14 +94,21 @@ export function PromoterPortal({ token }: { token: string }) {
   async function loadLists(pId: string, hId: string) {
     const { data } = await supabase
       .from('promoter_lists')
-      .select('id, name, token, event_id, house_id, promoter_id')
+      .select('id, name, token, event_id, house_id, promoter_id, events(promoter_enabled)')
       .eq('promoter_id', pId)
       .eq('house_id', hId)
 
     if (!data) { setLists([]); return }
 
+    // Não mostra listas de eventos que não estão (ou deixaram de estar) liberados para promoter
+    type Joined = PromoterListItem & { events?: { promoter_enabled?: boolean } | Array<{ promoter_enabled?: boolean }> | null }
+    const liberadas = (data as unknown as Joined[]).filter(l => {
+      const e = Array.isArray(l.events) ? l.events[0] : l.events
+      return e?.promoter_enabled === true
+    })
+
     const withCounts = await Promise.all(
-      data.map(async (l: PromoterListItem) => {
+      liberadas.map(async (l) => {
         const { count } = await supabase
           .from('promoter_list_guests')
           .select('id', { count: 'exact', head: true })
@@ -150,12 +157,13 @@ export function PromoterPortal({ token }: { token: string }) {
         .single()
       if (hData) setHouse(hData)
 
-      // 4. Load ALL upcoming events for this house
+      // 4. Load upcoming events LIBERADOS para promoter (promoter_enabled = true)
       const today = new Date().toISOString().slice(0, 10)
       const { data: evData } = await supabase
         .from('events')
         .select('id, name, event_date, start_time, flyer_url, status, genre')
         .eq('house_id', hId)
+        .eq('promoter_enabled', true)
         .neq('status', 'cancelado')
         .gte('event_date', today)
         .order('event_date', { ascending: true })

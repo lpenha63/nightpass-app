@@ -22,6 +22,8 @@ interface PromoterList {
     promotions?: string
     promotions_list?: Array<{ label?: string; value_cents?: number }>
     list_locks?: { casa?: boolean; promoters?: boolean; reservas?: boolean }
+    house_list_enabled?: boolean
+    promoter_enabled?: boolean
   }
   houses?: { name: string; logo_url?: string }
 }
@@ -75,7 +77,7 @@ export function ListaPublicPage({ token }: { token: string }) {
     // Não carregamos a lista de convidados existente: o cliente não deve ver
     // a contagem nem os nomes de quem já confirmou.
     supabase.from('promoter_lists')
-      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists,promotions,promotions_list,list_locks),houses(name,logo_url)')
+      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists,promotions,promotions_list,list_locks,house_list_enabled,promoter_enabled),houses(name,logo_url)')
       .eq('token', token).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
@@ -84,14 +86,18 @@ export function ListaPublicPage({ token }: { token: string }) {
       })
   }, [token])
 
-  // Suspensão por tipo: Lista da Casa usa o lock "casa"; lista de promoter usa "promoters"
+  // Lista da Casa usa flags "casa"; lista de promoter usa flags "promoters".
+  // Aberta só se HABILITADA no evento E NÃO suspensa.
   const isHouseList = lista?.promoters?.full_name === 'Lista da Casa'
-  const listLocked = !!(isHouseList ? lista?.events?.list_locks?.casa : lista?.events?.list_locks?.promoters)
+  const evL = lista?.events
+  const enabled = isHouseList ? (evL?.house_list_enabled !== false) : (evL?.promoter_enabled === true)
+  const suspended = !!(isHouseList ? evL?.list_locks?.casa : evL?.list_locks?.promoters)
+  const listLocked = !enabled || suspended
 
   async function addGuest() {
     if (!form.name.trim()) { setError('Nome obrigatório'); return }
     if (!lista) return
-    if (listLocked) { setError('Esta lista está fechada no momento (lotação atingida).'); return }
+    if (listLocked) { setError('Esta lista está fechada no momento.'); return }
     setSubmitting(true); setError('')
     const { data, error: err } = await supabase.from('promoter_list_guests').insert({
       list_id: lista.id,
@@ -167,7 +173,7 @@ export function ListaPublicPage({ token }: { token: string }) {
         <div style={{ fontSize: 56, marginBottom: 12 }}>🔒</div>
         <div style={{ color: C.txt, fontWeight: 800, fontSize: 20, marginBottom: 8 }}>Lista encerrada</div>
         <div style={{ color: C.sub, fontSize: 14 }}>
-          A lista de <strong style={{ color: C.acc }}>{lista?.events?.name}</strong> atingiu a lotação e não está aceitando novos nomes no momento.
+          A lista de <strong style={{ color: C.acc }}>{lista?.events?.name}</strong> não está aceitando novos nomes no momento.
         </div>
       </div>
     </div>
