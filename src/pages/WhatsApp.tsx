@@ -65,6 +65,19 @@ export function WhatsAppPage({ house }: Props) {
     setConnecting(false)
   }
 
+  // Desloga a instância (logout) — para trocar de aparelho/número
+  async function disconnectInstance() {
+    if (!cfg?.api_url || !cfg.instance_name || !cfg.api_key) return
+    if (!confirm('Desconectar o WhatsApp desta instância?\n\nVocê precisará escanear o QR de novo para reconectar (útil ao trocar de aparelho ou número).')) return
+    setConnecting(true); setQr(null)
+    try {
+      await fetch(`${cfg.api_url}/instance/logout/${cfg.instance_name}`, { method: 'DELETE', headers: { apikey: cfg.api_key } })
+      _succ('WhatsApp desconectado. Gere um novo QR para reconectar.')
+      refreshWa()
+    } catch (e: unknown) { _err('Erro ao desconectar: ' + (e instanceof Error ? e.message : 'desconhecido')) }
+    setConnecting(false)
+  }
+
   async function testConn() {
     if (!cfg?.api_url || !cfg.instance_name || !cfg.api_key) { _err('Preencha API URL, Instance Name e API Key'); return }
     if (!testPhone) { _err('Digite um telefone para teste'); return }
@@ -159,7 +172,10 @@ export function WhatsAppPage({ house }: Props) {
               </span>
             </div>
             {waStatus === 'open' ? (
-              <div style={{ color: C.grn, fontSize: 13, fontWeight: 600 }}>✅ Aparelho conectado e pronto para enviar mensagens.</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ color: C.grn, fontSize: 13, fontWeight: 600, flex: 1, minWidth: 180 }}>✅ Aparelho conectado e pronto para enviar mensagens.</div>
+                <Btn onClick={disconnectInstance} disabled={connecting} variant="secondary" style={{ color: '#ef4444', borderColor: '#ef444455' }}>🔌 {connecting ? 'Desconectando…' : 'Desconectar'}</Btn>
+              </div>
             ) : (
               <>
                 <div style={{ color: C.mut, fontSize: 12, marginBottom: 10 }}>

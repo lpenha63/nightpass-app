@@ -1,6 +1,6 @@
 import { C, RC, RL } from '../constants/theme'
 import { Pill } from './ui'
-import { useWhatsAppStatus } from '../hooks/useWhatsAppStatus'
+import type { WAStatus } from '../hooks/useWhatsAppStatus'
 import type { Session } from '../types'
 
 export type PageId =
@@ -39,11 +39,11 @@ interface SidebarProps {
   newCI: number
   pendingRatings?: number
   onLogout: () => void
+  waStatus?: WAStatus
 }
 
-export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pendingRatings = 0, onLogout }: SidebarProps) {
+export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pendingRatings = 0, onLogout, waStatus = 'loading' }: SidebarProps) {
   const isAdmin = ['super_admin', 'admin'].includes(session.role)
-  const { status: waStatus } = useWhatsAppStatus(session.house.id)
   const waDot: Record<string, { color: string; title: string }> = {
     open: { color: '#22c55e', title: 'WhatsApp conectado' },
     connecting: { color: '#f59e0b', title: 'WhatsApp conectando…' },

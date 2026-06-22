@@ -1,4 +1,4 @@
-import { useWhatsAppStatus } from '../hooks/useWhatsAppStatus'
+import type { WAStatus } from '../hooks/useWhatsAppStatus'
 import { C } from '../constants/theme'
 
 const META: Record<string, { color: string; label: string }> = {
@@ -7,10 +7,16 @@ const META: Record<string, { color: string; label: string }> = {
   close: { color: '#ef4444', label: 'WhatsApp desconectado' },
 }
 
+interface Props {
+  status: WAStatus
+  reconnect: () => void | Promise<void>
+  reconnecting: boolean
+  onOpenSettings?: () => void
+}
+
 // Barra fina no topo da tela com a luz de status + botão Reconectar.
 // Some quando a integração não está configurada/ativa.
-export function WhatsAppBar({ houseId, onOpenSettings }: { houseId: string; onOpenSettings?: () => void }) {
-  const { status, reconnect, reconnecting } = useWhatsAppStatus(houseId)
+export function WhatsAppBar({ status, reconnect, reconnecting, onOpenSettings }: Props) {
   if (status === 'off' || status === 'loading') return null
   const m = META[status] ?? META.close
   const ok = status === 'open'

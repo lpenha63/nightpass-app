@@ -5,6 +5,7 @@ import { C } from './constants/theme'
 import { Sidebar, type PageId } from './components/Sidebar'
 import { BottomNav } from './components/BottomNav'
 import { WhatsAppBar } from './components/WhatsAppBar'
+import { useWhatsAppStatus } from './hooks/useWhatsAppStatus'
 import { DashboardPage } from './pages/Dashboard'
 import { CheckinPage } from './pages/Checkin'
 import { ClientsPage } from './pages/Clients'
@@ -136,6 +137,9 @@ export default function App() {
     if (active === 'checkin') setNewCI(0)
   }, [active])
 
+  // Fonte única de status do WhatsApp (compartilhada por barra do topo + sidebar)
+  const wa = useWhatsAppStatus(session?.house?.id)
+
   async function handleLogout() {
     await supabase.auth.signOut()
     setSession(null)
@@ -178,13 +182,14 @@ export default function App() {
         newCI={newCI}
         pendingRatings={pendingRatings}
         onLogout={handleLogout}
+        waStatus={wa.status}
       />
       <main
         className="np-main page-anim"
         key={active}
         style={{ marginLeft: 240, flex: 1, minHeight: '100vh', overflowY: 'auto', background: C.bg }}
       >
-        <WhatsAppBar houseId={session.house.id} onOpenSettings={() => navigateTo('whatsapp')} />
+        <WhatsAppBar status={wa.status} reconnect={wa.reconnect} reconnecting={wa.reconnecting} onOpenSettings={() => navigateTo('whatsapp')} />
         <div className="np-content" style={{ padding: '16px 32px' }}>
           {pages[active]}
         </div>
