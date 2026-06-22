@@ -28,7 +28,9 @@ export function useWhatsAppStatus(houseId?: string) {
       const r = await fetch(`${cfg.api_url}/instance/connectionState/${cfg.instance_name}`, { headers: { apikey: cfg.api_key } })
       const j = await r.json()
       const state = j?.instance?.state ?? j?.state
-      setStatus(state === 'open' ? 'open' : state === 'connecting' ? 'connecting' : 'close')
+      // Binário: só 'open' conta como conectado. 'connecting' (sem aparelho pareado)
+      // = desconectado na prática. O amarelo só aparece durante uma reconexão ativa.
+      setStatus(state === 'open' ? 'open' : 'close')
     } catch {
       setStatus('close')
     }
