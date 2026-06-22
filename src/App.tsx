@@ -4,6 +4,7 @@ import { supabase } from './lib/supabase'
 import { C } from './constants/theme'
 import { Sidebar, type PageId } from './components/Sidebar'
 import { BottomNav } from './components/BottomNav'
+import { WhatsAppBar } from './components/WhatsAppBar'
 import { DashboardPage } from './pages/Dashboard'
 import { CheckinPage } from './pages/Checkin'
 import { ClientsPage } from './pages/Clients'
@@ -183,6 +184,7 @@ export default function App() {
         key={active}
         style={{ marginLeft: 240, flex: 1, minHeight: '100vh', overflowY: 'auto', background: C.bg }}
       >
+        <WhatsAppBar houseId={session.house.id} onOpenSettings={() => navigateTo('whatsapp')} />
         <div className="np-content" style={{ padding: '16px 32px' }}>
           {pages[active]}
         </div>

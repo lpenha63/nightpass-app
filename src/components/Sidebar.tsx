@@ -43,7 +43,7 @@ interface SidebarProps {
 
 export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pendingRatings = 0, onLogout }: SidebarProps) {
   const isAdmin = ['super_admin', 'admin'].includes(session.role)
-  const waStatus = useWhatsAppStatus(session.house.id)
+  const { status: waStatus } = useWhatsAppStatus(session.house.id)
   const waDot: Record<string, { color: string; title: string }> = {
     open: { color: '#22c55e', title: 'WhatsApp conectado' },
     connecting: { color: '#f59e0b', title: 'WhatsApp conectando…' },
