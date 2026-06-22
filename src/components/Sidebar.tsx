@@ -1,5 +1,6 @@
 import { C, RC, RL } from '../constants/theme'
 import { Pill } from './ui'
+import { useWhatsAppStatus } from '../hooks/useWhatsAppStatus'
 import type { Session } from '../types'
 
 export type PageId =
@@ -42,6 +43,14 @@ interface SidebarProps {
 
 export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pendingRatings = 0, onLogout }: SidebarProps) {
   const isAdmin = ['super_admin', 'admin'].includes(session.role)
+  const waStatus = useWhatsAppStatus(session.house.id)
+  const waDot: Record<string, { color: string; title: string }> = {
+    open: { color: '#22c55e', title: 'WhatsApp conectado' },
+    connecting: { color: '#f59e0b', title: 'WhatsApp conectando…' },
+    close: { color: '#ef4444', title: 'WhatsApp desconectado' },
+    off: { color: '#6b7280', title: 'WhatsApp desativado' },
+    loading: { color: '#6b7280', title: 'Verificando WhatsApp…' },
+  }
 
   return (
     <>
@@ -125,6 +134,16 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
                   style={{ fontSize: 18, opacity: isActive ? 1 : 0.6, flexShrink: 0, lineHeight: 1 }}
                 />
                 <span style={{ flex: 1 }}>{n.label}</span>
+                {n.id === 'whatsapp' && (() => {
+                  const d = waDot[waStatus] ?? waDot.off
+                  return (
+                    <span title={d.title} style={{
+                      width: 9, height: 9, borderRadius: '50%', background: d.color, flexShrink: 0,
+                      boxShadow: waStatus === 'open' ? `0 0 7px ${d.color}` : 'none',
+                      animation: waStatus === 'connecting' ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                    }} />
+                  )
+                })()}
                 {showBadge && (
                   <span style={{
                     background: badgeColor, color: '#fff',
