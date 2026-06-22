@@ -4,6 +4,7 @@ import { C } from '../constants/theme'
 import { Card, Btn } from '../components/ui'
 import { _err, _succ, type ToastState } from '../utils/toast'
 import { fmtWAPhone } from '../utils/whatsapp'
+import { useWhatsAppStatus } from '../hooks/useWhatsAppStatus'
 import type { House, WhatsAppConfig } from '../types'
 
 interface Props { house: House }
@@ -22,6 +23,10 @@ export function WhatsAppPage({ house }: Props) {
   const [testPhone, setTestPhone] = useState('')
   const [et, setEt] = useState<Template | null>(null)
   const [toast, _setToast] = useState<ToastState | null>(null)
+  // Conexão / pareamento via QR
+  const { status: waStatus, refresh: refreshWa } = useWhatsAppStatus(house.id)
+  const [qr, setQr] = useState<{ base64?: string; pairingCode?: string } | null>(null)
+  const [connecting, setConnecting] = useState(false)
 
   function load() {
     supabase.from('whatsapp_config').select('*').eq('house_id', house.id).limit(1)
@@ -33,6 +38,32 @@ export function WhatsAppPage({ house }: Props) {
   }
 
   useEffect(() => { load() }, [house.id])
+
+  // Enquanto o QR está visível, checa a conexão a cada 3s; quando conecta, some o QR
+  useEffect(() => {
+    if (!qr) return
+    const id = setInterval(() => { refreshWa() }, 3000)
+    return () => clearInterval(id)
+  }, [qr, refreshWa])
+  useEffect(() => {
+    if (waStatus === 'open' && qr) { setQr(null); _succ('✅ WhatsApp conectado!') }
+  }, [waStatus, qr])
+
+  // Pede o QR / código de pareamento à Evolution API (instance/connect)
+  async function connectInstance() {
+    if (!cfg?.api_url || !cfg.instance_name || !cfg.api_key) { _err('Preencha API URL, Instance Name e API Key'); return }
+    setConnecting(true); setQr(null)
+    try {
+      const r = await fetch(`${cfg.api_url}/instance/connect/${cfg.instance_name}`, { headers: { apikey: cfg.api_key } })
+      const j = await r.json()
+      const base64 = j?.base64 ?? j?.qrcode?.base64 ?? null
+      const pairingCode = j?.pairingCode ?? j?.qrcode?.pairingCode ?? null
+      if (base64 || pairingCode) setQr({ base64: base64 ?? undefined, pairingCode: pairingCode ?? undefined })
+      else if ((j?.instance?.state ?? j?.state) === 'open') { _succ('✅ Já está conectado!'); refreshWa() }
+      else _err('Não foi possível obter o QR. Confira instância e chave.')
+    } catch (e: unknown) { _err('Erro: ' + (e instanceof Error ? e.message : 'desconhecido')) }
+    setConnecting(false)
+  }
 
   async function testConn() {
     if (!cfg?.api_url || !cfg.instance_name || !cfg.api_key) { _err('Preencha API URL, Instance Name e API Key'); return }
@@ -113,6 +144,40 @@ export function WhatsAppPage({ house }: Props) {
           <Btn onClick={saveCfg} disabled={saving}>💾 {saving ? 'Salvando...' : 'Salvar'}</Btn>
         </div>
       </Card>
+
+      {/* Conexão / QR */}
+      {(() => {
+        const sm = ({ open: { c: '#22c55e', t: 'Conectado' }, connecting: { c: '#f59e0b', t: 'Conectando…' }, close: { c: '#ef4444', t: 'Desconectado' }, off: { c: '#6b7280', t: 'Inativo' }, loading: { c: '#6b7280', t: 'Verificando…' } } as const)[waStatus]
+        const qrSrc = qr?.base64 ? (qr.base64.startsWith('data:') ? qr.base64 : `data:image/png;base64,${qr.base64}`) : null
+        return (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span style={{ color: C.txt, fontWeight: 700, fontSize: 15 }}>🔌 Conexão</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: sm.c, boxShadow: waStatus === 'open' ? `0 0 7px ${sm.c}` : 'none' }} />
+                <span style={{ color: sm.c, fontSize: 13, fontWeight: 700 }}>{sm.t}</span>
+              </span>
+            </div>
+            {waStatus === 'open' ? (
+              <div style={{ color: C.grn, fontSize: 13, fontWeight: 600 }}>✅ Aparelho conectado e pronto para enviar mensagens.</div>
+            ) : (
+              <>
+                <div style={{ color: C.mut, fontSize: 12, marginBottom: 10 }}>
+                  Gere o QR e escaneie no celular: WhatsApp → <strong>Aparelhos conectados</strong> → <strong>Conectar aparelho</strong>.
+                </div>
+                <Btn onClick={connectInstance} disabled={connecting}>{connecting ? 'Gerando…' : (qr ? '🔄 Gerar novo QR' : '📱 Conectar / Gerar QR')}</Btn>
+                {qr && (
+                  <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                    {qrSrc && <img src={qrSrc} alt="QR Code WhatsApp" style={{ width: 240, height: 240, borderRadius: 12, background: '#fff', padding: 8 }} />}
+                    {qr.pairingCode && <div style={{ color: C.txt, fontSize: 14 }}>Código: <strong style={{ letterSpacing: 2 }}>{qr.pairingCode}</strong></div>}
+                    <div style={{ color: C.gold, fontSize: 12, fontWeight: 600 }}>⏳ Aguardando leitura… conecta sozinho ao escanear.</div>
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+        )
+      })()}
 
       {/* Templates */}
       <Card style={{ marginBottom: 16 }}>
