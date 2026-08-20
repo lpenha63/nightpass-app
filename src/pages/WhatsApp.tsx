@@ -27,6 +27,7 @@ export function WhatsAppPage({ house }: Props) {
   const { status: waStatus, refresh: refreshWa } = useWhatsAppStatus(house.id)
   const [qr, setQr] = useState<{ base64?: string; pairingCode?: string } | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [showManual, setShowManual] = useState(false)
 
   function load() {
     supabase.from('whatsapp_config').select('*').eq('house_id', house.id).limit(1)
@@ -85,13 +86,18 @@ export function WhatsAppPage({ house }: Props) {
     if (!fph) { _err('Telefone inválido'); return }
     setTesting(true)
     try {
-      const res = await fetch(`${cfg.api_url}/message/sendText/${cfg.instance_name}`, {
+      const { waConnectionState, waStateMessage } = await import('../utils/whatsapp')
+      const st = await waConnectionState(cfg)
+      if (st !== 'open') { _err('❌ ' + waStateMessage(st)); setTesting(false); return }
+      const resp = await fetch(`${cfg.api_url}/message/sendText/${cfg.instance_name}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.api_key },
         body: JSON.stringify({ number: fph, text: '✅ NightPass conectado! Sua integração WhatsApp está funcionando.' }),
-      }).then(r => r.json())
+      })
+      const res = await resp.json().catch(() => null)
       if (res?.key) _succ('✅ Mensagem enviada! WhatsApp conectado.')
-      else _err('Falha: ' + JSON.stringify(res))
-    } catch (e: unknown) { _err('Erro: ' + (e instanceof Error ? e.message : 'desconhecido')) }
+      else if (Array.isArray(res?.response?.message) && res.response.message.some((m: { exists?: boolean }) => m?.exists === false)) _err('Este número não tem WhatsApp.')
+      else _err('Falha ao enviar: ' + (res?.response?.message ? JSON.stringify(res.response.message) : (res?.message || JSON.stringify(res))))
+    } catch (e: unknown) { _err('Erro de conexão com o servidor do WhatsApp: ' + (e instanceof Error ? e.message : 'desconhecido')) }
     setTesting(false)
   }
 
@@ -119,6 +125,75 @@ export function WhatsAppPage({ house }: Props) {
       {toast && <div style={{ position: 'fixed', bottom: 24, right: 24, background: C.grn + '22', color: C.grn, borderRadius: 12, padding: '12px 18px', fontSize: 13, fontWeight: 700, zIndex: 1100 }}>{toast.msg}</div>}
 
       <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, marginBottom: 20 }}>💬 WhatsApp</h1>
+
+      {/* Manual & Boas Práticas */}
+      <Card style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
+        <button onClick={() => setShowManual(v => !v)}
+          style={{ width: '100%', background: 'none', border: 'none', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontFamily: 'inherit' }}>
+          <span style={{ color: C.txt, fontWeight: 700, fontSize: 15 }}>📖 Manual de Conexão & Boas Práticas</span>
+          <span style={{ color: C.mut, fontSize: 16 }}>{showManual ? '▼' : '▶'}</span>
+        </button>
+        {showManual && (
+          <div style={{ padding: '0 18px 18px' }}>
+            {/* 1. Como conectar */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ color: C.acc, fontWeight: 700, fontSize: 13, marginBottom: 10 }}>📱 Como conectar (passo a passo)</div>
+              {[
+                'Preencha Instance Name, API URL e API Key (fornecidos pelo provedor da Evolution API) e clique em 💾 Salvar.',
+                'Marque a opção "Ativo" no topo da configuração.',
+                'Clique em "📱 Conectar / Gerar QR".',
+                'No celular: WhatsApp → Configurações → Aparelhos conectados → Conectar um aparelho.',
+                'Escaneie o QR Code que aparece na tela. O status muda para "Conectado" sozinho.',
+                'Confirme enviando uma mensagem de teste para o seu número no campo "Telefone para teste".',
+              ].map((step, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
+                  <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: '50%', background: C.acc + '22', color: C.acc, fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>{i + 1}</span>
+                  <span style={{ color: C.sub, fontSize: 12.5, lineHeight: 1.5 }}>{step}</span>
+                </div>
+              ))}
+              <div style={{ background: C.acc + '12', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '8px 12px', marginTop: 8, fontSize: 12, color: C.sub, lineHeight: 1.5 }}>
+                💡 Use um <strong>chip dedicado</strong> (não o número pessoal). O celular precisa ficar com internet e bateria — é ele que mantém a conexão ativa.
+              </div>
+            </div>
+
+            {/* 2. Regras do WhatsApp */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ color: C.gold, fontWeight: 700, fontSize: 13, marginBottom: 10 }}>⚠️ Regras do WhatsApp (para não tomar bloqueio)</div>
+              {[
+                'Número não-oficial (Evolution/Baileys) vai contra os Termos do WhatsApp — o risco de bloqueio sempre existe. Use sempre um chip secundário, nunca o principal.',
+                'Aquecimento: número novo começa devagar (20–50 msgs/dia na 1ª semana) e aumenta aos poucos ao longo de 2–3 semanas.',
+                'Nunca dispare tudo de uma vez. Evite texto idêntico para muita gente — personalize com a variável {{name}}.',
+                'Envie só para quem é seu cliente / já interagiu com você. Números que nunca te responderam denunciam mais.',
+                'Deixe alguns segundos entre cada mensagem — rajadas são o que mais derruba número.',
+                'Muitos bloqueios ou denúncias seguidos = número cai. Dê motivo pra pessoa querer receber.',
+              ].map((rule, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+                  <span style={{ color: C.gold, fontSize: 13, flexShrink: 0, marginTop: 1 }}>•</span>
+                  <span style={{ color: C.sub, fontSize: 12.5, lineHeight: 1.5 }}>{rule}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* 3. Recomendações */}
+            <div>
+              <div style={{ color: C.grn, fontWeight: 700, fontSize: 13, marginBottom: 10 }}>✅ Recomendações de envio</div>
+              {[
+                ['Melhores horários', '10h–12h e 18h–21h. Evite madrugada e horário comercial cheio.'],
+                ['Personalize sempre', 'Mensagem com o nome ({{name}}) gera muito menos denúncia que texto genérico.'],
+                ['Prefira os automáticos', 'Check-in e aniversário são pontuais e bem-vindos — baixo risco.'],
+                ['Campanhas grandes', 'Divida em lotes menores ao longo do dia, não tudo de uma vez.'],
+                ['Tenha um backup', 'Mantenha um número reserva já aquecido caso o principal caia.'],
+                ['Responda quem responder', 'Interação real reduz o risco de bloqueio.'],
+              ].map(([title, desc], i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+                  <span style={{ color: C.grn, fontSize: 13, flexShrink: 0, marginTop: 1 }}>✓</span>
+                  <span style={{ color: C.sub, fontSize: 12.5, lineHeight: 1.5 }}><strong style={{ color: C.txt }}>{title}:</strong> {desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
 
       {/* Config */}
       <Card style={{ marginBottom: 16 }}>
@@ -184,7 +259,7 @@ export function WhatsAppPage({ house }: Props) {
                 <Btn onClick={connectInstance} disabled={connecting}>{connecting ? 'Gerando…' : (qr ? '🔄 Gerar novo QR' : '📱 Conectar / Gerar QR')}</Btn>
                 {qr && (
                   <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                    {qrSrc && <img src={qrSrc} alt="QR Code WhatsApp" style={{ width: 240, height: 240, borderRadius: 12, background: '#fff', padding: 8 }} />}
+                    {qrSrc && <img loading="lazy" decoding="async" src={qrSrc} alt="QR Code WhatsApp" style={{ width: 240, height: 240, borderRadius: 12, background: '#fff', padding: 8 }} />}
                     {qr.pairingCode && <div style={{ color: C.txt, fontSize: 14 }}>Código: <strong style={{ letterSpacing: 2 }}>{qr.pairingCode}</strong></div>}
                     <div style={{ color: C.gold, fontSize: 12, fontWeight: 600 }}>⏳ Aguardando leitura… conecta sozinho ao escanear.</div>
                   </div>

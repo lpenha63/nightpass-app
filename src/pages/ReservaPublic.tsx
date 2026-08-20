@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, useMemo } from 'react'
+import { supabasePublico } from '../lib/supabase'
 
 const C = {
   bg: '#0a0e1a', card: '#111827', brd: '#1e2736',
@@ -24,7 +24,7 @@ interface Reservation {
 }
 
 const VALUE_TYPES = [
-  { value: 'normal', label: '🎟️ Pagamento Normal' },
+  { value: 'normal', label: '🎫 Pagamento Normal' },
   { value: 'antecipado', label: '⚡ Pagamento Antecipado' },
   { value: 'desconto', label: '🏷️ Com Desconto' },
   { value: 'vip', label: '👑 VIP' },
@@ -65,26 +65,28 @@ export function ReservaPublicPage({ token }: { token: string }) {
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
   const [notFound, setNotFound] = useState(false)
+  // Cliente que envia o token no cabeçalho: o RLS só libera os convidados desta reserva
+  const sb = useMemo(() => supabasePublico(token), [token])
 
   useEffect(() => {
-    supabase.from('reservations')
+    sb.from('reservations')
       .select('*,events(name,event_date),houses(name,logo_url)')
       .eq('token', token).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
         setReserva(r.data as Reservation)
         // Load existing guests
-        supabase.from('reservation_guests').select('*').eq('reservation_id', r.data.id)
+        sb.from('reservation_guests').select('*').eq('reservation_id', r.data.id)
           .then(g => { setSaved((g.data ?? []) as SavedGuest[]); setLoading(false) })
       })
-  }, [token])
+  }, [token, sb])
 
   async function addGuest() {
     if (!form.name.trim()) { setError('Nome obrigatório'); return }
     if (!reserva) return
     if (saved.length >= reserva.people_count) { setError(`Limite de ${reserva.people_count} convidado(s) atingido`); return }
     setSubmitting(true); setError('')
-    const { data, error: err } = await supabase.from('reservation_guests').insert({
+    const { data, error: err } = await sb.from('reservation_guests').insert({
       reservation_id: reserva.id,
       house_id: reserva.house_id,
       event_id: reserva.event_id ?? null,
@@ -101,7 +103,7 @@ export function ReservaPublicPage({ token }: { token: string }) {
   }
 
   async function removeGuest(id: string) {
-    await supabase.from('reservation_guests').delete().eq('id', id)
+    await sb.from('reservation_guests').delete().eq('id', id)
     setSaved(p => p.filter(g => g.id !== id))
   }
 
@@ -158,7 +160,7 @@ export function ReservaPublicPage({ token }: { token: string }) {
       {reserva!.flyer_url && (
         <div style={{ maxWidth: 480, margin: '0 auto', padding: '20px 20px 0' }}>
           <div style={{ position: 'relative', paddingBottom: '100%', borderRadius: 16, overflow: 'hidden', border: `1px solid ${C.brd}` }}>
-            <img src={reserva!.flyer_url} alt="flyer" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+            <img loading="lazy" decoding="async" src={reserva!.flyer_url} alt="flyer" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
               onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }} />
           </div>
         </div>
@@ -168,7 +170,7 @@ export function ReservaPublicPage({ token }: { token: string }) {
       <div style={{ background: reserva!.flyer_url ? 'transparent' : `linear-gradient(135deg,#1d4ed8,#0a0e1a)`, padding: '28px 20px 24px', textAlign: 'center' }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {!reserva!.flyer_url && reserva!.houses?.logo_url && (
-            <img src={reserva!.houses.logo_url} alt="logo" style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover', marginBottom: 12 }} />
+            <img loading="lazy" decoding="async" src={reserva!.houses.logo_url} alt="logo" style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover', marginBottom: 12 }} />
           )}
           <div style={{ color: C.acc, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
             {reserva!.houses?.name ?? ''}

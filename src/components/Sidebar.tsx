@@ -1,3 +1,4 @@
+import { memo, useState } from 'react'
 import { C, RC, RL } from '../constants/theme'
 import { Pill } from './ui'
 import type { WAStatus } from '../hooks/useWhatsAppStatus'
@@ -6,7 +7,7 @@ import type { Session } from '../types'
 export type PageId =
   | 'dashboard' | 'checkin' | 'clients' | 'events'
   | 'reservas' | 'promoters' | 'reports'
-  | 'whatsapp' | 'users' | 'freelancers' | 'settings'
+  | 'whatsapp' | 'users' | 'freelancers' | 'settings' | 'agenda'
 
 interface NavItem {
   id: PageId
@@ -17,6 +18,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
+  { id: 'agenda',      icon: 'list-check',            label: 'Minha Agenda' },
   { id: 'dashboard',   icon: 'house-fill',            label: 'Dashboard' },
   { id: 'checkin',     icon: 'person-check-fill',     label: 'Check-in' },
   { id: 'clients',     icon: 'person-lines-fill',     label: 'Clientes' },
@@ -32,6 +34,8 @@ const NAV: NavItem[] = [
 
 interface SidebarProps {
   session: Session
+  /** Troca a casa ativa (só aparece para quem tem mais de uma) */
+  onTrocarCasa?: (houseId: string) => void
   active: PageId
   setActive: (id: PageId) => void
   mOpen: boolean
@@ -42,7 +46,8 @@ interface SidebarProps {
   waStatus?: WAStatus
 }
 
-export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pendingRatings = 0, onLogout, waStatus = 'loading' }: SidebarProps) {
+function SidebarImpl({ session, active, setActive, mOpen, setMOpen, newCI, pendingRatings = 0, onLogout, waStatus = 'loading', onTrocarCasa }: SidebarProps) {
+  const [casasOpen, setCasasOpen] = useState(false)
   const isAdmin = ['super_admin', 'admin'].includes(session.role)
   const waDot: Record<string, { color: string; title: string }> = {
     open: { color: '#22c55e', title: 'WhatsApp conectado' },
@@ -70,7 +75,7 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
         className={`np-sb${mOpen ? ' open' : ''}`}
         style={{
           width: 240, minWidth: 240,
-          background: 'rgba(10,14,26,0.97)',
+          background: 'var(--c-nav-bg)',
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
           borderRight: '1px solid rgba(59,130,246,0.12)',
@@ -84,15 +89,51 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
           padding: '18px 16px', borderBottom: `1px solid ${C.brd}`,
           background: `linear-gradient(135deg,${C.acd}18,transparent)`,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            {session.house.logo_url
-              ? <img src={session.house.logo_url} alt={session.house.name} style={{ width: 34, height: 34, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
-              : <div style={{ width: 34, height: 34, background: `linear-gradient(135deg,${C.acd},${C.acc})`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, boxShadow: `0 0 14px ${C.acd}55` }}>🎭</div>
-            }
-            <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, lineHeight: 1.3 }}>
-              {session.house.name || 'NightPass'}
-            </div>
-          </div>
+          {(() => {
+            // Com mais de uma casa o cabeçalho vira seletor. Antes o app entrava numa
+            // casa qualquer (consulta com .limit(1) sem ordenar) e não havia como trocar.
+            const casas = session.houses ?? []
+            const multi = casas.length > 1
+            const marca = (
+              <>
+                {session.house.logo_url
+                  ? <img loading="lazy" decoding="async" src={session.house.logo_url} alt={session.house.name} style={{ width: 34, height: 34, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
+                  : <div style={{ width: 34, height: 34, background: `linear-gradient(135deg,${C.acd},${C.acc})`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, boxShadow: `0 0 14px ${C.acd}55`, flexShrink: 0 }}>🎭</div>
+                }
+                <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, lineHeight: 1.3, textAlign: 'left', flex: 1, minWidth: 0 }}>
+                  {session.house.name || 'NightPass'}
+                  {multi && <div style={{ color: C.mut, fontSize: 11, fontWeight: 500 }}>trocar unidade ▾</div>}
+                </div>
+              </>
+            )
+            if (!multi) return <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>{marca}</div>
+            return (
+              <div style={{ position: 'relative', marginBottom: 10 }}>
+                <button onClick={() => setCasasOpen(v => !v)} title="Trocar de unidade"
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {marca}
+                </button>
+                {casasOpen && (<>
+                  <div onClick={() => setCasasOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 61, background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: 6, boxShadow: '0 14px 36px rgba(0,0,0,0.4)', display: 'grid', gap: 2 }}>
+                    {casas.map(h => {
+                      const atual = h.id === session.house.id
+                      return (
+                        <button key={h.id} onClick={() => { setCasasOpen(false); if (!atual) onTrocarCasa?.(h.id) }}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left', background: atual ? C.acc + '18' : 'none', border: 'none', borderRadius: 8, padding: '8px 10px', color: atual ? C.acc : C.txt, fontSize: 13, fontWeight: atual ? 700 : 500, cursor: atual ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                          {h.logo_url
+                            ? <img src={h.logo_url} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
+                            : <span style={{ width: 22, height: 22, borderRadius: 6, background: C.brd, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>🎭</span>}
+                          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.name}</span>
+                          {atual && <span style={{ fontSize: 11 }}>✓</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>)}
+              </div>
+            )
+          })()}
           <Pill color={RC[session.role] || C.mut} small>
             {RL[session.role] || session.role}
           </Pill>
@@ -111,6 +152,7 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
             return (
               <button
                 key={n.id}
+                className={isActive ? 'np-nav-item is-active' : 'np-nav-item'}
                 onClick={() => { setActive(n.id); setMOpen(false) }}
                 style={{
                   width: '100%',
@@ -119,7 +161,9 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
                   borderRadius: 12,
                   padding: '11px 14px',
                   display: 'flex', alignItems: 'center', gap: 12,
-                  color: isActive ? C.acc : C.mut,
+                  // sub, não mut: mut dá 3,98:1 sobre o fundo do menu no tema escuro
+                  // e reprova no WCAG AA (mín. 4,5:1). sub dá 7,58:1.
+                  color: isActive ? C.acc : C.sub,
                   fontSize: 15,
                   fontWeight: isActive ? 700 : 500,
                   cursor: 'pointer',
@@ -168,7 +212,7 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: '10px 14px', borderRadius: 12,
               background: 'none', border: `1px solid rgba(255,255,255,0.07)`,
-              color: C.mut, fontSize: 14, fontWeight: 500,
+              color: C.sub, fontSize: 14, fontWeight: 500,
               cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
@@ -180,3 +224,7 @@ export function Sidebar({ session, active, setActive, mOpen, setMOpen, newCI, pe
     </>
   )
 }
+
+// memo: o App re-renderiza a cada check-in (realtime) e poll do WhatsApp; a Sidebar só precisa
+// re-renderizar quando suas props mudam de fato.
+export const Sidebar = memo(SidebarImpl)

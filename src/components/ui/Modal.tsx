@@ -8,12 +8,14 @@ interface ModalProps {
   wide?: boolean
   maxWidth?: number
   fullscreen?: boolean
+  noDirtyCheck?: boolean
+  zIndex?: number
   children: ReactNode
 }
 
 const CONFIRM_MSG = 'Tem alterações não salvas.\nDeseja sair sem salvar?'
 
-export function Modal({ open, onClose, title, wide, maxWidth, fullscreen, children }: ModalProps) {
+export function Modal({ open, onClose, title, wide, maxWidth, fullscreen, noDirtyCheck, zIndex, children }: ModalProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const dirtyRef = useRef(false)
 
@@ -34,17 +36,17 @@ export function Modal({ open, onClose, title, wide, maxWidth, fullscreen, childr
   }, [open])
 
   const handleClose = useCallback(() => {
-    if (dirtyRef.current && !window.confirm(CONFIRM_MSG)) return
+    if (!noDirtyCheck && dirtyRef.current && !window.confirm(CONFIRM_MSG)) return
     dirtyRef.current = false
     onClose()
-  }, [onClose])
+  }, [onClose, noDirtyCheck])
 
   // Intercept "Cancelar" button clicks in capture phase so we can show confirm first
   useEffect(() => {
     if (!open || !bodyRef.current) return
     const el = bodyRef.current
     const handler = (e: Event) => {
-      if (!dirtyRef.current) return
+      if (noDirtyCheck || !dirtyRef.current) return
       const btn = (e.target as HTMLElement).closest('button')
       if (!btn) return
       if (btn.textContent?.trim() === 'Cancelar') {
@@ -69,22 +71,23 @@ export function Modal({ open, onClose, title, wide, maxWidth, fullscreen, childr
 
   return (
     <div
+      className="modal-overlay"
       onClick={handleClose}
       style={{
         position: 'fixed', inset: 0,
         background: 'rgba(4,6,18,0.78)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        zIndex: 1000,
+        zIndex: zIndex ?? 1000,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 16,
       }}
     >
       <div
-        className="modal-inner"
+        className={fullscreen ? 'modal-inner' : 'modal-inner modal-sheet'}
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: 'rgba(12,17,32,0.96)',
+          background: 'var(--c-modal-bg)',
           backdropFilter: 'blur(28px)',
           WebkitBackdropFilter: 'blur(28px)',
           border: '1px solid rgba(59,130,246,0.18)',

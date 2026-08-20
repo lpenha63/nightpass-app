@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmtCurrency } from '../utils/format'
 import QRCode from 'react-qr-code'
+import { NightPassBar } from './TicketPublic'
 import type { Event, TicketBatch, TicketOrder, Ticket } from '../types'
 
 const C = {
@@ -23,10 +24,23 @@ interface EventWithHouse extends Event {
 }
 interface BatchWithAvail extends TicketBatch { available: number }
 
+/** ***.456.789-** — o suficiente para a portaria conferir sem expor o documento inteiro */
+function maskCpf(cpf: string) {
+  const d = cpf.replace(/\D/g, '')
+  if (d.length < 11) return cpf
+  return `***.${d.slice(3, 6)}.${d.slice(6, 9)}-**`
+}
+
 type PayResult =
-  | { mode: 'free';   order_id: string }
-  | { mode: 'manual'; order_id: string; amount_cents: number; pix_key?: string; pix_holder?: string }
-  | { mode: 'mp';     order_id: string; amount_cents: number; qr_code?: string; qr_code_base64?: string }
+  | { mode: 'free';     order_id: string }
+  | { mode: 'manual';   order_id: string; amount_cents: number; pix_key?: string; pix_holder?: string }
+  | { mode: 'mp';       order_id: string; amount_cents: number; qr_code?: string; qr_code_base64?: string }
+  | { mode: 'checkout'; order_id: string; amount_cents: number; service_fee_cents: number; init_point: string }
+
+/** Taxa de serviço por unidade, em centavos */
+function taxaUnit(b: { price_cents: number; service_fee_pct?: number | null }) {
+  return Math.round(b.price_cents * Number(b.service_fee_pct ?? 0) / 100)
+}
 
 export function EventPublicPage({ eventId }: { eventId: string }) {
   const [event, setEvent] = useState<EventWithHouse | null>(null)
@@ -37,6 +51,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
   const [selBatch, setSelBatch] = useState<BatchWithAvail | null>(null)
   const [qty, setQty] = useState(1)
   const [form, setForm] = useState({ name: '', cpf: '', phone: '', email: '' })
+  const [nomes, setNomes] = useState<string[]>([])   // ingresso nominal: um nome por unidade
   const [step, setStep] = useState<'select' | 'form' | 'pix' | 'done'>('select')
   const [submitting, setSubmitting] = useState(false)
   const [payResult, setPayResult] = useState<PayResult | null>(null)
@@ -51,6 +66,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
         setEvent(r.data as EventWithHouse)
+        document.title = `NightPass Tickets — ${(r.data as EventWithHouse).name}`
         return supabase.from('ticket_batches').select('*').eq('event_id', eventId).eq('active', true).order('price_cents')
       })
       .then(r => {
@@ -61,28 +77,49 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
           .map(b => ({ ...b, available: Math.max(0, b.quantity - b.sold) }))
         setBatches(bs)
         setLoading(false)
+        // ?lote=<id> abre direto naquele lote — é o link que a casa copia por lote
+        const alvo = new URLSearchParams(window.location.search).get('lote')
+        const b = alvo ? bs.find(x => x.id === alvo) : null
+        if (b && b.available > 0) { setSelBatch(b); setQty(1); setStep('form') }
       })
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [eventId])
 
+  // Leitura via RPC: o comprador é anônimo e não tem (nem deve ter) SELECT em ticket_orders/tickets
+  async function fetchOrder(orderId: string) {
+    const { data } = await supabase.rpc('get_order_public', { p_order_id: orderId })
+    const row = data?.[0] as { order_id: string; batch_name?: string } | undefined
+    if (!row) return null
+    // a RPC devolve order_id; a tela usa order.id
+    return { ...row, id: row.order_id } as unknown as TicketOrder
+  }
+  async function fetchTickets(orderId: string) {
+    const { data } = await supabase.rpc('get_tickets_by_order', { p_order_id: orderId })
+    return ((data ?? []) as { ticket_id: string; token: string; holder_name: string }[])
+      .map(t => ({ id: t.ticket_id, token: t.token, holder_name: t.holder_name })) as Ticket[]
+  }
+
   function startPolling(orderId: string) {
     pollRef.current = setInterval(async () => {
-      const { data: ord } = await supabase.from('ticket_orders').select('*').eq('id', orderId).single()
+      const ord = await fetchOrder(orderId)
       if (!ord) return
       setOrder(ord)
       if (ord.payment_status === 'paid') {
         clearInterval(pollRef.current!)
-        const { data: tks } = await supabase.from('tickets').select('*').eq('order_id', orderId)
-        setTickets(tks ?? [])
+        setTickets(await fetchTickets(orderId))
         setStep('done')
       }
     }, 4000)
   }
 
-  async function submit() {
+  async function submit(metodo: 'pix' | 'card' = 'pix') {
     if (!form.name.trim()) { setError('Nome obrigatório'); return }
     if (!form.phone.trim()) { setError('Telefone obrigatório'); return }
     if (!selBatch || !event) return
+    if (selBatch.nominal) {
+      const faltando = Array.from({ length: qty }, (_, i) => (nomes[i] ?? '').trim()).filter(n => n.length < 2).length
+      if (faltando > 0) { setError(`Informe o nome de cada participante (${faltando} faltando)`); return }
+    }
     setSubmitting(true); setError('')
     try {
       const res = await fetch('/api/create-payment', {
@@ -97,6 +134,8 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
           buyer_phone: form.phone.trim(),
           buyer_email: form.email || null,
           quantity: qty,
+          method: metodo,
+          holder_names: selBatch.nominal ? Array.from({ length: qty }, (_, i) => (nomes[i] ?? '').trim()) : undefined,
         }),
       })
       const result: PayResult = await res.json()
@@ -105,14 +144,15 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
       setPayResult(result)
 
       if (result.mode === 'free') {
-        const { data: ord } = await supabase.from('ticket_orders').select('*').eq('id', result.order_id).single()
-        const { data: tks } = await supabase.from('tickets').select('*').eq('order_id', result.order_id)
-        setOrder(ord)
-        setTickets(tks ?? [])
+        setOrder(await fetchOrder(result.order_id))
+        setTickets(await fetchTickets(result.order_id))
         setStep('done')
+      } else if (result.mode === 'checkout') {
+        // Checkout Pro: crédito, débito, PIX e boleto ficam na tela do Mercado Pago.
+        // O comprador volta para /pagamento/:order, que acompanha a confirmação.
+        window.location.href = result.init_point
       } else {
-        const { data: ord } = await supabase.from('ticket_orders').select('*').eq('id', result.order_id).single()
-        setOrder(ord)
+        setOrder(await fetchOrder(result.order_id))
         setStep('pix')
         startPolling(result.order_id)
       }
@@ -155,6 +195,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
+      <NightPassBar />
       {/* Hero */}
       <div style={{
         background: event.flyer_url
@@ -165,7 +206,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
       }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {event.flyer_url && (
-            <img src={event.flyer_url} alt={event.name}
+            <img loading="lazy" decoding="async" src={event.flyer_url} alt={event.name}
               style={{ width: '100%', maxWidth: 300, borderRadius: 16, marginBottom: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }} />
           )}
           <div style={{ color: C.acc, fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
@@ -192,7 +233,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
             <h2 style={{ color: C.txt, fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Escolha seu ingresso</h2>
             {batches.length === 0
               ? <div style={{ background: C.card, borderRadius: 16, padding: 32, textAlign: 'center', border: `1px solid ${C.brd}` }}>
-                  <div style={{ fontSize: 36, marginBottom: 12 }}>🎟️</div>
+                  <div style={{ fontSize: 36, marginBottom: 12 }}>🎫</div>
                   <div style={{ color: C.mut, fontSize: 14 }}>Vendas encerradas ou em breve</div>
                 </div>
               : batches.map(b => (
@@ -214,6 +255,9 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
                       <div style={{ color: b.available > 0 ? C.grn : C.red, fontWeight: 900, fontSize: 22 }}>
                         {b.price_cents === 0 ? 'GRÁTIS' : fmtCurrency(b.price_cents)}
                       </div>
+                      {taxaUnit(b) > 0 && (
+                        <div style={{ color: C.mut, fontSize: 11, marginTop: 1 }}>+ {fmtCurrency(taxaUnit(b))} taxa</div>
+                      )}
                       <div style={{ color: b.available > 5 ? C.grn : b.available > 0 ? C.gold : C.red, fontSize: 11, fontWeight: 600, marginTop: 2 }}>
                         {b.available === 0 ? 'Esgotado' : b.available <= 10 ? `Últimas ${b.available}` : `${b.available} disponíveis`}
                       </div>
@@ -267,16 +311,66 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
               </div>
             </div>
 
+            {/* Lote nominal: um nome por ingresso, conferido na portaria contra documento */}
+            {selBatch.nominal && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ color: C.sub, fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+                  {qty > 1 ? 'Nome de cada participante' : 'Nome do participante'}
+                </div>
+                <div style={{ color: C.mut, fontSize: 11, marginBottom: 8 }}>
+                  Cada ingresso sai nominal e pode ser conferido com documento na entrada.
+                </div>
+                {Array.from({ length: qty }, (_, i) => (
+                  <input key={i} {...inp}
+                    style={{ ...inp.style, marginBottom: 8 }}
+                    placeholder={qty > 1 ? `Nome do ingresso ${i + 1}` : 'Nome completo'}
+                    value={nomes[i] ?? ''}
+                    onChange={e => setNomes(p => { const n = [...p]; n[i] = e.target.value; return n })} />
+                ))}
+                {qty > 1 && (
+                  <button
+                    onClick={() => setNomes(p => { const n = [...p]; n[0] = form.name; return n })}
+                    style={{ background: 'none', border: 'none', color: C.acc, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+                    Usar meu nome no primeiro ingresso
+                  </button>
+                )}
+              </div>
+            )}
+
             {error && <div style={{ background: C.red + '22', border: `1px solid ${C.red}44`, borderRadius: 10, padding: '10px 14px', color: C.red, fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderTop: `1px solid ${C.brd}`, marginBottom: 16 }}>
-              <span style={{ color: C.mut, fontSize: 14 }}>{qty}x {selBatch.name}</span>
-              <span style={{ color: C.txt, fontWeight: 900, fontSize: 20 }}>{selBatch.price_cents === 0 ? 'GRÁTIS' : fmtCurrency(selBatch.price_cents * qty)}</span>
+            {/* Total aberto: o comprador precisa ver a taxa antes de ir para o pagamento */}
+            <div style={{ padding: '14px 0', borderTop: `1px solid ${C.brd}`, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: C.mut, fontSize: 14 }}>{qty}x {selBatch.name}</span>
+                <span style={{ color: C.sub, fontSize: 14 }}>{selBatch.price_cents === 0 ? 'GRÁTIS' : fmtCurrency(selBatch.price_cents * qty)}</span>
+              </div>
+              {taxaUnit(selBatch) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                  <span style={{ color: C.mut, fontSize: 13 }}>Taxa de serviço</span>
+                  <span style={{ color: C.sub, fontSize: 13 }}>{fmtCurrency(taxaUnit(selBatch) * qty)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.brd}` }}>
+                <span style={{ color: C.txt, fontSize: 14, fontWeight: 700 }}>Total</span>
+                <span style={{ color: C.txt, fontWeight: 900, fontSize: 20 }}>
+                  {selBatch.price_cents === 0 ? 'GRÁTIS' : fmtCurrency((selBatch.price_cents + taxaUnit(selBatch)) * qty)}
+                </span>
+              </div>
             </div>
 
-            <button onClick={submit} disabled={submitting}
-              style={{ width: '100%', background: `linear-gradient(135deg,#1d4ed8,${C.acc})`, color: '#fff', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 800, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit' }}>
-              {submitting ? 'Processando...' : `🎟️ Garantir Ingresso${qty > 1 ? `s (${qty})` : ''}`}
+            {/* PIX em destaque: cai na hora, sem sair do site e sem conta no Mercado Pago */}
+            <button onClick={() => submit('pix')} disabled={submitting}
+              style={{ width: '100%', background: `linear-gradient(135deg,#0e9f6e,${C.grn})`, color: '#04231a', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 800, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit' }}>
+              {submitting ? 'Processando...' : `⚡ Pagar com PIX${qty > 1 ? ` (${qty})` : ''}`}
+            </button>
+            <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', marginTop: 6 }}>
+              Aprovação na hora · o ingresso chega em seguida
+            </div>
+
+            <button onClick={() => submit('card')} disabled={submitting}
+              style={{ width: '100%', marginTop: 12, background: 'transparent', color: C.acc, border: `1px solid ${C.acc}66`, borderRadius: 14, padding: 14, fontSize: 15, fontWeight: 700, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit' }}>
+              💳 Pagar com cartão
             </button>
           </>
         )}
@@ -292,7 +386,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
             {/* MP QR code */}
             {payResult.mode === 'mp' && payResult.qr_code_base64 && (
               <div style={{ background: '#fff', borderRadius: 16, padding: 16, display: 'inline-block', marginBottom: 20 }}>
-                <img src={`data:image/png;base64,${payResult.qr_code_base64}`} alt="PIX QR Code"
+                <img loading="lazy" decoding="async" src={`data:image/png;base64,${payResult.qr_code_base64}`} alt="PIX QR Code"
                   style={{ width: 220, height: 220, display: 'block' }} />
               </div>
             )}
@@ -360,7 +454,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
             {tickets.map((tk, i) => (
               <div key={tk.id} style={{ background: C.card, border: `1px solid ${C.grn}44`, borderRadius: 20, padding: 24, marginBottom: 16, textAlign: 'center' }}>
                 <div style={{ color: C.grn, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
-                  🎟️ Ingresso {tickets.length > 1 ? `${i + 1}/${tickets.length}` : ''}
+                  🎫 Ingresso {tickets.length > 1 ? `${i + 1}/${tickets.length}` : ''}
                 </div>
                 <div style={{ color: C.txt, fontWeight: 800, fontSize: 16, marginBottom: 16 }}>{event.name}</div>
                 <div style={{ background: '#fff', borderRadius: 12, padding: 12, display: 'inline-block', marginBottom: 12 }}>
@@ -378,15 +472,47 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
               </div>
             )}
 
+            {/* Link permanente: se fechar esta aba, o ingresso continua acessível */}
+            {tickets.length > 0 && (
+              <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 16, marginBottom: 16, textAlign: 'left' as const }}>
+                <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, marginBottom: 8 }}>LINK DO SEU INGRESSO</div>
+                <div style={{ color: C.sub, fontSize: 12, wordBreak: 'break-all' as const, marginBottom: 10 }}>
+                  {window.location.origin}/ingresso/{tickets[0].token}
+                </div>
+                <button
+                  onClick={() => copyPix(`${window.location.origin}/ingresso/${tickets[0].token}`)}
+                  style={{ width: '100%', background: C.acc + '22', border: `1px solid ${C.acc}55`, color: C.acc, borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {copied ? '✅ Link copiado' : '🔗 Copiar link'}
+                </button>
+                <div style={{ color: C.mut, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+                  Também enviamos por WhatsApp. Guarde o link — ele reabre seu ingresso quando quiser.
+                </div>
+              </div>
+            )}
+
             <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: 16, marginTop: 8, textAlign: 'left' }}>
               <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, marginBottom: 8 }}>RESUMO</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ color: C.sub, fontSize: 13 }}>Comprador</span>
+                <span style={{ color: C.sub, fontSize: 13 }}>Titular</span>
                 <span style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{order.buyer_name}</span>
+              </div>
+              {form.cpf && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ color: C.sub, fontSize: 13 }}>CPF</span>
+                  <span style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{maskCpf(form.cpf)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ color: C.sub, fontSize: 13 }}>Evento</span>
+                <span style={{ color: C.txt, fontSize: 13, fontWeight: 600, textAlign: 'right' as const }}>{event.name}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ color: C.sub, fontSize: 13 }}>Local</span>
+                <span style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{event.houses?.name ?? ''}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                 <span style={{ color: C.sub, fontSize: 13 }}>Ingresso</span>
-                <span style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{selBatch?.name} × {order.quantity}</span>
+                <span style={{ color: C.txt, fontSize: 13, fontWeight: 600 }}>{selBatch?.name ?? (order as { batch_name?: string }).batch_name} × {order.quantity}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: C.sub, fontSize: 13 }}>Status</span>

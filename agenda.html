@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NightPass — Minha Agenda</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Minha Agenda">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<meta property="og:title" content="Minha Agenda — NightPass">
+<meta property="og:description" content="Suas tarefas e eventos.">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#f5f0e1;font-family:Inter,sans-serif;min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
+.wrap{max-width:520px;margin:0 auto;padding:20px 16px 40px}
+.head{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.head-txt{flex:1;min-width:0}
+.bell{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.bell span{font-size:15px;line-height:1;opacity:.85}
+.avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;color:#fff;flex-shrink:0}
+.head h1{font-size:20px;font-weight:900}
+.head .sub{color:#a89a7d;font-size:12px;margin-top:2px}
+.stat-row{display:flex;gap:8px;margin-bottom:20px}
+.stat{flex:1;background:#161222;border:1px solid #2a2036;border-radius:12px;padding:10px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.stat:active{transform:scale(.97)}
+.stat.sel{background:#1e1733;border-color:#7c3aed}
+.today{background:linear-gradient(135deg,#2a1f4a,#1a1330);border:1px solid #7c3aed66;border-radius:16px;padding:16px;margin-bottom:14px}
+.today-tag{display:inline-block;background:#7c3aed33;color:#c4b5fd;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;letter-spacing:.05em;margin-bottom:6px}
+.act{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.act button{flex:1;min-width:120px;border:none;border-radius:10px;padding:11px;font-size:14px;font-weight:800;font-family:inherit;cursor:pointer}
+.b-in{background:linear-gradient(135deg,#10b981,#059669);color:#fff}
+.b-out{background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b55!important}
+.stat b{display:block;font-size:20px;font-weight:900}
+.stat span{font-size:10px;color:#a89a7d;text-transform:uppercase;letter-spacing:.05em}
+.ev{background:#161222;border:1px solid #2a2036;border-radius:16px;padding:16px;margin-bottom:14px}
+.ev-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px}
+.ev-name{font-size:17px;font-weight:800;color:#fff}
+.ev-date{color:#a89a7d;font-size:12px;margin-bottom:2px}
+.badge{font-size:10px;font-weight:800;border-radius:20px;padding:3px 10px;white-space:nowrap}
+.b-conf{background:#10b98122;color:#10b981;border:1px solid #10b98144}
+.b-pend{background:#f59e0b22;color:#f59e0b;border:1px solid #f59e0b44}
+.b-done{background:#3b82f622;color:#3b82f6;border:1px solid #3b82f644}
+.progress{height:5px;background:#0a0a0f;border-radius:3px;overflow:hidden;margin:12px 0}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,#10b981,#059669);border-radius:3px;transition:width .3s}
+.area-h{font-size:11px;color:#a89a7d;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:12px 0 6px}
+.task{display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid #1e1a2a}
+.task:last-child{border-bottom:none}
+/* 44px = alvo mínimo de toque (salão escuro, gente com pressa) */
+.chk{width:44px;height:44px;border-radius:12px;border:2px solid #2a2036;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px;background:#0a0a0f;transition:all .15s;-webkit-tap-highlight-color:transparent}
+.chk:active{transform:scale(.92)}
+.chk.on{background:#10b981;border-color:#10b981;color:#fff}
+/* Execução da tarefa: Feito / Não feito (a negativa pede explicação) */
+.t-acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.t-acts button{flex:1;min-width:110px;min-height:44px;border-radius:10px;font-size:13px;font-weight:800;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.t-acts button:active{transform:scale(.97)}
+.t-ok{background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none}
+.t-no{background:#f8717118;color:#f87171;border:1px solid #f8717155}
+.t-done{background:#10b98118;color:#10b981;border:1px solid #10b98144}
+.t-blocked{background:#f871710d;border-left:3px solid #f87171;padding-left:10px;border-radius:8px}
+/* Progresso do dia — noção de "quanto falta" sem esconder a lista */
+.prog-box{background:#161222;border:1px solid #2a2036;border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.prog-top{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#a89a7d}
+.prog-top b{color:#fff;font-size:15px;font-weight:900}
+.prog-warn{margin-top:8px;font-size:11px;color:#f87171;font-weight:700}
+.blk{margin-top:8px;background:#f8717114;border:1px solid #f8717133;border-radius:8px;padding:8px 10px;font-size:12px;color:#f87171;font-weight:700;line-height:1.45}
+.task-body{flex:1;min-width:0}
+.task-title{font-size:14px;font-weight:700;line-height:1.3}
+.task-title.done{color:#6b7280;text-decoration:line-through}
+.task-desc{color:#a89a7d;font-size:12px;margin-top:2px}
+.task-meta{font-size:11px;margin-top:3px}
+.overdue{color:#f87171;font-weight:700}
+.empty{text-align:center;padding:50px 20px;color:#a89a7d}
+.empty .ic{font-size:52px;margin-bottom:12px}
+.spinner{width:34px;height:34px;border:3px solid #2a2036;border-top-color:#a78bfa;border-radius:50%;animation:spin .8s linear infinite;margin:80px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);padding:11px 22px;border-radius:12px;font-size:13px;font-weight:700;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.foot{text-align:center;color:#4b4658;font-size:11px;margin-top:24px}
+.upc-h{font-size:12px;color:#a89a7d;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:4px 0 8px}
+.upc{display:flex;align-items:center;gap:12px;background:#161222;border:1px solid #2a2036;border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.upc-date{width:44px;height:44px;border-radius:10px;background:#7c3aed22;border:1px solid #7c3aed55;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;line-height:1}
+.upc-date b{font-size:16px;font-weight:900;color:#a78bfa}
+.upc-date span{font-size:8px;color:#a78bfa;text-transform:uppercase;margin-top:1px}
+.upc-body{flex:1;min-width:0}
+.upc-name{font-size:14px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upc-sub{font-size:11px;color:#a89a7d;margin-top:2px}
+/* Carrossel de eventos da casa — rola pro lado com encaixe (snap) */
+.carousel{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
+  scrollbar-width:none;padding:2px 16px 10px;margin:0 -16px}
+.carousel::-webkit-scrollbar{display:none}
+.upc-card{flex:0 0 84%;max-width:300px;scroll-snap-align:start;background:#161222;border:1px solid #2a2036;
+  border-radius:14px;padding:12px}
+.upc-top{display:flex;align-items:center;gap:10px}
+.upc-nums{display:flex;gap:8px;margin-top:10px}
+.upc-nums>div{flex:1;background:#0a0a0f;border:1px solid #2a2036;border-radius:10px;padding:8px;text-align:center}
+.upc-nums b{display:block;font-size:18px;font-weight:900;line-height:1}
+.upc-nums span{font-size:9px;color:#a89a7d}
+.upc-btn{width:100%;margin-top:10px;min-height:44px;background:#7c3aed22;border:1px solid #7c3aed55;color:#c4b5fd;
+  border-radius:10px;padding:10px;font-size:13px;font-weight:800;font-family:inherit;cursor:pointer}
+.upc-btn:active{transform:scale(.98)}
+.upc-res{text-align:right;flex-shrink:0}
+.upc-res b{font-size:17px;font-weight:900;color:#f59e0b;display:block}
+.upc-res span{font-size:9px;color:#a89a7d}
+.inst{background:#161222;border:1px solid #7c3aed55;border-radius:16px;padding:14px;margin-top:18px}
+.inst h3{font-size:14px;font-weight:800;color:#fff;margin-bottom:3px}
+.inst p{color:#a89a7d;font-size:12px;line-height:1.5}
+.inst button{width:100%;margin-top:10px;background:linear-gradient(135deg,#7c3aed,#1d4ed8);border:none;border-radius:12px;padding:12px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit}
+.inst .steps{margin-top:10px;background:#0a0a0f;border:1px solid #2a2036;border-radius:10px;padding:10px 12px;color:#c9bfa8;font-size:12px;line-height:1.6}
+.inst .steps b{color:#fff}
+.sw{position:relative;width:52px;height:30px;flex-shrink:0;border:none;border-radius:999px;background:#2a2036;cursor:pointer;padding:0;transition:background .2s;font-family:inherit}
+.sw.on{background:#10b981}
+.sw i{position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:left .2s}
+.sw.on i{left:25px}
+.sw.sm{width:38px;height:22px}
+.sw.sm i{width:18px;height:18px;top:2px;left:2px}
+.sw.sm.on i{left:18px}
+.uni{width:34px;height:34px;border-radius:9px;flex-shrink:0;object-fit:cover;background:#1a1424;border:1px solid #2a2036}
+.uni-wrap{position:relative;width:34px;height:34px;flex-shrink:0}
+.ev-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;max-width:42%}
+.ev-right .uni-nome{text-align:right;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.uni-wrap .uni,.uni-wrap .uni-ini{position:absolute;top:0;left:0}
+.uni-ini{width:34px;height:34px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#7c3aed,#a78bfa);color:#fff;font-size:13px;font-weight:900;letter-spacing:-.02em}
+.uni-nome{font-size:11px;color:#a89a7d;font-weight:700}
+.steps{margin:8px 0 4px;border-left:2px solid #2a2036;padding-left:10px}
+.steps-h{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#a89a7d;font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.steps-bar{height:4px;background:#1a1424;border-radius:3px;overflow:hidden;margin-bottom:6px}
+.steps-bar i{display:block;height:100%;background:linear-gradient(90deg,#10b981,#059669);transition:width .25s}
+.step{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:none;padding:8px 0;color:#e8ecf5;font-size:13.5px;font-family:inherit;cursor:pointer;line-height:1.25}
+.step b{width:21px;height:21px;border-radius:6px;border:2px solid #3a3048;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;color:#fff;font-weight:700}
+.step.done b{background:#10b981;border-color:#10b981}
+.step.done span{color:#a89a7d;text-decoration:line-through}
+/* alvo de toque de ~44px sem engordar o desenho do interruptor */
+.sw.sm::after{content:'';position:absolute;inset:-11px -8px}
+</style>
+</head>
+<body>
+<div class="wrap"><div id="app"><div class="spinner"></div></div><div id="installBar"></div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
+<script>
+(function(){
+var SB=window.supabase.createClient('https://irghwfzcbazujddfftsx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw');
+var app=document.getElementById('app');
+var token=new URLSearchParams(window.location.search).get('t');
+var data=null, busy={}, team=[], openEv={}, view='home', sent=[], pushOn=false, reports=[], resList=[], resEvName='';
+// Carimbado no build (copy-static.js). Em dev fica o literal.
+var APP_BUILD='__APP_BUILD__';
+
+// O app da equipe fica ABERTO a noite inteira. Sem isto, quem entrou no comeco do turno
+// segue rodando o codigo daquela hora. Conferimos ao voltar para a tela e de tempos em tempos.
+window.conferirVersao=function(){
+  if(APP_BUILD.indexOf('__')===0)return;                 // dev: nao ha o que comparar
+  fetch('/version.json',{cache:'no-store'}).then(function(r){ return r.ok?r.json():null; }).then(function(v){
+    if(!v||!v.build||v.build===APP_BUILD)return;
+    var b=document.getElementById('np-upd');
+    if(b)return;                                          // ja avisamos
+    b=document.createElement('div');
+    b.id='np-upd';
+    b.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 16px);z-index:90;display:flex;align-items:center;gap:10px;background:#141a2e;border:1px solid #7c3aed88;border-radius:999px;padding:8px 10px 8px 16px;box-shadow:0 10px 30px rgba(0,0,0,.45);max-width:calc(100vw - 24px)';
+    b.innerHTML='<span style="color:#e8ecf5;font-size:13px;font-weight:600;white-space:nowrap">✨ Nova versão</span>'
+      +'<button style="border:none;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;color:#fff;background:linear-gradient(135deg,#7c3aed,#6d28d9);font-family:inherit;cursor:pointer" onclick="location.reload()">Atualizar</button>'
+      +'<button aria-label="Agora não" style="background:none;border:none;color:#a89a7d;font-size:16px;cursor:pointer;padding:0 4px" onclick="this.parentNode.remove()">✕</button>';
+    document.body.appendChild(b);
+  }).catch(function(){});
+}
+
+// ── Manifest dinâmico: instalado, o app abre DIRETO nesta agenda (com o token na URL) ──
+try{
+  var mf={name:'Minha Agenda — NightPass',short_name:'Minha Agenda',
+    start_url:location.pathname+location.search,scope:location.pathname,
+    display:'standalone',orientation:'portrait-primary',
+    background_color:'#0a0a0f',theme_color:'#7c3aed',lang:'pt-BR',
+    icons:[{src:'/icon-192.png',sizes:'192x192',type:'image/png',purpose:'any'},
+           {src:'/icon-512.png',sizes:'512x512',type:'image/png',purpose:'maskable'}]};
+  var mlink=document.querySelector('link[rel="manifest"]')||document.createElement('link');
+  mlink.rel='manifest';
+  mlink.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/manifest+json'}));
+  if(!mlink.parentNode)document.head.appendChild(mlink);
+}catch(e){}
+
+// ── Instalar na tela inicial (para não precisar reenviar o link) ──
+var deferredPrompt=null, showSteps=false;
+var ua=navigator.userAgent||'';
+var isIOS=/iphone|ipad|ipod/i.test(ua);
+var isInApp=/FBAN|FBAV|FB_IAB|Instagram|Line\//i.test(ua)||/WhatsApp|WeChat|MicroMessenger|Twitter|Snapchat|TikTok/i.test(ua);
+var standalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();deferredPrompt=e;renderInstall();});
+window.addEventListener('appinstalled',function(){deferredPrompt=null;standalone=true;renderInstall();});
+
+function renderInstall(){
+  var el=document.getElementById('installBar'); if(!el)return;
+  // Só na tela inicial — nas telas internas o convite de instalar vira ruído
+  if(standalone||!token||view!=='home'){el.innerHTML='';return;}
+  var body='';
+  if(isInApp){
+    body='<p>Para instalar, abra este link no navegador do celular.</p>'
+      +'<div class="steps"><b>1.</b> Toque no menu <b>⋯</b> no canto da tela e escolha <b>“Abrir no navegador”</b> (Safari/Chrome).<br><b>2.</b> Lá vai aparecer o botão para instalar.</div>';
+  }else if(deferredPrompt){
+    body='<p>Instale e abra sua agenda direto pelo ícone, sem precisar do link.</p><button id="instBtn">📲 Instalar app</button>';
+  }else if(isIOS){
+    body='<p>Instale e abra sua agenda direto pelo ícone, sem precisar do link.</p><button id="instBtn">📲 Como instalar</button>'
+      +(showSteps?'<div class="steps">No iPhone: toque em <b>Compartilhar</b> ⎙ na barra do Safari e escolha <b>“Adicionar à Tela de Início”</b>.</div>':'');
+  }else{
+    body='<p>Abra este link no celular e toque em instalar para ter sua agenda como app.</p>';
+  }
+  el.innerHTML='<div class="inst"><h3>📲 Tenha sua agenda no celular</h3>'+body+'</div>';
+  var b=document.getElementById('instBtn');
+  if(b)b.onclick=function(){
+    if(deferredPrompt){deferredPrompt.prompt();deferredPrompt.userChoice.then(function(){deferredPrompt=null;renderInstall();});}
+    else{showSteps=!showSteps;renderInstall();}
+  };
+}
+
+function toast(msg,ok){
+  var t=document.createElement('div');
+  t.className='toast'; t.style.background=ok?'#10b981':'#f87171'; t.style.color='#fff'; t.textContent=msg;
+  document.body.appendChild(t); setTimeout(function(){t.remove();},2600);
+}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// Capitaliza só a 1ª letra (o CSS capitalize gerava "Terça-Feira, 04 De Agosto")
+function cap1(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+function fmtDate(d){return cap1(new Date(d+'T12:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'}));}
+function fmtDeadline(d){return new Date(d).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+
+// Ponto só abre 10 min antes do horário combinado. Sem horário, libera sempre.
+// Espelha a regra do servidor (freelancer_clock) só para não deixar a pessoa tocar em vão.
+function pontoAbre(e){
+  if(!e.entry_time)return null;
+  var hm=String(e.entry_time).slice(0,5).split(':');
+  var d=new Date(e.event_date+'T00:00:00');
+  if(parseInt(hm[0],10)<6)d.setDate(d.getDate()+1);   // madrugada = noite seguinte
+  d.setHours(parseInt(hm[0],10),parseInt(hm[1],10),0,0);
+  return new Date(d.getTime()-10*60000);
+}
+function hhmm(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+
+// Sino de avisos no canto superior direito: e uma preferencia DO APARELHO, entao fica
+// fora da lista de tarefas e aparece em todas as telas.
+// Selo da unidade. Quem atende mais de um estabelecimento precisa saber, olhando o
+// card, em qual casa e o evento. Sem logo cadastrada, cai nas iniciais do nome.
+function uniHtml(nome, logo){
+  var n = (nome||'').trim();
+  if(!n && !logo) return '';
+  var ini = uniIniciais(n);
+  if(!logo) return ini;
+  // Iniciais por baixo, logo por cima. Se a imagem falhar ela se remove e sobra o selo.
+  // Nada de montar HTML dentro do onerror: as aspas duplas cortavam o proprio atributo.
+  return '<div class="uni-wrap">'+ini+'<img class="uni" src="'+esc(logo)+'" alt="'+esc(n)+'" onerror="this.remove()"></div>';
+}
+function uniIniciais(nome){
+  var p = (nome||'?').trim().split(/\s+/).filter(Boolean);
+  var ini = (p[0]||'?').charAt(0) + (p.length>1 ? p[p.length-1].charAt(0) : '');
+  return '<div class="uni-ini" title="'+esc(nome||'')+'">'+esc(ini.toUpperCase())+'</div>';
+}
+
+function bellHtml(){
+  if(!pushSupported())return '';
+  var negado=('Notification' in window)&&Notification.permission==='denied';
+  var titulo=negado?'Avisos bloqueados no navegador — toque para ver como liberar'
+            :(pushOn?'Avisos ligados neste aparelho — toque para desligar'
+                    :'Avisos desligados — toque para receber aviso de tarefa nova');
+  return '<div class="bell"><span>'+(pushOn?'🔔':'🔕')+'</span>'
+    +'<button class="sw sm'+(pushOn?' on':'')+'" onclick="'+(pushOn?'disablePush()':'enablePush()')+'"'
+    +' title="'+titulo+'" aria-label="'+titulo+'"><i></i></button></div>';
+}
+
+function render(){
+  if(!data){app.innerHTML='<div class="empty"><div class="ic">🔒</div><div>Link inválido ou colaborador inativo.</div></div>';return;}
+  var f=data.freelancer, evs=data.events||[], upc=data.upcoming||[];
+  var initial=(f.name||'?').trim().charAt(0).toUpperCase();
+
+  // Dia OPERACIONAL: antes das 6h ainda é "a noite de ontem" — assim o evento que vira
+  // a madrugada não some da tela às 00h (e o ponto continua funcionando).
+  var now=new Date();
+  var ref=new Date(now);
+  if(now.getHours()<6) ref.setDate(ref.getDate()-1);
+  var todayStr=ref.getFullYear()+'-'+('0'+(ref.getMonth()+1)).slice(-2)+'-'+('0'+ref.getDate()).slice(-2);
+
+  // allEvs guarda tudo (inclusive encerrados) — usado só pelo histórico "Feitas".
+  // evs = de hoje em diante: é o que conta no card e aparece na lista (antes divergiam).
+  var allEvs=evs;
+  evs=evs.filter(function(e){ return !e.event_date || e.event_date>=todayStr; });
+  // Card de evento = evento em que a pessoa foi ESCALADA. Tarefa recebida para um evento
+  // sem escala nao vira card (parecia que ela trabalha nesse dia) - segue em "A fazer".
+  var mine=evs.filter(function(e){return e.scaled;});
+  var todayEv=mine.filter(function(e){return e.event_date===todayStr;})[0];
+
+  // Tarefas achatadas (com o evento de origem) — base das telas "A fazer" e "Feitas".
+  // Pendentes de evento que JÁ PASSOU não aparecem mais (não há o que fazer com elas).
+  var pend=[], done=[];
+  allEvs.forEach(function(e){
+    var passou = e.event_date && e.event_date < todayStr;
+    (e.tasks||[]).forEach(function(t){
+      if(t.status==='done'){ done.push({t:t,ev:e.name,ic:'🎉'}); return; }  // histórico mantém tudo
+      if(passou) return;               // pendente de evento encerrado → oculta
+      pend.push({t:t,ev:e.name,ic:'🎉'});
+    });
+  });
+  // Tarefas do dia a dia (sem evento): nunca "passaram", entao entram sempre.
+  // Antes elas nem chegavam ao app — o gestor criava e so o WhatsApp avisava.
+  (data.avulsas||[]).forEach(function(tk){
+    if(tk.status==='done') done.push({t:tk,ev:'Dia a dia',ic:'🧹'});
+    else pend.push({t:tk,ev:'Dia a dia',ic:'🧹'});
+  });
+
+  var byDeadline=function(a,b){
+    var da=a.t.deadline?new Date(a.t.deadline).getTime():Infinity;
+    var db=b.t.deadline?new Date(b.t.deadline).getTime():Infinity;
+    return da-db;
+  };
+  pend.sort(byDeadline);
+
+  function taskHtml(t, evName, evIcon){
+    var isDone=t.status==='done';
+    var isBlocked=t.status==='blocked';
+    var overdue=!isDone&&!isBlocked&&t.deadline&&new Date(t.deadline)<new Date();
+    var h='<div class="task'+(isBlocked?' t-blocked':'')+'">';
+    h+='<div class="task-body"><div class="task-title'+(isDone?' done':'')+'">'+esc(t.title)+'</div>';
+    if(evName)h+='<div class="task-desc">'+(evIcon||'🎉')+' '+esc(evName)+'</div>';
+    if(t.description)h+='<div class="task-desc">'+esc(t.description)+'</div>';
+    if(t.deadline)h+='<div class="task-meta '+(overdue?'overdue':'')+'" style="color:'+(overdue?'':'#a89a7d')+'">⏰ '+fmtDeadline(t.deadline)+(overdue?' — VENCIDO':'')+'</div>';
+    if(isBlocked&&t.block_reason)h+='<div class="blk">⚠️ Não foi feito: '+esc(t.block_reason)+'<br><span style="color:#a89a7d;font-weight:400">Relatado ao gestor</span></div>';
+    // Subtarefas: a tarefa vira uma checklist. Marcar o último passo conclui a tarefa
+    // sozinha (regra no servidor), então aqui não existe estado inconsistente.
+    var steps=t.steps||[];
+    if(steps.length){
+      var sdn=0; steps.forEach(function(s){ if(s.done)sdn++; });
+      h+='<div class="steps"><div class="steps-h"><span>Subtarefas</span><span style="color:'+(sdn===steps.length?'#10b981':'#a89a7d')+'">'+sdn+' de '+steps.length+'</span></div>';
+      h+='<div class="steps-bar"><i style="width:'+Math.round(sdn/steps.length*100)+'%"></i></div>';
+      steps.forEach(function(s){
+        h+='<button class="step'+(s.done?' done':'')+'" onclick="toggleStep(\''+s.id+'\','+(s.done?'false':'true')+')">'
+          +'<b>'+(s.done?'✓':'')+'</b><span>'+esc(s.title)+'</span></button>';
+      });
+      h+='</div>';
+    }
+    // Ações: Feito / Não feito (a negativa exige explicação e vira ocorrência)
+    if(isDone){
+      h+='<div class="t-acts"><button class="t-done" onclick="toggleTask(\''+t.id+'\',false)">✅ Feito · desfazer</button></div>';
+    }else if(isBlocked){
+      h+='<div class="t-acts"><button class="t-ok" onclick="toggleTask(\''+t.id+'\',true)">✅ Resolvi, feito</button></div>';
+    }else{
+      h+='<div class="t-acts">'
+        +'<button class="t-ok" onclick="toggleTask(\''+t.id+'\',true)">✅ '+(steps.length?'Concluir tudo':'Feito')+'</button>'
+        +'<button class="t-no" onclick="blockTask(\''+t.id+'\')">⚠️ Não feito</button>'
+        +'</div>';
+    }
+    h+='</div></div>';
+    return h;
+  }
+
+  function eventCard(e){
+    var passou = e.event_date && e.event_date < todayStr;
+    // Evento que já passou: mostra só o que foi concluído (as pendentes não têm mais o que fazer)
+    var tasks=(e.tasks||[]).filter(function(t){ return passou ? t.status==='done' : true; });
+    var dn=tasks.filter(function(t){return t.status==='done';}).length;
+    var pct=tasks.length?Math.round(dn/tasks.length*100):0;
+    var open=!!openEv[e.id];
+    var badge = passou ? '<span class="badge b-done">📦 Encerrado</span>'
+              : tasks.length && dn===tasks.length ? '<span class="badge b-done">✅ Tudo pronto</span>'
+              : e.confirmed ? '<span class="badge b-conf">✅ Confirmado</span>'
+              : '<span class="badge b-pend">⏳ '+(tasks.length-dn)+' pendente(s)</span>';
+    var h='<div class="ev">';
+    h+='<div class="ev-head" style="cursor:pointer" onclick="toggleEv(\''+e.id+'\')">'
+      +'<div style="min-width:0"><div class="ev-name">'+(open?'▾':'▸')+' '+esc(e.name)+'</div>'
+      +'<div class="ev-date">📅 '+fmtDate(e.event_date)+(e.start_time?' · 🕒 '+e.start_time.slice(0,5):'')+'</div>'
+      +(e.role?'<div class="ev-date">🏷️ '+esc(e.role)+'</div>':'')+'</div>'
+      +'<div class="ev-right">'+uniHtml(e.house_name, e.house_logo)
+      +(e.house_name?'<div class="uni-nome">'+esc(e.house_name)+'</div>':'')
+      +badge+'</div></div>';
+    if(tasks.length)h+='<div class="progress"><i style="width:'+pct+'%"></i></div>';
+    // Confirmação de escala: só para eventos futuros/hoje em que está escalado e ainda não respondeu
+    if(e.scaled && !e.responded_at && e.event_date >= todayStr){
+      h+='<div class="task-meta" style="margin-top:8px">Você foi escalado. Confirma presença?</div>';
+      h+='<div class="act">'
+        +'<button class="b-in" onclick="confirmShift(event,\''+e.id+'\',true)">✅ Confirmo</button>'
+        +'<button class="b-out" onclick="confirmShift(event,\''+e.id+'\',false)">❌ Não posso</button>'
+        +'</div>';
+    }else if(e.scaled && e.responded_at){
+      h+='<div class="task-meta" style="color:'+(e.confirmed?'#10b981':'#f87171')+'">'+(e.confirmed?'✅ Presença confirmada por você':'❌ Você informou que não poderá ir')+'</div>';
+    }
+    // Ponto: só no dia do evento e para quem está escalado
+    if(e.scaled && e.event_date===todayStr){
+      var abre=pontoAbre(e);
+      h+='<div class="act">';
+      if(!e.checkin_at){
+        if(abre&&new Date()<abre) h+='<button class="b-in" style="opacity:.55" disabled>🔒 Ponto abre às '+hhmm(abre)+'</button>';
+        else h+='<button class="b-in" onclick="clockIn(\''+e.id+'\',\'in\')">📍 Cheguei</button>';
+      }
+      else if(!e.checkout_at) h+='<button class="b-out" onclick="clockIn(\''+e.id+'\',\'out\')">👋 Registrar saída</button>';
+      else h+='<button class="b-out" style="opacity:.6" disabled>✔ Jornada registrada</button>';
+      h+='</div>';
+      if(!e.checkin_at&&abre&&new Date()<abre)
+        h+='<div class="task-meta">Entrada combinada para as '+String(e.entry_time).slice(0,5)+'.</div>';
+    }
+    if(open){
+      if(tasks.length){
+        var byArea={};
+        tasks.forEach(function(t){var k=(t.area_icon||'📋')+' '+(t.area||'Geral');(byArea[k]=byArea[k]||[]).push(t);});
+        Object.keys(byArea).forEach(function(area){
+          h+='<div class="area-h">'+esc(area)+'</div>';
+          byArea[area].forEach(function(t){ h+=taskHtml(t, null); });
+        });
+      }else{
+        h+='<div class="task-desc" style="padding:8px 0">Sem tarefas atribuídas a você neste evento.</div>';
+      }
+    }
+    h+='</div>';
+    return h;
+  }
+
+  // ── Cabeçalho + navegação (cards clicáveis) ──
+  var html='<div class="head"><div class="avatar">'+esc(initial)+'</div>'
+    +'<div class="head-txt"><h1>Olá, '+esc((f.name||'').split(' ')[0])+'! 👋</h1><div class="sub">'+(view==='home'?'Sua agenda de hoje':view==='eventos'?'Seus eventos':view==='todo'?'Tarefas a fazer':view==='sent'?'Tarefas que você enviou':view==='report'?'Ocorrências':view==='res'?'Reservas do evento':'Tarefas concluídas')+'</div></div>'
+    +bellHtml()+'</div>';
+  html+='<div class="stat-row">'
+     +'<div class="stat'+(view==='eventos'?' sel':'')+'" onclick="setView(\'eventos\')"><b style="color:#a78bfa">'+mine.length+'</b><span>Eventos</span></div>'
+     +'<div class="stat'+(view==='todo'?' sel':'')+'" onclick="setView(\'todo\')"><b style="color:#f59e0b">'+pend.length+'</b><span>A fazer</span></div>'
+     +'<div class="stat'+(view==='done'?' sel':'')+'" onclick="setView(\'done\')"><b style="color:#10b981">'+done.length+'</b><span>Feitas</span></div>'
+     +((f&&f.can_delegate)?'<div class="stat'+(view==='sent'?' sel':'')+'" onclick="setView(\'sent\')"><b style="color:#22d3ee">'+(sent.filter(function(s){return s.status!=='done';}).length)+'</b><span>Enviadas</span></div>':'')
+     +'</div>';
+  if(view!=='home'){
+    html+='<div style="margin-bottom:12px"><button onclick="setView(\'home\')" style="background:none;border:1px solid #2a2036;color:#a89a7d;border-radius:10px;padding:7px 12px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer">← Início</button></div>';
+  }
+
+  // ── TELA INICIAL: evento de hoje + tarefas pendentes ──
+  if(view==='home'){
+    if(todayEv){
+      var tks=todayEv.tasks||[];
+      var tdn=tks.filter(function(t){return t.status==='done';}).length;
+      html+='<div class="today">';
+      html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
+        +'<div style="min-width:0"><div class="today-tag">🔥 HOJE</div>'
+        +'<div class="ev-name">'+esc(todayEv.name)+'</div></div>'
+        +'<div class="ev-right">'+uniHtml(todayEv.house_name, todayEv.house_logo)
+        +(todayEv.house_name?'<div class="uni-nome">'+esc(todayEv.house_name)+'</div>':'')
+        +'</div></div>';
+      html+='<div class="ev-date">🕒 '+(todayEv.start_time?todayEv.start_time.slice(0,5):'a definir')+(todayEv.role?' · 🏷️ '+esc(todayEv.role):'')+'</div>';
+      if(todayEv.entry_time)html+='<div class="ev-date">⏱️ Sua entrada: '+String(todayEv.entry_time).slice(0,5)+'</div>';
+      if(todayEv.checkin_at){
+        var ci=new Date(todayEv.checkin_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+        html+='<div class="ev-date" style="color:#10b981;font-weight:700">✅ Entrada registrada às '+ci+(todayEv.checkout_at?' · 👋 saída '+new Date(todayEv.checkout_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'')+'</div>';
+      }
+      if(tks.length)html+='<div class="ev-date">📋 '+tdn+'/'+tks.length+' tarefas concluídas</div>';
+      // Ponto pelo app (só se estiver escalado no evento)
+      html+='<div class="act">';
+      if(todayEv.scaled){
+        if(!todayEv.checkin_at){
+          var abreHoje=pontoAbre(todayEv);
+          if(abreHoje&&new Date()<abreHoje)
+            html+='<button class="b-in" style="opacity:.55" disabled>🔒 Ponto abre às '+hhmm(abreHoje)+'</button>';
+          else
+            html+='<button class="b-in" onclick="clockIn(\''+todayEv.id+'\',\'in\')">📍 Cheguei</button>';
+        }else if(!todayEv.checkout_at){
+          html+='<button class="b-out" onclick="clockIn(\''+todayEv.id+'\',\'out\')">👋 Registrar saída</button>';
+        }else{
+          html+='<button class="b-out" style="opacity:.6" disabled>✔ Jornada registrada</button>';
+        }
+      }
+      html+='<button class="b-in" style="background:#7c3aed" onclick="setView(\'eventos\');toggleEv(\''+todayEv.id+'\')">Ver tarefas</button>';
+      html+='</div>';
+      if(todayEv.scaled&&!todayEv.checkin_at&&f.geo_on)html+='<div class="task-meta" style="margin-top:8px">📍 O ponto é validado pela sua localização — precisa estar na casa.</div>';
+      html+='</div>';
+    }else{
+      var next=mine.filter(function(e){return e.event_date>todayStr;})[0];
+      html+='<div class="ev"><div class="task-desc" style="padding:4px 0">'
+        +(next?'📅 Sem evento hoje. Seu próximo: <b style="color:#fff">'+esc(next.name)+'</b> em '+fmtDate(next.event_date)
+              +'<br><span style="color:#a89a7d">📍 O botão de bater ponto aparece aqui no dia do evento.</span>'
+             :'📅 Você não tem eventos agendados no momento.')
+        +'</div></div>';
+    }
+
+    html+='<div class="upc-h">📋 Minhas tarefas'+(pend.length?' ('+pend.length+')':'')+'</div>';
+    // Progresso do dia: dá a noção de conjunto ("quanto falta") sem esconder nada
+    (function(){
+      var doneHoje=done.length, totalHoje=pend.length+doneHoje;
+      if(totalHoje===0)return;
+      var pctHoje=Math.round(doneHoje/totalHoje*100);
+      var travadas=pend.filter(function(p){return p.t.status==='blocked';}).length;
+      html+='<div class="prog-box">'
+        +'<div class="prog-top"><span><b>'+doneHoje+'</b> de <b>'+totalHoje+'</b> concluídas</span>'
+        +'<span style="color:'+(pctHoje===100?'#10b981':'#a89a7d')+'">'+pctHoje+'%</span></div>'
+        +'<div class="progress" style="margin:8px 0 0"><i style="width:'+pctHoje+'%"></i></div>'
+        +(travadas?'<div class="prog-warn">⚠️ '+travadas+' com problema relatado</div>':'')
+        +'</div>';
+    })();
+    if(pend.length===0){
+      html+='<div class="ev"><div class="task-desc" style="padding:6px 0">🎉 Nenhuma tarefa pendente. Bom trabalho!</div></div>';
+    }else{
+      // Não repete o nome do evento quando é o mesmo já mostrado no card acima
+      var destaque=todayEv?todayEv.name:(mine.filter(function(e){return e.event_date>todayStr;})[0]||{}).name;
+      html+='<div class="ev">';
+      pend.slice(0,6).forEach(function(p){ html+=taskHtml(p.t, p.ev===destaque?null:p.ev, p.ic); });
+      html+='</div>';
+      if(pend.length>6)html+='<div style="margin:-6px 0 14px"><button onclick="setView(\'todo\')" style="width:100%;background:none;border:1px dashed #2a2036;color:#a89a7d;border-radius:10px;padding:9px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer">Ver todas as '+pend.length+' tarefas →</button></div>';
+    }
+
+    // Atalhos
+    html+='<div style="display:grid;gap:8px;margin-bottom:14px">';
+    if(f&&f.can_delegate){
+      html+='<button onclick="setView(\'sent\')" style="width:100%;background:#141a2e;border:1px solid #2a3350;color:#22d3ee;border-radius:12px;padding:12px;font-size:14px;font-weight:800;font-family:inherit;cursor:pointer">📤 Enviar tarefa à equipe →</button>';
+    }
+    html+='<button onclick="setView(\'report\')" style="width:100%;background:#2a1f14;border:1px solid #f59e0b44;color:#f59e0b;border-radius:12px;padding:12px;font-size:14px;font-weight:800;font-family:inherit;cursor:pointer">📣 Relatar ocorrência →</button>';
+    html+='</div>';
+  }
+
+  // ── OCORRÊNCIAS: avisar ADM / líder (ex.: "falta morango", "não tem cadeiras") ──
+  if(view==='report'){
+    var ipR='width:100%;box-sizing:border-box;background:#0d1120;border:1px solid #2a3350;border-radius:10px;padding:10px 12px;color:#e8ecf5;font-size:14px;font-family:inherit;margin-bottom:8px;';
+    var evsHoje=evs.filter(function(e){return e.event_date>=todayStr;});
+    html+='<div class="upc-h">📣 Nova ocorrência</div>';
+    html+='<div style="background:#141a2e;border:1px solid #2a3350;border-radius:14px;padding:12px;margin-bottom:16px">';
+    html+='<div style="display:flex;gap:8px;margin-bottom:8px">'
+      +'<select id="rpTarget" style="'+ipR+'margin-bottom:0"><option value="adm">Para a Administração</option><option value="lider">Para o Líder</option></select>'
+      +'<select id="rpCat" style="'+ipR+'margin-bottom:0">'
+        +'<option value="compra">🛒 Compra</option><option value="equipamento">🔧 Equipamento</option>'
+        +'<option value="limpeza">🧹 Limpeza</option><option value="seguranca">🛡️ Segurança</option>'
+        +'<option value="geral" selected>📋 Geral</option></select>'
+      +'</div>';
+    html+='<select id="rpEvent" style="'+ipR+'"><option value="">Sem evento (geral)</option>'
+      +evsHoje.map(function(u){var d2=new Date(u.event_date+'T12:00');return '<option value="'+u.id+'">'+esc(u.name)+' · '+('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'</option>';}).join('')+'</select>';
+    html+='<textarea id="rpMsg" rows="3" placeholder="Ex.: precisa comprar morango / não tem cadeiras no salão" style="'+ipR+'resize:vertical"></textarea>';
+    html+='<button onclick="sendReport()" style="width:100%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">📣 Enviar ocorrência</button>';
+    html+='</div>';
+
+    html+='<div class="upc-h">📨 Minhas ocorrências'+(reports.length?' ('+reports.length+')':'')+'</div>';
+    if(reports.length===0){
+      html+='<div class="ev"><div class="task-desc" style="padding:6px 0">Você ainda não relatou nada.</div></div>';
+    }else{
+      html+='<div class="ev">';
+      reports.forEach(function(r){
+        var ok=r.status==='resolvido';
+        var quando=new Date(r.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+        html+='<div class="task"><div class="chk'+(ok?' on':'')+'" style="cursor:default">'+(ok?'✓':'')+'</div>';
+        html+='<div class="task-body"><div class="task-title'+(ok?' done':'')+'">'+esc(r.message)+'</div>';
+        html+='<div class="task-desc">'+(r.target==='lider'?'👤 Líder':'🏢 ADM')+' · '+esc(r.category||'geral')+(r.event_name?' · 🎉 '+esc(r.event_name):'')+'</div>';
+        html+='<div class="task-meta" style="color:'+(ok?'#10b981':'#a89a7d')+'">'+(ok?'✅ Resolvido':'⏳ Aguardando')+' · enviado '+quando+'</div>';
+        html+='</div></div>';
+      });
+      html+='</div>';
+    }
+  }
+
+  // ── EVENTOS: só os que você está escalado / tem tarefa ──
+  if(view==='eventos'){
+    if(mine.length===0){
+      html+='<div class="empty"><div class="ic">🎭</div><div>Você ainda não foi escalado em nenhum evento.</div></div>';
+    }else{
+      mine.forEach(function(e){ html+=eventCard(e); });
+    }
+    // Agenda da casa (só para quem tem permissão de ver todos os eventos)
+    if(upc.length){
+      // Carrossel: aqui é navegação/exploração (não checklist), então passar o dedo
+      // pro lado é natural — e economiza muita altura de tela.
+      html+='<div class="upc-h">🎉 Agenda da casa'+(upc.length>1?' <span style="text-transform:none;font-weight:400">· deslize →</span>':'')+'</div>';
+      html+='<div class="carousel">';
+      upc.forEach(function(u){
+        var d=new Date(u.event_date+'T12:00');
+        var dd=('0'+d.getDate()).slice(-2), mm=('0'+(d.getMonth()+1)).slice(-2);
+        var mon=d.toLocaleDateString('pt-BR',{month:'short'}).replace('.','');
+        var wd=cap1(d.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.',''));
+        html+='<div class="upc-card">'
+          +'<div class="upc-top"><div class="upc-date"><b>'+dd+'</b><span>'+esc(mon)+'</span></div>'
+          +'<div class="upc-body"><div class="upc-name">'+esc(u.name)+'</div>'
+          +'<div class="upc-sub">'+esc(wd)+', '+dd+'/'+mm+(u.start_time?' · '+u.start_time.slice(0,5):'')+'</div></div></div>'
+          +'<div class="upc-nums">'
+            +'<div><b style="color:#22d3ee">'+(u.convidados||0)+'</b><span>👥 convidados</span></div>'
+            +'<div><b style="color:#f59e0b">'+(u.reservas||0)+'</b><span>🪑 reservas</span></div>'
+          +'</div>'
+          +((u.reservas||0)>0?'<button class="upc-btn" onclick="openRes(\''+u.id+'\',\''+esc(u.name).replace(/'/g,"\\'")+'\')">🪑 Montar reservas</button>':'')
+          +'</div>';
+      });
+      html+='</div>';
+    }
+  }
+
+  // ── ENVIADAS: acompanhamento das tarefas que EU deleguei ──
+  if(view==='sent'){
+    // Formulário de envio — só eventos em que VOCÊ está escalado (regra também no servidor)
+    var minhasEscalas=evs.filter(function(e){return e.scaled && e.event_date>=todayStr;});
+    var ipS='width:100%;box-sizing:border-box;background:#0d1120;border:1px solid #2a3350;border-radius:10px;padding:10px 12px;color:#e8ecf5;font-size:14px;font-family:inherit;margin-bottom:8px;';
+    html+='<div class="upc-h">📤 Nova tarefa</div>';
+    html+='<div style="background:#141a2e;border:1px solid #2a3350;border-radius:14px;padding:12px;margin-bottom:16px">';
+    html+='<input id="dtTitle" placeholder="Tarefa (ex: Montar bar 2)" style="'+ipS+'">';
+    html+='<select id="dtTarget" style="'+ipS+'"><option value="">Para quem…</option>'
+      +team.map(function(m){return '<option value="'+m.id+'">'+esc(m.full_name)+(m.staff_type==='funcionario'?' · funcionário':'')+'</option>';}).join('')+'</select>';
+    html+='<select id="dtEvent" style="'+ipS+'"><option value="">Sem evento (geral)</option>'
+      +minhasEscalas.map(function(u){var d2=new Date(u.event_date+'T12:00');return '<option value="'+u.id+'">'+esc(u.name)+' · '+('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'</option>';}).join('')+'</select>';
+    html+='<input id="dtDeadline" type="datetime-local" style="'+ipS+'">';
+    html+='<button onclick="sendDeleg()" style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">✅ Enviar tarefa</button>';
+    if(minhasEscalas.length===0)html+='<div class="task-meta" style="margin-top:8px">Você não está escalado em nenhum evento futuro — só dá para enviar tarefa geral.</div>';
+    html+='</div>';
+
+    if(sent.length===0){
+      html+='<div class="empty"><div class="ic">📤</div><div>Você ainda não enviou tarefas.<br>Use o formulário acima.</div></div>';
+    }else{
+      var pendS=sent.filter(function(s){return s.status!=='done';});
+      var doneS=sent.filter(function(s){return s.status==='done';});
+      var blocks=[['⏳ Aguardando ('+pendS.length+')',pendS],['✅ Concluídas ('+doneS.length+')',doneS]];
+      blocks.forEach(function(b){
+        if(b[1].length===0)return;
+        html+='<div class="upc-h">'+b[0]+'</div><div class="ev">';
+        b[1].forEach(function(s){
+          var isDone=s.status==='done';
+          var overdue=!isDone&&s.deadline&&new Date(s.deadline)<new Date();
+          html+='<div class="task"><div class="chk'+(isDone?' on':'')+'" style="cursor:default">'+(isDone?'✓':'')+'</div>';
+          html+='<div class="task-body"><div class="task-title'+(isDone?' done':'')+'">'+esc(s.title)+'</div>';
+          html+='<div class="task-desc">👤 '+esc(s.assignee_name||'—')+(s.event_name?' · 🎉 '+esc(s.event_name):'')+'</div>';
+          if(isDone&&s.completed_at){
+            html+='<div class="task-meta" style="color:#10b981">✅ Concluída em '+fmtDeadline(s.completed_at)+'</div>';
+          }else if(s.deadline){
+            html+='<div class="task-meta '+(overdue?'overdue':'')+'" style="color:'+(overdue?'':'#a89a7d')+'">⏰ '+fmtDeadline(s.deadline)+(overdue?' — VENCIDO':'')+'</div>';
+          }
+          html+='</div></div>';
+        });
+        html+='</div>';
+      });
+    }
+  }
+
+  // ── RESERVAS DO EVENTO (montar mesas) ──
+  if(view==='res'){
+    html+='<div class="upc-h">🪑 Reservas · '+esc(resEvName)+'</div>';
+    if(resList.length===0){
+      html+='<div class="empty"><div class="ic">🪑</div><div>Nenhuma reserva para este evento.</div></div>';
+    }else{
+      var totPax=resList.reduce(function(s,r){return s+(r.people||0);},0);
+      html+='<div class="stat-row" style="margin-bottom:12px">'
+        +'<div class="stat" style="cursor:default"><b style="color:#a78bfa">'+resList.length+'</b><span>Reservas</span></div>'
+        +'<div class="stat" style="cursor:default"><b style="color:#22d3ee">'+totPax+'</b><span>Pessoas</span></div>'
+        +'</div>';
+      // agrupa por local (mesa/camarote) para facilitar a montagem
+      var byLoc={};
+      resList.forEach(function(r){ var k=r.location||'Sem local definido'; (byLoc[k]=byLoc[k]||[]).push(r); });
+      Object.keys(byLoc).sort().forEach(function(loc){
+        html+='<div class="area-h">📍 '+esc(loc)+'</div><div class="ev">';
+        byLoc[loc].forEach(function(r){
+          html+='<div class="task"><div style="width:26px;flex-shrink:0;text-align:center;font-size:16px">🪑</div>'
+            +'<div class="task-body"><div class="task-title">'+esc(r.name)+' · '+(r.people||0)+'p</div>'
+            +(r.arrival?'<div class="task-meta">🕐 chega '+esc(String(r.arrival).slice(0,5))+'</div>':'')
+            +(r.obs?'<div class="task-desc">📝 '+esc(r.obs)+'</div>':'')
+            +'</div></div>';
+        });
+        html+='</div>';
+      });
+    }
+  }
+
+  // ── A FAZER / FEITAS ──
+  if(view==='todo'||view==='done'){
+    var list=view==='todo'?pend:done;
+    if(list.length===0){
+      html+='<div class="empty"><div class="ic">'+(view==='todo'?'🎉':'📭')+'</div><div>'+(view==='todo'?'Nenhuma tarefa pendente. Bom trabalho!':'Nenhuma tarefa concluída ainda.')+'</div></div>';
+    }else{
+      html+='<div class="ev">';
+      list.forEach(function(p){ html+=taskHtml(p.t, p.ev, p.ic); });
+      html+='</div>';
+    }
+  }
+
+  html+='<div class="foot">Powered by NightPass 🎭<br><span style="opacity:.6;font-size:10px">v'+APP_BUILD+'</span></div>';
+  app.innerHTML=html;
+  setBadge(pend.length);
+}
+
+// ── Bater ponto pelo app (com verificação de local por GPS) ──
+window.clockIn=function(evId,action){
+  if(busy['clock'])return;
+  var label=action==='in'?'entrada':'saída';
+  function send(lat,lng){
+    SB.rpc('freelancer_clock',{p_token:token,p_event:evId,p_action:action,p_lat:lat,p_lng:lng}).then(function(r){
+      busy['clock']=false;
+      var d=r.data||{};
+      if(r.error||!d.ok){ toast(d.error||'Não foi possível registrar',false); return; }
+      toast(action==='in'?'✅ Entrada registrada!':'👋 Saída registrada!',true);
+      SB.rpc('freelancer_agenda',{p_token:token}).then(function(rr){ if(!rr.error){data=rr.data; render();} });
+    });
+  }
+  busy['clock']=true;
+  toast('📍 Obtendo sua localização…',true);
+  if(!navigator.geolocation){ send(null,null); return; }
+  pegarLocal(
+    function(lat,lng){ send(lat,lng); },
+    function(motivo){
+      busy['clock']=false;
+      toast(motivo==='negada'
+        ? 'A localização está bloqueada para este site. Toque no cadeado 🔒 ao lado do endereço e libere "Local".'
+        : 'Não conseguimos ler sua localização (sinal fraco aqui dentro). Aguarde alguns segundos e toque de novo.', false);
+    }
+  );
+};
+
+// GPS preciso costuma ESTOURAR o tempo dentro da casa mesmo com a localização ligada
+// — era isso que fazia o app pedir para "ativar a localização" já ativada.
+// 1ª tentativa: GPS fino. 2ª: aceita rede/wi-fi e posição recente, que funciona sob laje.
+function pegarLocal(ok,falhou){
+  function tentar2(){
+    navigator.geolocation.getCurrentPosition(
+      function(p){ ok(p.coords.latitude,p.coords.longitude); },
+      function(e2){ falhou(e2&&e2.code===1?'negada':'semsinal'); },
+      {enableHighAccuracy:false,timeout:20000,maximumAge:120000}
+    );
+  }
+  navigator.geolocation.getCurrentPosition(
+    function(p){ ok(p.coords.latitude,p.coords.longitude); },
+    function(err){ if(err&&err.code===1){ falhou('negada'); return; } tentar2(); },
+    {enableHighAccuracy:true,timeout:8000,maximumAge:0}
+  );
+}
+
+// Marca/desmarca uma subtarefa. O servidor conclui (ou reabre) a tarefa dona.
+window.toggleStep=function(id,done){
+  if(busy[id])return; busy[id]=true;
+  SB.rpc('freelancer_step_toggle',{p_token:token,p_step_id:id,p_done:done}).then(function(r){
+    busy[id]=false;
+    var d=r.data||{};
+    if(r.error||!d.ok){ toast((d&&d.error)||'Não foi possível marcar',false); return; }
+    if(done&&d.tarefa_concluida)toast('✅ Tarefa concluída!',true);
+    SB.rpc('freelancer_agenda',{p_token:token}).then(function(rr){ if(!rr.error){data=rr.data; render();} });
+  });
+};
+
+// ── Confirmar / recusar escala ──
+window.confirmShift=function(ev,evId,yes){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+  var reason=null;
+  if(!yes){ reason=prompt('Motivo (opcional):')||null; }
+  SB.rpc('freelancer_confirm_shift',{p_token:token,p_event:evId,p_confirm:yes,p_reason:reason}).then(function(r){
+    var d=r.data||{};
+    if(r.error||!d.ok){ toast(d.error||'Não foi possível responder',false); return; }
+    toast(yes?'✅ Presença confirmada!':'Registrado. A casa foi avisada.',true);
+    SB.rpc('freelancer_agenda',{p_token:token}).then(function(rr){ if(!rr.error){data=rr.data; render();} });
+  });
+};
+
+// Abre as reservas do evento (para a equipe montar as mesas)
+window.openRes=function(evId,evName){
+  resEvName=evName||''; resList=[]; setView('res');
+  SB.rpc('freelancer_event_reservations',{p_token:token,p_event:evId}).then(function(r){
+    if(!r.error){ resList=r.data||[]; render(); }
+  });
+};
+
+window.setView=function(v){ view=v; render(); renderInstall(); window.scrollTo(0,0); };
+window.toggleEv=function(id){ openEv[id]=!openEv[id]; render(); };
+
+// "Não feito": exige explicação e gera ocorrência para o gestor
+window.blockTask=function(id){
+  var motivo=prompt('O que impediu? (vai para o gestor)\n\nEx.: fritadeira em 150°C, fora do padrão');
+  if(motivo===null)return;                       // cancelou
+  if(!motivo.trim()){ toast('Explique o que aconteceu',false); return; }
+  if(busy[id])return; busy[id]=true;
+  SB.rpc('freelancer_task_block',{p_token:token,p_task_id:id,p_reason:motivo.trim()}).then(function(r){
+    busy[id]=false;
+    var d=r.data||{};
+    if(r.error||!d.ok){ toast(d.error||'Não foi possível registrar',false); return; }
+    toast('⚠️ Registrado e enviado ao gestor',true);
+    SB.rpc('freelancer_agenda',{p_token:token}).then(function(rr){ if(!rr.error){data=rr.data; render();} });
+    loadReports();
+  });
+};
+
+window.toggleTask=function(id,done){
+  if(busy[id])return; busy[id]=true;
+  SB.rpc('freelancer_task_toggle',{p_token:token,p_task_id:id,p_done:done}).then(function(r){
+    busy[id]=false;
+    if(r.error||r.data===false){toast('Não foi possível atualizar',false);return;}
+    // atualiza estado local
+    (data.events||[]).forEach(function(e){(e.tasks||[]).forEach(function(t){if(t.id===id){t.status=done?'done':'pending';t.completed_at=done?new Date().toISOString():null;t.block_reason=null;}});});
+    render();
+    toast(done?'✅ Tarefa concluída!':'↩️ Reaberta',true);
+  });
+};
+
+window.sendDeleg=function(){
+  var title=(document.getElementById('dtTitle')||{}).value||'';
+  var target=(document.getElementById('dtTarget')||{}).value||'';
+  var event=(document.getElementById('dtEvent')||{}).value||'';
+  var deadline=(document.getElementById('dtDeadline')||{}).value||'';
+  if(!title.trim()){toast('Informe a tarefa',false);return;}
+  if(!target){toast('Escolha para quem enviar',false);return;}
+  var isoDeadline=deadline?new Date(deadline).toISOString():null;
+  SB.rpc('freelancer_create_task',{p_token:token,p_target:target,p_title:title.trim(),p_deadline:isoDeadline,p_event:event||null}).then(function(r){
+    var d=r.data||{};
+    if(r.error||!d.ok){toast('Erro: '+(d.error||'falha'),false);return;}
+    toast('✅ Tarefa enviada para '+(d.assignee||'colaborador'),true);
+    // notifica o destinatário: WhatsApp + push no celular (ambos em segundo plano)
+    try{ SB.functions.invoke('notify-task',{body:{token:token,assignee_id:target,title:title.trim(),event_id:event||null,deadline:isoDeadline}}); }catch(e){}
+    try{ SB.functions.invoke('push-send',{body:{token:token,assignee_id:target,title:'📋 Nova tarefa',body:title.trim(),url:'/agenda.html'}}); }catch(e){}
+    // recarrega a agenda (atualiza contadores) e a lista de enviadas
+    SB.rpc('freelancer_agenda',{p_token:token}).then(function(rr){ if(!rr.error){data=rr.data; render(); renderInstall();} });
+    loadSent();
+  });
+};
+
+// Volta do segundo plano → recarrega. Sem isto, tarefa criada pelo gestor so
+// aparecia se a pessoa fechasse e abrisse o app.
+var ultimoLoad = Date.now();
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState!=='visible')return;
+  if(Date.now()-ultimoLoad < 15000)return;          // evita recarregar a cada toque
+  ultimoLoad = Date.now();
+  SB.rpc('freelancer_agenda',{p_token:token}).then(function(r){
+    if(!r.error&&r.data){ data=r.data; render(); }
+  });
+  conferirVersao();
+});
+
+// ── Avisos no celular (Web Push) ──
+function pushSupported(){ return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window); }
+
+function b64ToUint8(b64){
+  var pad='='.repeat((4 - b64.length % 4) % 4);
+  var s=(b64+pad).replace(/-/g,'+').replace(/_/g,'/');
+  var raw=atob(s), arr=new Uint8Array(raw.length);
+  for(var i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i);
+  return arr;
+}
+
+// Descobre se este device já está inscrito
+function checkPush(){
+  if(!pushSupported())return;
+  navigator.serviceWorker.ready.then(function(reg){
+    return reg.pushManager.getSubscription();
+  }).then(function(sub){ if(sub){ pushOn=true; render(); } }).catch(function(){});
+}
+
+window.enablePush=function(){
+  if(!pushSupported()){ toast('Seu celular/navegador não suporta avisos',false); return; }
+  if(busy['push'])return; busy['push']=true;
+  Notification.requestPermission().then(function(perm){
+    if(perm!=='granted'){
+      busy['push']=false;
+      toast(perm==='denied'
+        ? 'Avisos bloqueados para este site. Toque no cadeado 🔒 ao lado do endereço e libere "Notificações".'
+        : 'Você precisa permitir os avisos', false);
+      return;
+    }
+    return navigator.serviceWorker.ready.then(function(reg){
+      return SB.rpc('push_public_key').then(function(r){
+        if(r.error||!r.data){ throw new Error('sem chave'); }
+        return reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:b64ToUint8(r.data) });
+      });
+    }).then(function(sub){
+      var j=sub.toJSON();
+      return SB.rpc('freelancer_push_subscribe',{p_token:token,p_endpoint:j.endpoint,p_p256dh:j.keys.p256dh,p_auth:j.keys.auth});
+    }).then(function(r){
+      busy['push']=false;
+      var d=(r&&r.data)||{};
+      if((r&&r.error)||!d.ok){ toast('Não foi possível ativar os avisos',false); return; }
+      pushOn=true; toast('🔔 Avisos ativados neste celular!',true); render();
+    });
+  }).catch(function(){ busy['push']=false; toast('Não foi possível ativar os avisos',false); });
+};
+
+window.disablePush=function(){
+  if(busy['push'])return; busy['push']=true;
+  navigator.serviceWorker.ready.then(function(reg){
+    return reg.pushManager.getSubscription();
+  }).then(function(sub){
+    if(!sub){ pushOn=false; busy['push']=false; render(); return; }
+    var ep=sub.endpoint;
+    return sub.unsubscribe().then(function(){
+      return SB.rpc('freelancer_push_unsubscribe',{p_token:token,p_endpoint:ep});
+    }).then(function(){
+      pushOn=false; busy['push']=false; setBadge(0);
+      toast('🔕 Avisos desligados neste aparelho',true); render();
+    });
+  }).catch(function(){ busy['push']=false; toast('Não foi possível desligar os avisos',false); });
+};
+
+// Número no ícone do app (mesmo padrão do WhatsApp). O service worker atualiza quando
+// chega push com o app fechado; aqui corrigimos o valor sempre que a tela é montada.
+function setBadge(n){
+  try{
+    if(!('setAppBadge' in navigator))return;
+    if(n>0)navigator.setAppBadge(n); else if(navigator.clearAppBadge)navigator.clearAppBadge();
+  }catch(e){}
+}
+
+// ── Ocorrências ──
+function loadReports(){
+  SB.rpc('freelancer_my_reports',{p_token:token}).then(function(r){ if(!r.error){ reports=r.data||[]; render(); } });
+}
+
+window.sendReport=function(){
+  var msg=(document.getElementById('rpMsg')||{}).value||'';
+  if(!msg.trim()){ toast('Escreva a ocorrência',false); return; }
+  if(busy['rep'])return; busy['rep']=true;
+  var target=(document.getElementById('rpTarget')||{}).value||'adm';
+  var cat=(document.getElementById('rpCat')||{}).value||'geral';
+  var evId=(document.getElementById('rpEvent')||{}).value||null;
+  SB.rpc('freelancer_report',{p_token:token,p_message:msg.trim(),p_target:target,p_category:cat,p_event:evId}).then(function(r){
+    busy['rep']=false;
+    var d=r.data||{};
+    if(r.error||!d.ok){ toast(d.error||'Não foi possível enviar',false); return; }
+    toast('📣 Ocorrência enviada!',true);
+    var el=document.getElementById('rpMsg'); if(el)el.value='';
+    loadReports();
+  });
+};
+
+// Tarefas que este colaborador delegou (para a aba "Enviadas")
+function loadSent(){
+  SB.rpc('freelancer_sent_tasks',{p_token:token}).then(function(r){
+    if(!r.error){ sent=r.data||[]; render(); }
+  });
+}
+
+function init(){
+  renderInstall();
+  // Service worker: necessário para receber os avisos com o app fechado
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/sw.js').then(function(){ checkPush(); }).catch(function(){});
+  }
+  setTimeout(conferirVersao, 4000);
+  setInterval(conferirVersao, 15*60*1000);
+  if(!token){app.innerHTML='<div class="empty"><div class="ic">🔒</div><div>Link inválido.</div></div>';return;}
+  SB.rpc('freelancer_agenda',{p_token:token}).then(function(r){
+    if(r.error){app.innerHTML='<div class="empty"><div class="ic">⚠️</div><div>Erro ao carregar. Tente novamente.</div></div>';return;}
+    data=r.data;
+    render();
+    renderInstall();
+    loadReports();
+    // carrega a equipe (destinos) e as tarefas enviadas, se este colaborador pode delegar
+    if(data.freelancer&&data.freelancer.can_delegate){
+      SB.rpc('freelancer_team',{p_token:token}).then(function(rt){ if(!rt.error){team=rt.data||[]; render();} });
+      loadSent();
+    }
+  });
+}
+init();
+})();
+</script>
+</body>
+</html>

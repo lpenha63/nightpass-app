@@ -1,11 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useSession } from './hooks/useSession'
+import { useSession, guardarCasa } from './hooks/useSession'
+import { UpdateBar } from './components/UpdateBar'
 import { supabase } from './lib/supabase'
-import { C } from './constants/theme'
+import { C, initTheme } from './constants/theme'
+import { useTheme } from './hooks/useTheme'
+
+// Aplica o tema salvo antes do primeiro render (evita flash)
+initTheme()
 import { Sidebar, type PageId } from './components/Sidebar'
 import { BottomNav } from './components/BottomNav'
 import { WhatsAppBar } from './components/WhatsAppBar'
 import { useWhatsAppStatus } from './hooks/useWhatsAppStatus'
+import { useSubscription } from './hooks/useSubscription'
+import { SubscriptionGate } from './components/SubscriptionGate'
 import { DashboardPage } from './pages/Dashboard'
 import { CheckinPage } from './pages/Checkin'
 import { ClientsPage } from './pages/Clients'
@@ -16,7 +23,10 @@ import { ReportsPage } from './pages/Reports'
 import { EventsPage } from './pages/Events'
 import { PromotersPage } from './pages/Promoters'
 import { FreelancersPage } from './pages/Freelancers'
+import { AgendaPage } from './pages/Agenda'
 import { EventPublicPage } from './pages/EventPublic'
+import { TicketPublicPage } from './pages/TicketPublic'
+import { PagamentoRetornoPage } from './pages/PagamentoRetorno'
 import { SettingsPage } from './pages/Settings'
 import { ReservaPublicPage } from './pages/ReservaPublic'
 import { ListaPublicPage } from './pages/ListaPublic'
@@ -29,6 +39,14 @@ export default function App() {
   // Public event page: /e/[eventId]
   const publicMatch = window.location.pathname.match(/^\/e\/([a-f0-9-]{36})$/)
   if (publicMatch) return <EventPublicPage eventId={publicMatch[1]} />
+
+  // Retorno do Checkout Pro: /pagamento/[order_id]
+  const pagtoMatch = window.location.pathname.match(/^\/pagamento\/([a-f0-9-]{36})$/i)
+  if (pagtoMatch) return <PagamentoRetornoPage orderId={pagtoMatch[1]} />
+
+  // Ticket recovery page: /ingresso/[token]
+  const ingressoMatch = window.location.pathname.match(/^\/ingresso\/([a-f0-9-]{36})$/i)
+  if (ingressoMatch) return <TicketPublicPage token={ingressoMatch[1]} />
 
   // Public reservation page: /reserva/[token]
   const reservaMatch = window.location.pathname.match(/^\/reserva\/([a-zA-Z0-9_-]+)$/)
@@ -53,6 +71,7 @@ export default function App() {
   // Birthday guest registration: /niver-guest/[token]
   const niverGuestMatch = window.location.pathname.match(/^\/niver-guest\/([a-zA-Z0-9_-]+)$/)
   if (niverGuestMatch) return <NiverGuestPage token={niverGuestMatch[1]} />
+  useTheme() // re-renderiza (estilos inline seguem o tema) ao trocar
   const { session, setSession, checked } = useSession()
   const [active, setActive] = useState<PageId>('dashboard')
   const pageHistoryRef = useRef<PageId[]>([])
@@ -81,18 +100,25 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState)
   }, [active])
 
-  function navigateTo(page: PageId) {
+  // useCallback: referência estável → Sidebar/BottomNav (memoizados) não re-renderizam
+  // a cada check-in em tempo real / poll do WhatsApp, só quando a navegação de fato muda.
+  const navigateTo = useCallback((page: PageId) => {
+    // Bloqueia navegação para páginas não liberadas (ex: colaborador só acessa a agenda)
+    if (session && !session.allowedPages.includes(page)) {
+      page = (session.allowedPages.find(p => !p.includes('.')) ?? 'dashboard') as PageId
+    }
     if (page !== active) {
       pageHistoryRef.current = [...pageHistoryRef.current, active]
       window.history.pushState({ page }, '')
     }
     setActive(page)
-  }
+  }, [session, active])
 
-  // Redirect to dashboard if current page is not allowed
+  // Redirect to the first allowed page if current page is not allowed (ex: colaborador → agenda)
   useEffect(() => {
     if (session && !session.allowedPages.includes(active)) {
-      navigateTo('dashboard')
+      const first = (session.allowedPages.find(p => !p.includes('.')) ?? 'dashboard') as PageId
+      navigateTo(first)
     }
   }, [session?.allowedPages])
   const [mOpen, setMOpen] = useState(false)
@@ -140,10 +166,15 @@ export default function App() {
   // Fonte única de status do WhatsApp (compartilhada por barra do topo + sidebar)
   const wa = useWhatsAppStatus(session?.house?.id)
 
-  async function handleLogout() {
+  // Assinatura SaaS da casa — controla bloqueio/banner de trial
+  const { sub, loading: subLoading, refresh: refreshSub } = useSubscription(session?.house?.id)
+
+  const handleLogout = useCallback(async () => {
     await supabase.auth.signOut()
     setSession(null)
-  }
+  }, [setSession])
+
+  const openWhatsApp = useCallback(() => navigateTo('whatsapp'), [navigateTo])
 
   if (!checked) {
     return (
@@ -157,25 +188,45 @@ export default function App() {
     return <LoginPage onLogin={setSession} />
   }
 
-  const pages: Record<PageId, React.ReactNode> = {
-    dashboard: <DashboardPage house={session.house} user={session.user} role={session.role} />,
-    checkin:   <CheckinPage house={session.house} user={session.user} role={session.role} />,
-    clients:   <ClientsPage house={session.house} user={session.user} role={session.role} />,
-    events:    <EventsPage house={session.house} onGoToReservas={(date, eventId) => { setReservaNav({ date, eventId }); navigateTo('reservas') }} />,
-    reservas:  <ReservasPage house={session.house} user={session.user} initialNav={reservaNav} onNavConsumed={() => setReservaNav(null)} />,
-    promoters: <PromotersPage house={session.house} user={session.user} />,
-    reports:   <ReportsPage house={session.house} />,
-    whatsapp:  <WhatsAppPage house={session.house} />,
-    users:       <UsersPage house={session.house} user={session.user} role={session.role} />,
-    freelancers: <FreelancersPage house={session.house} onRatingsChanged={refreshPending} />,
-    settings:    <SettingsPage house={session.house} />,
+  // Página efetiva: se a atual não é liberada, cai na primeira permitida (evita flash de página proibida)
+  const safeActive: PageId = session.allowedPages.includes(active)
+    ? active
+    : ((session.allowedPages.find(p => !p.includes('.')) ?? 'dashboard') as PageId)
+
+  // Cria APENAS o elemento da página ativa (antes o objeto recriava os 12 a cada render)
+  // Troca de unidade: grava a preferência e recarrega. Dezenas de telas guardam dados
+  // da casa em estado próprio (eventos, listas, caixa) — recarregar é a única forma
+  // barata de garantir que nada da casa anterior sobre na tela.
+  function trocarCasa(houseId: string) {
+    guardarCasa(houseId)
+    window.location.reload()
+  }
+
+  const sess = session
+  function renderPage(id: PageId): React.ReactNode {
+    switch (id) {
+      case 'dashboard':   return <DashboardPage house={sess.house} user={sess.user} role={sess.role} houses={sess.houses} onTrocarCasa={trocarCasa} />
+      case 'checkin':     return <CheckinPage house={sess.house} user={sess.user} role={sess.role} />
+      case 'clients':     return <ClientsPage house={sess.house} user={sess.user} role={sess.role} />
+      case 'events':      return <EventsPage house={sess.house} role={sess.role} allowedPages={sess.allowedPages} onGoToReservas={(date, eventId) => { setReservaNav({ date, eventId }); navigateTo('reservas') }} />
+      case 'reservas':    return <ReservasPage house={sess.house} user={sess.user} initialNav={reservaNav} onNavConsumed={() => setReservaNav(null)} />
+      case 'promoters':   return <PromotersPage house={sess.house} user={sess.user} />
+      case 'reports':     return <ReportsPage house={sess.house} />
+      case 'whatsapp':    return <WhatsAppPage house={sess.house} />
+      case 'users':       return <UsersPage house={sess.house} user={sess.user} role={sess.role} />
+      case 'freelancers': return <FreelancersPage house={sess.house} onRatingsChanged={refreshPending} />
+      case 'settings':    return <SettingsPage house={sess.house} session={sess} sub={sub} refreshSub={refreshSub} />
+      case 'agenda':      return <AgendaPage house={sess.house} user={sess.user} role={sess.role} />
+      default:            return null
+    }
   }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: C.bg }}>
+      <UpdateBar />
       <Sidebar
         session={session}
-        active={active}
+        active={safeActive}
         setActive={navigateTo}
         mOpen={mOpen}
         setMOpen={setMOpen}
@@ -183,19 +234,23 @@ export default function App() {
         pendingRatings={pendingRatings}
         onLogout={handleLogout}
         waStatus={wa.status}
+        onTrocarCasa={trocarCasa}
       />
       <main
         className="np-main page-anim"
-        key={active}
+        key={safeActive}
         style={{ marginLeft: 240, flex: 1, minHeight: '100vh', overflowY: 'auto', background: C.bg }}
       >
-        <WhatsAppBar status={wa.status} reconnect={wa.reconnect} reconnecting={wa.reconnecting} onOpenSettings={() => navigateTo('whatsapp')} />
-        <div className="np-content" style={{ padding: '16px 32px' }}>
-          {pages[active]}
+        <WhatsAppBar status={wa.status} reconnect={wa.reconnect} reconnecting={wa.reconnecting} onOpenSettings={openWhatsApp} />
+        <div className="np-content" style={{ padding: '46px 32px 24px' }}>
+          {/* Configurações fica sempre acessível (é onde se regulariza a assinatura) */}
+          {safeActive === 'settings'
+            ? renderPage(safeActive)
+            : <SubscriptionGate session={session} sub={sub} loading={subLoading}>{renderPage(safeActive)}</SubscriptionGate>}
         </div>
       </main>
       <BottomNav
-        active={active}
+        active={safeActive}
         setActive={navigateTo}
         setMOpen={setMOpen}
         newCI={newCI}

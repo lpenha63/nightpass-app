@@ -6,6 +6,14 @@
 <title>NightPass - Convite</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#d4a017">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Você foi convidado! 🎉">
+<meta property="og:description" content="Confirme sua presença e acesse os detalhes do evento.">
+<meta property="og:image" content="https://nightpass-app.vercel.app/icon-512.png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://nightpass-app.vercel.app/icon-512.png">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -77,10 +85,14 @@ input:focus{border-color:#d4a01766}
 (function(){
 var SB_URL='https://irghwfzcbazujddfftsx.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw';
-var SB=window.supabase.createClient(SB_URL,SB_KEY);
 var app=document.getElementById('app');
 var params=new URLSearchParams(window.location.search);
 var token=params.get('t');
+// O RLS das reservas exige o token do link neste cabeçalho; sem ele a página
+// não lê a reserva e mostrava "convite expirado" mesmo com link válido.
+var SB=window.supabase.createClient(SB_URL,SB_KEY,{
+  global:{headers:{'x-np-token':token||''}}
+});
 var data=null;
 var event=null;
 var house=null;
@@ -207,27 +219,42 @@ window.register=function(){
   if(btn){btn.disabled=true;btn.textContent='Enviando...';}
   submitted=true;
 
-  SB.from('reservation_guests').insert({
-    reservation_id:data.id,
-    house_id:data.house_id,
-    name:name,
-    phone:phone||null,
-    birth_date:bdate||null,
-    confirmed:false
-  }).then(function(r){
-    if(r.error){
+  function doInsert(){
+    SB.from('reservation_guests').insert({
+      reservation_id:data.id,
+      house_id:data.house_id,
+      name:name,
+      phone:phone||null,
+      birth_date:bdate||null,
+      confirmed:false
+    }).then(function(r){
+      if(r.error){
+        submitted=false;
+        if(btn){btn.disabled=false;btn.textContent='Confirmar minha presença ✅';}
+        showToast('Erro: '+r.error.message,'error');
+        return;
+      }
+      // Tenta criar cliente no sistema
+      SB.from('clients').select('id').eq('house_id',data.house_id).ilike('full_name',name).then(function(cr){
+        if(!cr.data||cr.data.length===0){
+          SB.from('clients').insert({house_id:data.house_id,full_name:name,phone:phone||null,source:'guest_invite',status:'active'});
+        }
+      });
+      renderSuccess(name);
+    });
+  }
+
+  // Evita cadastro em duplicidade: mesmo telefone (se informado) ou mesmo nome já confirmados nesta reserva
+  var dupQuery=SB.from('reservation_guests').select('id').eq('reservation_id',data.id);
+  dupQuery=phone ? dupQuery.eq('phone',phone) : dupQuery.ilike('name',name);
+  dupQuery.then(function(dr){
+    if(dr.data&&dr.data.length>0){
       submitted=false;
       if(btn){btn.disabled=false;btn.textContent='Confirmar minha presença ✅';}
-      showToast('Erro: '+r.error.message,'error');
+      showToast('Você já está confirmado nesta lista!','error');
       return;
     }
-    // Tenta criar cliente no sistema
-    SB.from('clients').select('id').eq('house_id',data.house_id).ilike('full_name',name).then(function(cr){
-      if(!cr.data||cr.data.length===0){
-        SB.from('clients').insert({house_id:data.house_id,full_name:name,phone:phone||null,source:'guest_invite',status:'active'});
-      }
-    });
-    renderSuccess(name);
+    doInsert();
   });
 };
 

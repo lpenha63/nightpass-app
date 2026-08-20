@@ -4,9 +4,19 @@ import { C } from '../constants/theme'
 import { Card, Toast, Btn } from '../components/ui'
 import { sT, type ToastState } from '../utils/toast'
 import { fmtWAPhone } from '../utils/whatsapp'
-import type { House, WhatsAppConfig } from '../types'
+import { useTheme } from '../hooks/useTheme'
+import { SubscriptionSection } from '../components/SubscriptionGate'
+import { painelUnidadesLigado, setPainelUnidades } from '../hooks/useSession'
+import { APP_BUILD } from '../components/UpdateBar'
+import { SetupGuide } from '../components/SetupGuide'
+import type { House, WhatsAppConfig, Session, SaasSubscription } from '../types'
 
-interface Props { house: House }
+interface Props {
+  house: House
+  session?: Session
+  sub?: SaasSubscription | null
+  refreshSub?: () => void
+}
 
 interface HouseConfig {
   // Empresa
@@ -61,12 +71,6 @@ function Field({ label, hint, half, children }: { label: string; hint?: string; 
   )
 }
 
-const INP: React.CSSProperties = {
-  width: '100%', background: C.bg, border: `1px solid ${C.brd}`,
-  borderRadius: 10, padding: '10px 13px', color: C.txt, fontSize: 14,
-  fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
-}
-
 function fmtCNPJ(v: string) {
   const d = v.replace(/\D/g, '').slice(0, 14)
   return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
@@ -76,7 +80,13 @@ function fmtCNPJ(v: string) {
          .replace(/^(\d{2})$/, '$1')
 }
 
-export function SettingsPage({ house }: Props) {
+export function SettingsPage({ house, session, sub, refreshSub }: Props) {
+  const INP: React.CSSProperties = {
+    width: '100%', background: C.bg, border: `1px solid ${C.brd}`,
+    borderRadius: 10, padding: '10px 13px', color: C.txt, fontSize: 14,
+    fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+  }
+  const { theme, setTheme } = useTheme()
   const [config, setConfig] = useState<HouseConfig>(EMPTY)
   const [waConfig, setWaConfig] = useState<WhatsAppConfig | null>(null)
   const [loading, setLoading] = useState(true)
@@ -98,6 +108,7 @@ export function SettingsPage({ house }: Props) {
   const [changingPass, setChangingPass] = useState(false)
   const [showNewPass, setShowNewPass] = useState(false)
   const [myEmail, setMyEmail] = useState('')
+  const [painelOn, setPainelOn] = useState(painelUnidadesLigado())
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
   const [instanceStatus, setInstanceStatus] = useState<'unknown' | 'open' | 'close' | 'connecting'>('unknown')
@@ -268,6 +279,105 @@ export function SettingsPage({ house }: Props) {
     setUploading(false)
   }
 
+  // Local da casa para validar o ponto batido pelo app da equipe (por estabelecimento)
+  const [geoBusy, setGeoBusy] = useState(false)
+  const [geo, setGeo] = useState({ lat: '', lng: '', radius: '250' })
+  useEffect(() => {
+    supabase.from('houses').select('lat,lng,clock_radius_m').eq('id', house.id).maybeSingle()
+      .then(r => {
+        if (!r.data) return
+        setGeo({
+          lat: r.data.lat != null ? String(r.data.lat) : '',
+          lng: r.data.lng != null ? String(r.data.lng) : '',
+          radius: String(r.data.clock_radius_m ?? 250),
+        })
+      })
+  }, [house.id])
+
+  function captureHouseLocation() {
+    if (!navigator.geolocation) { sT(setToast, 'Este navegador não tem GPS — digite as coordenadas abaixo.', 'error'); return }
+    setGeoBusy(true)
+    navigator.geolocation.getCurrentPosition(pos => {
+      setGeoBusy(false)
+      setGeo(g => ({ ...g, lat: pos.coords.latitude.toFixed(6), lng: pos.coords.longitude.toFixed(6) }))
+      sT(setToast, '📍 Coordenadas capturadas — clique em 💾 Salvar local.', 'success')
+    }, err => {
+      setGeoBusy(false)
+      // Mensagem por motivo — o erro genérico não dizia o que fazer
+      const msg = err.code === err.PERMISSION_DENIED
+        ? 'Localização bloqueada. Libere no cadeado 🔒 da barra de endereço (ou use as coordenadas do Google Maps abaixo).'
+        : err.code === err.POSITION_UNAVAILABLE
+          ? 'GPS indisponível neste aparelho (comum em PC). Cole as coordenadas do Google Maps abaixo.'
+          : 'Demorou para localizar. Tente de novo ou cole as coordenadas do Google Maps abaixo.'
+      sT(setToast, msg, 'warn')
+    },
+    { enableHighAccuracy: true, timeout: 12000 })
+  }
+
+  // Busca as coordenadas a partir do endereço já cadastrado. É o caminho mais
+  // prático no PC, onde o GPS do navegador costuma não funcionar.
+  const [geoAddrBusy, setGeoAddrBusy] = useState(false)
+  async function buscarPorEndereco() {
+    if (!config.address.trim() || !config.city.trim()) {
+      sT(setToast, 'Preencha o endereço e a cidade acima antes de buscar.', 'warn'); return
+    }
+    setGeoAddrBusy(true)
+    try {
+      const { data: sess } = await supabase.auth.getSession()
+      const r = await fetch('/api/geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sess?.session?.access_token ?? ''}` },
+        body: JSON.stringify({
+          address: config.address, city: config.city, state: config.state,
+          house_id: house.id,
+          // O nome ajuda a achar o próprio estabelecimento em vez do meio da rua
+          house_name: config.name || house.name,
+        }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!d?.ok) { sT(setToast, d?.error ?? 'Não foi possível localizar o endereço.', 'error'); return }
+      setGeo(g => ({ ...g, lat: d.melhor.lat.toFixed(6), lng: d.melhor.lng.toFixed(6) }))
+      sT(setToast, d.aproximado
+        ? '📍 Achei só a via, sem o número — confira no mapa antes de salvar.'
+        : `📍 ${String(d.melhor.rotulo).split(',').slice(0, 2).join(',')} — confira no mapa e salve.`,
+        d.aproximado ? 'warn' : 'success')
+    } catch {
+      sT(setToast, 'Erro de conexão ao buscar o endereço.', 'error')
+    } finally { setGeoAddrBusy(false) }
+  }
+
+  // Aceita "-23.55052, -46.63331" colado do Google Maps
+  function pasteCoords(v: string) {
+    const m = v.match(/(-?\d+[.,]\d+)\s*[,;]\s*(-?\d+[.,]\d+)/)
+    if (m) setGeo(g => ({ ...g, lat: m[1].replace(',', '.'), lng: m[2].replace(',', '.') }))
+  }
+
+  // O "Limpar" só apagava os campos na tela; agora remove do banco também,
+  // senão o ponto continuava sendo validado pelo local antigo.
+  async function removerHouseLocation() {
+    const { error } = await supabase.from('houses')
+      .update({ lat: null, lng: null }).eq('id', house.id)
+    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    setGeo(g => ({ ...g, lat: '', lng: '' }))
+    sT(setToast, 'Local removido — o ponto passa a ser registrado sem verificação.', 'success')
+  }
+
+  async function saveHouseLocation() {
+    const lat = parseFloat(geo.lat), lng = parseFloat(geo.lng)
+    const radius = Math.max(30, parseInt(geo.radius) || 250)
+    // Sem coordenadas o update gravava null e avisava "local removido" — parecia
+    // que o salvar não funcionava. Agora diz o que falta fazer.
+    if (!geo.lat.trim() && !geo.lng.trim()) {
+      sT(setToast, 'Nenhuma coordenada preenchida. Use 🏠 Buscar pelo endereço ou 📍 Usar localização atual.', 'warn')
+      return
+    }
+    if (isNaN(lat) || isNaN(lng)) { sT(setToast, 'Coordenadas inválidas — confira latitude e longitude.', 'warn'); return }
+    const { error } = await supabase.from('houses')
+      .update({ lat, lng, clock_radius_m: radius }).eq('id', house.id)
+    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    sT(setToast, `📍 Local salvo — ponto válido num raio de ${radius}m.`, 'success')
+  }
+
   async function saveHouse() {
     setSaving(true)
     const { error } = await supabase.from('houses').update({
@@ -311,11 +421,25 @@ export function SettingsPage({ house }: Props) {
     if (!config.mp_access_token.trim()) { sT(setToast, 'Insira o token antes de testar', 'warn'); return }
     setTestingMp(true); setMpStatus('idle')
     try {
-      const res = await fetch('https://api.mercadopago.com/users/me', {
-        headers: { Authorization: `Bearer ${config.mp_access_token.trim()}` },
+      // Pelo servidor: a API do Mercado Pago não manda cabeçalho CORS, então o mesmo
+      // fetch feito daqui do navegador é bloqueado e sempre dava "erro de conexão".
+      const { data: sess } = await supabase.auth.getSession()
+      const res = await fetch('/api/mp-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sess?.session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ house_id: house.id, token: config.mp_access_token.trim() }),
       })
-      if (res.ok) { const d = await res.json(); setMpStatus('ok'); sT(setToast, `✅ Conta: ${d.nickname ?? d.email}`, 'success') }
-      else { setMpStatus('error'); sT(setToast, '❌ Token inválido', 'error') }
+      const d = await res.json().catch(() => null)
+      if (d?.ok) {
+        setMpStatus('ok')
+        sT(setToast, `✅ Conta: ${d.nickname ?? d.email ?? 'conectada'}${d.site && d.site !== 'MLB' ? ` (atenção: conta ${d.site}, não Brasil)` : ''}`, 'success')
+      } else {
+        setMpStatus('error')
+        sT(setToast, `❌ ${d?.error ?? 'Token inválido'}`, 'error')
+      }
     } catch { setMpStatus('error'); sT(setToast, '❌ Erro de conexão', 'error') }
     setTestingMp(false)
   }
@@ -359,9 +483,72 @@ export function SettingsPage({ house }: Props) {
     <div style={{ maxWidth: 700, paddingBottom: 80 }}>
       <Toast toast={toast} />
       <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, marginBottom: 4 }}>⚙️ Configurações</h1>
-      <p style={{ color: C.mut, fontSize: 14, marginBottom: 28 }}>Dados e integrações do estabelecimento</p>
+      <p style={{ color: C.mut, fontSize: 14, marginBottom: 20 }}>Dados e integrações do estabelecimento</p>
+
+      {/* Guia de configuração: verifica o que falta e ensina o passo a passo */}
+      <SetupGuide houseId={house.id} />
 
       {/* ── EMPRESA ── */}
+      {/* ── Aparência (tema claro/escuro) ── */}
+      <Section title="Aparência" icon="🎨">
+        <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 8, letterSpacing: '0.07em' }}>TEMA</label>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {([['dark', '🌙 Escuro'], ['light', '☀️ Claro']] as const).map(([t, label]) => (
+            <button key={t} onClick={() => setTheme(t)}
+              style={{
+                flex: '1 1 160px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '14px 16px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 14, fontWeight: 800,
+                border: `2px solid ${theme === t ? C.acc : C.brd}`,
+                background: theme === t ? C.acc + '18' : C.bg,
+                color: theme === t ? C.acc : C.sub,
+              }}>
+              {label}{theme === t ? ' ✓' : ''}
+            </button>
+          ))}
+        </div>
+        <div style={{ color: C.mut, fontSize: 11, marginTop: 8 }}>A preferência fica salva neste dispositivo.</div>
+      </Section>
+
+      {/* ── Multi-unidades: só faz sentido para quem tem mais de uma casa ── */}
+      {(session?.houses?.length ?? 0) > 1 && (
+        <Section title="Multi-unidades" icon="🏠">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: C.txt, fontSize: 14, fontWeight: 700 }}>Painel das unidades no Dashboard</div>
+              <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>
+                Mostra um resumo de cada uma das suas {session?.houses?.length} unidades — próximo evento, reservas,
+                check-ins e faturamento do dia — logo acima do Dashboard.
+              </div>
+            </div>
+            <button
+              onClick={() => { const v = !painelOn; setPainelOn(v); setPainelUnidades(v) }}
+              aria-label="Exibir o painel das unidades"
+              title={painelOn ? 'Tocar para ocultar o painel' : 'Tocar para exibir o painel'}
+              style={{
+                position: 'relative', width: 52, height: 30, flexShrink: 0, border: 'none',
+                borderRadius: 999, cursor: 'pointer', padding: 0, fontFamily: 'inherit',
+                background: painelOn ? C.grn : C.brd, transition: 'background .2s',
+              }}>
+              <i style={{
+                position: 'absolute', top: 3, left: painelOn ? 25 : 3, width: 24, height: 24,
+                borderRadius: '50%', background: '#fff', transition: 'left .2s',
+              }} />
+            </button>
+          </div>
+          <div style={{ color: C.mut, fontSize: 11, marginTop: 10 }}>
+            A preferência fica salva neste dispositivo. A troca de unidade continua sempre disponível no menu lateral.
+          </div>
+        </Section>
+      )}
+
+      {/* ── Assinatura do NightPass (SaaS) ── */}
+      {session && (
+        <Section title="Assinatura NightPass" icon="💎">
+          <SubscriptionSection session={session} sub={sub ?? null} refresh={refreshSub ?? (() => {})} />
+        </Section>
+      )}
+
       <Section title="Dados da Empresa" icon="🏢">
         {/* Logo */}
         <Field label="LOGOTIPO">
@@ -371,7 +558,7 @@ export function SettingsPage({ house }: Props) {
               background: C.bg, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
             }}>
               {config.logo_url
-                ? <img src={config.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ? <img loading="lazy" decoding="async" src={config.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 : <span style={{ fontSize: 28, opacity: 0.3 }}>🏠</span>
               }
             </div>
@@ -407,6 +594,70 @@ export function SettingsPage({ house }: Props) {
 
         <Field label="ENDEREÇO">
           <input style={INP} value={config.address} onChange={set('address')} placeholder="Rua, número, bairro" />
+        </Field>
+
+        {/* Local do estabelecimento — valida o ponto batido pelo app da equipe */}
+        <Field label="📍 LOCAL PARA O PONTO DA EQUIPE">
+          <div style={{ background: 'var(--c-panel)', border: `1px solid ${C.brd}`, borderRadius: 12, padding: 14 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              <button type="button" onClick={buscarPorEndereco} disabled={geoAddrBusy}
+                title="Usa o endereço preenchido acima para achar as coordenadas"
+                style={{ background: C.grn + '18', border: `1px solid ${C.grn}55`, color: C.grn, borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 700, cursor: geoAddrBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                {geoAddrBusy ? 'Buscando…' : '🏠 Buscar pelo endereço'}
+              </button>
+              <button type="button" onClick={captureHouseLocation} disabled={geoBusy}
+                style={{ background: C.acc + '18', border: `1px solid ${C.acc}55`, color: C.acc, borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 700, cursor: geoBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                {geoBusy ? 'Obtendo…' : '📍 Usar localização atual'}
+              </button>
+              <input placeholder="ou cole do Google Maps: -23.55052, -46.63331"
+                onChange={e => pasteCoords(e.target.value)}
+                style={{ ...INP, flex: '1 1 240px', minWidth: 0 }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: 8 }}>
+              <div>
+                <label style={{ fontSize: 10, color: C.mut, fontWeight: 700 }}>LATITUDE</label>
+                <input value={geo.lat} onChange={e => setGeo(g => ({ ...g, lat: e.target.value }))} placeholder="-23.550520" style={INP} />
+              </div>
+              <div>
+                <label style={{ fontSize: 10, color: C.mut, fontWeight: 700 }}>LONGITUDE</label>
+                <input value={geo.lng} onChange={e => setGeo(g => ({ ...g, lng: e.target.value }))} placeholder="-46.633308" style={INP} />
+              </div>
+              <div>
+                <label style={{ fontSize: 10, color: C.mut, fontWeight: 700 }}>RAIO</label>
+                <select value={geo.radius} onChange={e => setGeo(g => ({ ...g, radius: e.target.value }))} style={{ ...INP, appearance: 'none' }}>
+                  <option value="100">100 m</option>
+                  <option value="250">250 m</option>
+                  <option value="500">500 m</option>
+                  <option value="1000">1 km</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <button type="button" onClick={saveHouseLocation}
+                style={{ background: `linear-gradient(135deg,${C.grn},#059669)`, border: 'none', color: '#fff', borderRadius: 10, padding: '9px 16px', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>
+                💾 Salvar local
+              </button>
+              {geo.lat && (
+                <button type="button" onClick={removerHouseLocation}
+                  style={{ background: 'none', border: `1px solid ${C.brd}`, color: C.mut, borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Limpar
+                </button>
+              )}
+              {geo.lat && geo.lng && (
+                <a href={`https://www.google.com/maps?q=${geo.lat},${geo.lng}`} target="_blank" rel="noreferrer"
+                   style={{ alignSelf: 'center', color: C.acc, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                  🗺️ Conferir no mapa
+                </a>
+              )}
+              <span style={{ color: geo.lat ? C.grn : C.mut, fontSize: 12, fontWeight: 600, alignSelf: 'center' }}>
+                {geo.lat ? `✅ Ponto verificado num raio de ${geo.radius}m` : 'Sem local — ponto registrado sem verificação'}
+              </span>
+            </div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+              Cada estabelecimento tem seu próprio local e raio. Capture estando <b>dentro da casa</b>, ou cole as coordenadas
+              do Google Maps (clique com o botão direito no ponto do mapa → as coordenadas aparecem no topo).
+            </div>
+          </div>
         </Field>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 14 }}>
@@ -534,7 +785,7 @@ export function SettingsPage({ house }: Props) {
                   Abra o WhatsApp → Menu → Aparelhos conectados → Conectar aparelho
                 </div>
                 {qrCode
-                  ? <img src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
+                  ? <img loading="lazy" decoding="async" src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
                       alt="QR Code WhatsApp"
                       style={{ width: 220, height: 220, borderRadius: 12, border: `4px solid #25d366`, display: 'block', margin: '0 auto' }} />
                   : <div style={{ width: 220, height: 220, borderRadius: 12, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', color: C.mut, fontSize: 13 }}>
@@ -575,7 +826,7 @@ export function SettingsPage({ house }: Props) {
           {window.location.origin}/e/<span style={{ color: C.acc }}>ID_DO_EVENTO</span>
         </div>
         <div style={{ color: C.mut, fontSize: 11, marginTop: 6 }}>
-          Disponível no botão 🎟️ Ingressos de cada evento.
+          Disponível no botão 🎫 Ingressos de cada evento.
         </div>
       </Section>
 
@@ -623,6 +874,12 @@ export function SettingsPage({ house }: Props) {
         <Btn onClick={logout} variant="ghost" style={{ width: '100%', color: C.red, borderColor: C.red + '55' }}>
           🚪 Sair da conta
         </Btn>
+        <div
+          onClick={() => { navigator.clipboard?.writeText(APP_BUILD); sT(setToast, 'Versão copiada', 'success') }}
+          title="Toque para copiar — útil ao relatar um problema"
+          style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.brd}`, color: C.mut, fontSize: 11, textAlign: 'center', cursor: 'pointer' }}>
+          NightPass · versão <b style={{ color: C.sub, fontFamily: 'ui-monospace, monospace' }}>{APP_BUILD}</b>
+        </div>
       </Section>
     </div>
   )

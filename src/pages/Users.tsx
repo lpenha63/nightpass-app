@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { C, RC, RL } from '../constants/theme'
 import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { sT, type ToastState } from '../utils/toast'
-import { ROLE_PAGES, ALL_PAGES, PAGE_LABELS, PAGE_ICONS } from '../constants/permissions'
+import { sendWADirect } from '../utils/whatsapp'
+import { ROLE_PAGES, ALL_PAGES, PAGE_LABELS, PAGE_ICONS, PAGE_FEATURES, canUseFeature } from '../constants/permissions'
 import type { House } from '../types'
 
 interface Props { house: House; user: { id: string; email: string }; role: string }
@@ -21,7 +22,7 @@ interface HouseUser {
   freelancers?: { full_name: string; phone?: string }
 }
 
-interface StaffOption { id: string; full_name: string; staff_type?: string }
+interface StaffOption { id: string; full_name: string; staff_type?: string; phone?: string }
 
 const ROLES_LIST = [
   { value: 'super_admin', label: 'Super Admin',    desc: 'Acesso total ao sistema',                      pages: 11 },
@@ -30,15 +31,8 @@ const ROLES_LIST = [
   { value: 'portaria',    label: 'Portaria',        desc: 'Somente acesso ao check-in de clientes',        pages: 1  },
   { value: 'financeiro',  label: 'Financeiro',      desc: 'Dashboard, eventos e relatórios financeiros',   pages: 3  },
   { value: 'promoter',    label: 'Promoter',        desc: 'Gerencia suas listas e visualiza clientes',     pages: 2  },
+  { value: 'colaborador', label: 'Colaborador',     desc: 'App da equipe: só a agenda de tarefas dele',    pages: 1  },
 ]
-
-const SEL: React.CSSProperties = {
-  width: '100%', background: C.inp, border: `1px solid ${C.brd}`,
-  borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14,
-  fontFamily: 'inherit', outline: 'none',
-}
-
-const INP: React.CSSProperties = { ...SEL }
 
 function initials(name?: string) {
   if (!name) return '?'
@@ -46,6 +40,12 @@ function initials(name?: string) {
 }
 
 export function UsersPage({ house, user: currentUser, role: currentRole }: Props) {
+  const SEL: React.CSSProperties = {
+    width: '100%', background: C.inp, border: `1px solid ${C.brd}`,
+    borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14,
+    fontFamily: 'inherit', outline: 'none',
+  }
+  const INP: React.CSSProperties = { ...SEL }
   const [users, setUsers]   = useState<HouseUser[]>([])
   const [staff, setStaff]   = useState<StaffOption[]>([])
   const [toast, setToast]   = useState<ToastState | null>(null)
@@ -67,6 +67,7 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
   const [invStatus, setInvStatus]         = useState<'idle'|'checking'|'found'|'notfound'>('idle')
   const [invSending, setInvSending]       = useState(false)
   const [invFoundId, setInvFoundId]       = useState<string | null>(null)
+  const [invPhone, setInvPhone]           = useState('')
 
   function load() {
     supabase.from('house_users')
@@ -78,7 +79,7 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
 
   useEffect(() => {
     load()
-    supabase.from('freelancers').select('id,full_name,staff_type').eq('house_id', house.id).eq('status','ativo').eq('staff_type','funcionario')
+    supabase.from('freelancers').select('id,full_name,staff_type,phone').eq('house_id', house.id).eq('status','ativo').eq('staff_type','funcionario')
       .then(r => setStaff((r.data ?? []) as StaffOption[]))
   }, [house.id])
 
@@ -105,7 +106,31 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
   }
 
   function togglePage(p: string) {
-    setEditPages(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])
+    setEditPages(prev => {
+      if (prev.includes(p)) {
+        // ao remover a página, remove também suas sub-permissões
+        return prev.filter(x => x !== p && !x.startsWith(p + '.'))
+      }
+      return [...prev, p]
+    })
+  }
+
+  // Sub-permissões (recursos) de uma página, ex: events.budget
+  function featureOn(page: string, feature: string): boolean {
+    return canUseFeature(editPages, page, feature)
+  }
+  function toggleFeature(page: string, feature: string) {
+    const all = (PAGE_FEATURES[page] ?? []).map(f => f.key)
+    const selected = all.filter(k => canUseFeature(editPages, page, k))
+    const next = selected.includes(feature) ? selected.filter(k => k !== feature) : [...selected, feature]
+    setEditPages(prev => {
+      // limpa sub-chaves antigas dessa página
+      let base = prev.filter(x => !x.startsWith(page + '.'))
+      if (!base.includes(page)) base = [...base, page]
+      // todos selecionados → sem sub-chaves (acesso total); subconjunto → grava as chaves
+      if (next.length === all.length) return base
+      return [...base, ...next.map(k => `${page}.${k}`)]
+    })
   }
 
   async function saveEdit() {
@@ -138,9 +163,13 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
     else { setInvFoundId(null); setInvStatus('notfound') }
   }
 
-  async function sendInvite() {
-    setInvSending(true)
+  function closeInvite() {
+    setShowInvite(false)
+    setInvEmail(''); setInvFreelancer(''); setInvRole('operador'); setInvStatus('idle'); setInvFoundId(null); setInvSending(false); setInvPhone('')
+  }
 
+  // Grava o acesso/convite no banco. Retorna true em sucesso.
+  async function persistInvite(): Promise<boolean> {
     if (invFoundId) {
       // User exists → create house_users directly
       const { error } = await supabase.from('house_users').insert({
@@ -150,28 +179,53 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
         freelancer_id: invFreelancer || null,
         is_active: true,
       })
-      if (error) { sT(setToast, '❌ Erro: ' + error.message, 'error'); setInvSending(false); return }
-      sT(setToast, '✅ Acesso criado com sucesso!', 'success')
-    } else {
-      // User not registered yet → create pending invite
-      const { error } = await supabase.from('house_invites').insert({
-        house_id: house.id,
-        invited_email: invEmail.trim().toLowerCase(),
-        role: invRole,
-        freelancer_id: invFreelancer || null,
-        created_by: currentUser.id,
-      })
-      if (error) { sT(setToast, '❌ Erro ao salvar convite', 'error'); setInvSending(false); return }
-      sT(setToast, '📨 Convite registrado! Assim que o colaborador criar conta, ele terá acesso.', 'success')
+      if (error) { sT(setToast, '❌ Erro: ' + error.message, 'error'); return false }
+      return true
     }
+    // User not registered yet → create pending invite
+    const { error } = await supabase.from('house_invites').insert({
+      house_id: house.id,
+      invited_email: invEmail.trim().toLowerCase(),
+      role: invRole,
+      freelancer_id: invFreelancer || null,
+      created_by: currentUser.id,
+    })
+    if (error) { sT(setToast, '❌ Erro ao salvar convite', 'error'); return false }
+    return true
+  }
 
-    setShowInvite(false)
-    setInvEmail(''); setInvFreelancer(''); setInvRole('operador'); setInvStatus('idle'); setInvFoundId(null); setInvSending(false)
+  async function sendInvite() {
+    setInvSending(true)
+    const ok = await persistInvite()
+    if (!ok) { setInvSending(false); return }
+    sT(setToast, invFoundId ? '✅ Acesso criado com sucesso!' : '📨 Convite registrado! Assim que o colaborador criar conta, ele terá acesso.', 'success')
+    closeInvite()
+    load()
+  }
+
+  // Grava o convite e dispara o link de acesso pelo WhatsApp do integrante
+  async function sendInviteWA() {
+    if (!invPhone.trim()) { sT(setToast, 'Informe o telefone (ou selecione um integrante com telefone cadastrado)', 'warn'); return }
+    setInvSending(true)
+    const ok = await persistInvite()
+    if (!ok) { setInvSending(false); return }
+    const roleLabel = ROLES_LIST.find(r => r.value === invRole)?.label ?? invRole
+    const url = window.location.origin
+    const email = invEmail.trim().toLowerCase()
+    const firstName = (staff.find(s => s.id === invFreelancer)?.full_name ?? '').split(' ')[0]
+    const greet = firstName ? `Olá ${firstName}! 🎉` : 'Olá! 🎉'
+    const msg = invFoundId
+      ? `${greet}\n\nVocê foi adicionado como *${roleLabel}* na *${house.name}* (NightPass).\n\n👉 Acesse: ${url}\n🔑 Faça login com seu e-mail *${email}*.\n\nSeu acesso já está ativo! 🔓`
+      : `${greet}\n\nVocê foi convidado para acessar o *${house.name}* (NightPass) como *${roleLabel}*.\n\n👉 Acesse: ${url}\n📧 Clique em *Criar conta* usando o e-mail *${email}*.\n\nAssim que criar a conta, seu acesso é liberado automaticamente. 🔓`
+    const r = await sendWADirect(house.id, invPhone, msg, { type: 'user_invite' })
+    sT(setToast, r.viaApi ? '✅ Convite enviado pelo WhatsApp!' : '📲 Abrindo WhatsApp…', 'success')
+    closeInvite()
     load()
   }
 
   const isAdmin = ['super_admin','admin'].includes(currentRole)
-  const effPages = (hu: HouseUser) => hu.allowed_pages?.length ? hu.allowed_pages : (ROLE_PAGES[hu.role] ?? [...ALL_PAGES])
+  // Páginas efetivas para exibição (exclui sub-chaves "events.budget" dos pills)
+  const effPages = (hu: HouseUser) => (hu.allowed_pages?.length ? hu.allowed_pages : (ROLE_PAGES[hu.role] ?? [...ALL_PAGES])).filter(p => !p.includes('.'))
 
   if (ldg) return <div style={{ padding: 60, textAlign: 'center', color: C.mut }}>Carregando...</div>
 
@@ -375,6 +429,31 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
                   })}
                 </div>
               )}
+
+              {/* Sub-permissões por página (ex: dentro de Eventos liberar Produção sem Budget) */}
+              {customPages && Object.entries(PAGE_FEATURES).map(([page, feats]) => (
+                editPages.includes(page) ? (
+                  <div key={page} style={{ marginTop: 12, background: C.inp, borderRadius: 10, padding: '12px 14px' }}>
+                    <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>
+                      RECURSOS DE {(PAGE_LABELS[page] ?? page).toUpperCase()}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      {feats.map(f => {
+                        const on = featureOn(page, f.key)
+                        return (
+                          <button key={f.key} onClick={() => toggleFeature(page, f.key)}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8, border: `1px solid ${on ? C.acc : C.brd}`, background: on ? C.acc + '18' : 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                            <i className={`bi bi-${on ? 'check-circle-fill' : 'circle'}`} style={{ fontSize: 13, color: on ? C.acc : C.mut, flexShrink: 0 }} />
+                            <i className={`bi bi-${f.icon}`} style={{ fontSize: 13, color: on ? C.txt : C.mut, flexShrink: 0 }} />
+                            <span style={{ color: on ? C.txt : C.mut, fontSize: 12, fontWeight: on ? 600 : 400 }}>{f.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <div style={{ color: C.mut, fontSize: 10, marginTop: 6 }}>Todos ativos = acesso total à página. Desmarque para restringir recursos específicos.</div>
+                  </div>
+                ) : null
+              ))}
             </div>
 
             {/* Actions */}
@@ -389,7 +468,7 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
       </Modal>
 
       {/* ─── Invite modal ─── */}
-      <Modal open={showInvite} title="Adicionar Colaborador" onClose={() => { setShowInvite(false); setInvStatus('idle') }}>
+      <Modal open={showInvite} title="Adicionar Colaborador" onClose={closeInvite}>
         <div style={{ display: 'grid', gap: 16 }}>
 
           {/* Buscar integrante da equipe (primeiro passo) */}
@@ -397,9 +476,9 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
             <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>
               👷 BUSCAR INTEGRANTE DA EQUIPE
             </label>
-            <select value={invFreelancer} onChange={e => setInvFreelancer(e.target.value)} style={SEL}>
+            <select value={invFreelancer} onChange={e => { const id = e.target.value; setInvFreelancer(id); setInvPhone(staff.find(s => s.id === id)?.phone ?? '') }} style={SEL}>
               <option value="">— Selecione o integrante —</option>
-              {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}{s.phone ? '' : ' (sem telefone)'}</option>)}
             </select>
             <div style={{ color: C.mut, fontSize: 11, marginTop: 4 }}>Somente quem está cadastrado na aba Equipe pode receber acesso.</div>
           </div>
@@ -448,22 +527,42 @@ export function UsersPage({ house, user: currentUser, role: currentRole }: Props
                   {ROLES_LIST.map(r => <option key={r.value} value={r.value}>{r.label} — {r.desc}</option>)}
                 </select>
               </div>
+
+              {/* Telefone para envio do convite por WhatsApp */}
+              <div>
+                <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>
+                  📲 WHATSAPP DO COLABORADOR
+                </label>
+                <input value={invPhone} onChange={e => setInvPhone(e.target.value)}
+                  placeholder="(11) 99999-9999" style={INP} type="tel" />
+                <div style={{ color: C.mut, fontSize: 11, marginTop: 4 }}>
+                  Preenchido automaticamente pelo cadastro da Equipe. O link de acesso é enviado direto no WhatsApp.
+                </div>
+              </div>
             </>
           )}
 
           {/* Action */}
-          <div style={{ display: 'flex', gap: 10 }}>
-            {(invStatus === 'found' || invStatus === 'notfound') ? (
-              <Btn onClick={sendInvite} style={{ flex: 1 }}>
-                {invSending ? 'Salvando...' : invFoundId ? '✅ Criar Acesso' : '📨 Registrar Convite'}
+          {(invStatus === 'found' || invStatus === 'notfound') ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              <Btn onClick={sendInviteWA} disabled={invSending || !invPhone.trim()} style={{ background: '#25D36622', color: '#25D366', border: '1px solid #25D36644' }}>
+                {invSending ? 'Enviando…' : '📲 Enviar convite por WhatsApp'}
               </Btn>
-            ) : (
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Btn onClick={sendInvite} variant="secondary" style={{ flex: 1 }}>
+                  {invSending ? 'Salvando...' : invFoundId ? '✅ Só criar acesso' : '📨 Só registrar convite'}
+                </Btn>
+                <Btn onClick={closeInvite} variant="ghost">Cancelar</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 10 }}>
               <Btn onClick={checkEmail} style={{ flex: 1 }} variant="secondary">
                 🔍 Verificar E-mail
               </Btn>
-            )}
-            <Btn onClick={() => { setShowInvite(false); setInvStatus('idle') }} variant="ghost">Cancelar</Btn>
-          </div>
+              <Btn onClick={closeInvite} variant="ghost">Cancelar</Btn>
+            </div>
+          )}
 
           <div style={{ background: C.inp, borderRadius: 10, padding: '12px 14px', borderLeft: `3px solid ${C.acc}` }}>
             <div style={{ color: C.acc, fontWeight: 700, fontSize: 12, marginBottom: 4 }}>ℹ️ Regra de acesso</div>

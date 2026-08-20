@@ -17,9 +17,9 @@ interface InpProps {
   rows?: number
 }
 
-const inputStyle: CSSProperties = {
+const inputStyle = (): CSSProperties => ({
   width: '100%',
-  background: '#0f172a',
+  background: C.inp,
   border: `1px solid ${C.brd}`,
   borderRadius: 8,
   padding: '10px 12px',
@@ -29,7 +29,7 @@ const inputStyle: CSSProperties = {
   fontFamily: 'inherit',
   outline: 'none',
   boxSizing: 'border-box',
-}
+})
 
 export function Inp({ label, value, onChange, placeholder, mask, type = 'text', required, disabled, style, rows }: InpProps) {
   function handleChange(ev: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
@@ -57,7 +57,7 @@ export function Inp({ label, value, onChange, placeholder, mask, type = 'text', 
           placeholder={placeholder}
           disabled={disabled}
           rows={rows}
-          style={{ ...inputStyle, resize: 'vertical', minHeight: rows * 24, ...style }}
+          style={{ ...inputStyle(), resize: 'vertical', minHeight: rows * 24, ...style }}
         />
       ) : (
         <input
@@ -67,7 +67,7 @@ export function Inp({ label, value, onChange, placeholder, mask, type = 'text', 
           placeholder={placeholder}
           disabled={disabled}
           required={required}
-          style={{ ...inputStyle, ...style }}
+          style={{ ...inputStyle(), ...style }}
         />
       )}
     </div>
@@ -89,7 +89,7 @@ export function Sel({ label, value, onChange, options, style }: SelProps) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        style={{ ...inputStyle, ...style }}
+        style={{ ...inputStyle(), ...style }}
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>

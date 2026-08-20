@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, useMemo} from 'react'
+import { supabasePublico } from '../lib/supabase'
 
 const C = {
   bg: '#0a0e1a', card: '#111827', brd: '#1e2736',
@@ -13,6 +13,10 @@ interface PromoterList {
   house_id: string
   event_id: string
   promoter_id: string
+  entry_fee_cents?: number
+  entry_fee_male_cents?: number
+  entry_fee_female_cents?: number
+  cutoff_exempt?: boolean
   promoters?: { full_name: string; photo_url?: string }
   events?: {
     name: string; event_date: string; start_time?: string; flyer_url?: string
@@ -58,6 +62,9 @@ const INP: React.CSSProperties = {
 }
 
 export function ListaPublicPage({ token }: { token: string }) {
+  // Cliente com o token no cabeçalho: sem ele o RLS não devolve a lista nem os convidados
+  const supabase = useMemo(() => supabasePublico(token), [token])
+
   const [lista, setLista] = useState<PromoterList | null>(null)
   const [saved, setSaved] = useState<SavedGuest[]>([])
   const [loading, setLoading] = useState(true)
@@ -187,7 +194,7 @@ export function ListaPublicPage({ token }: { token: string }) {
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
       {/* Flyer inteiro (sem corte) */}
       {ev?.flyer_url && (
-        <img src={ev.flyer_url} alt={ev?.name ?? 'Flyer'} style={{ width: '100%', maxWidth: 480, height: 'auto', display: 'block', margin: '0 auto' }} />
+        <img loading="lazy" decoding="async" src={ev.flyer_url} alt={ev?.name ?? 'Flyer'} style={{ width: '100%', maxWidth: 480, height: 'auto', display: 'block', margin: '0 auto' }} />
       )}
       {/* Header */}
       <div style={{
@@ -196,7 +203,7 @@ export function ListaPublicPage({ token }: { token: string }) {
       }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {lista!.houses?.logo_url && (
-            <img src={lista!.houses.logo_url} alt="logo" style={{ width: 48, height: 48, borderRadius: 12, objectFit: 'cover', marginBottom: 10 }} />
+            <img loading="lazy" decoding="async" src={lista!.houses.logo_url} alt="logo" style={{ width: 48, height: 48, borderRadius: 12, objectFit: 'cover', marginBottom: 10 }} />
           )}
           <div style={{ color: '#a78bfa', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
             Lista da Casa
@@ -219,7 +226,14 @@ export function ListaPublicPage({ token }: { token: string }) {
           const artistNames = (ev?.artists ?? []).map(a => a?.name).filter((n): n is string => !!n && n.trim().length > 0)
           const promosArr = (ev?.promotions_list ?? []).map(p => p?.label).filter((l): l is string => !!l && l.trim().length > 0)
           const promoText = promosArr.length > 0 ? promosArr : (ev?.promotions ? [ev.promotions] : [])
-          const hasList = (ev?.price_male_list_cents ?? 0) > 0 || (ev?.price_female_list_cents ?? 0) > 0
+          // Valor da LISTA do promoter tem prioridade sobre o valor de lista do evento.
+          // VIP (nome contém VIP ou lista isenta) = grátis. Valor da lista = 0 sem ser VIP → cai no valor do evento.
+          const isVipList = /\bvip\b/i.test(lista?.name ?? '') || lista?.cutoff_exempt === true
+          const lMale = lista?.entry_fee_male_cents ?? lista?.entry_fee_cents ?? 0
+          const lFemale = lista?.entry_fee_female_cents ?? lista?.entry_fee_cents ?? 0
+          const listMale = isVipList ? 0 : (lMale > 0 ? lMale : (ev?.price_male_list_cents ?? 0))
+          const listFemale = isVipList ? 0 : (lFemale > 0 ? lFemale : (ev?.price_female_list_cents ?? 0))
+          const hasList = isVipList || listMale > 0 || listFemale > 0
           const hasCover = (ev?.price_male_cents ?? 0) > 0 || (ev?.price_female_cents ?? 0) > 0
           if (!hasList && !hasCover && artistNames.length === 0 && promoText.length === 0) return null
           return (
@@ -229,8 +243,13 @@ export function ListaPublicPage({ token }: { token: string }) {
                   <div style={{ color: C.mut, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 6 }}>💵 VALORES</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     {hasList ? (<>
-                      {(ev?.price_male_list_cents ?? 0) > 0 && <span style={{ background: C.acc + '18', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♂ Lista {fmtBRL(ev?.price_male_list_cents)}</span>}
-                      {(ev?.price_female_list_cents ?? 0) > 0 && <span style={{ background: '#ec489918', border: '1px solid #ec489933', borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♀ Lista {fmtBRL(ev?.price_female_list_cents)}</span>}
+                      {isVipList
+                        ? <span style={{ background: C.gold + '18', border: `1px solid ${C.gold}44`, borderRadius: 8, padding: '5px 10px', color: C.gold, fontSize: 13, fontWeight: 800 }}>⭐ Lista VIP · Grátis</span>
+                        : <>
+                            {listMale > 0 && <span style={{ background: C.acc + '18', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♂ Lista {fmtBRL(listMale)}</span>}
+                            {listFemale > 0 && <span style={{ background: '#ec489918', border: '1px solid #ec489933', borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♀ Lista {fmtBRL(listFemale)}</span>}
+                          </>
+                      }
                     </>) : (<>
                       {(ev?.price_male_cents ?? 0) > 0 && <span style={{ background: C.acc + '18', border: `1px solid ${C.acc}33`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♂ {fmtBRL(ev?.price_male_cents)}</span>}
                       {(ev?.price_female_cents ?? 0) > 0 && <span style={{ background: '#ec489918', border: '1px solid #ec489933', borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 13, fontWeight: 700 }}>♀ {fmtBRL(ev?.price_female_cents)}</span>}

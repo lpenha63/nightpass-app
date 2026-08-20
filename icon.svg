@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#6366f1"/>
@@ -11,9 +11,9 @@
   </defs>
   <rect width="512" height="512" rx="110" fill="url(#bg)"/>
   <rect x="12" y="12" width="488" height="488" rx="100" fill="url(#inner)" opacity="0.6"/>
-  <!-- N letter -->
-  <text x="256" y="330" font-family="Arial Black, Arial" font-weight="900" font-size="280"
-        text-anchor="middle" fill="white" opacity="0.95">N</text>
-  <!-- Decorative dot -->
-  <circle cx="380" cy="160" r="28" fill="#f59e0b"/>
+  <!-- Letra N vetorizada (sem depender de fonte instalada no conversor) -->
+  <path d="M 150 380 L 150 132 L 212 132 L 300 288 L 300 132 L 362 132 L 362 380 L 300 380 L 212 224 L 212 380 Z"
+        fill="#ffffff" opacity="0.96"/>
+  <!-- Ponto decorativo -->
+  <circle cx="392" cy="150" r="26" fill="#f59e0b"/>
 </svg>

@@ -18,6 +18,41 @@ export interface Session {
   role: string
   allowedPages: string[]
   freelancerId?: string | null
+  isSaasAdmin?: boolean
+  /** Todas as casas em que este usuário tem acesso ativo (para o seletor) */
+  houses?: House[]
+}
+
+// ── SaaS (assinaturas) ──
+export interface SaasPlan {
+  id: string
+  key: string
+  name: string
+  description?: string
+  price_cents: number
+  billing_period: 'monthly' | 'yearly'
+  trial_days: number
+  limits: Record<string, number | null>
+  features: Record<string, boolean>
+  active: boolean
+  highlight: boolean
+  sort_order: number
+}
+
+export type SaasStatus = 'trialing' | 'pending' | 'active' | 'past_due' | 'suspended' | 'canceled' | 'comp'
+
+export interface SaasSubscription {
+  id: string
+  house_id: string
+  plan_id: string
+  status: SaasStatus
+  trial_ends_at?: string | null
+  current_period_start?: string | null
+  current_period_end?: string | null
+  grace_until?: string | null
+  mp_preapproval_id?: string | null
+  payer_email?: string | null
+  saas_plans?: SaasPlan
 }
 
 export interface Client {
@@ -32,6 +67,7 @@ export interface Client {
   photo_url?: string
   fingerprint_id?: string
   source?: string
+  referral_source?: string
   status: string
   created_at: string
 }
@@ -63,6 +99,10 @@ export interface Event {
   price_female_cents?: number
   price_male_list_cents?: number
   price_female_list_cents?: number
+  list_cutoff_time?: string | null
+  price_male_list_early_cents?: number
+  price_female_list_early_cents?: number
+  is_operation?: boolean
   capacity?: number
   repeat_rule?: string
   attractions?: string
@@ -136,10 +176,14 @@ export interface Freelancer {
   phone?: string
   pix_key?: string
   daily_rate_cents?: number
+  hourly_rate_cents?: number
   work_types: WorkType[]
   staff_type?: string
   notes?: string
   status: string
+  access_token?: string
+  can_delegate_tasks?: boolean
+  can_see_all_events?: boolean
   created_at: string
 }
 
@@ -154,6 +198,10 @@ export interface TicketBatch {
   sold: number
   active: boolean
   expires_at?: string
+  /** Taxa de serviço em % somada ao preço na compra */
+  service_fee_pct?: number
+  /** Exige o nome de cada participante na compra */
+  nominal?: boolean
   created_at: string
 }
 
@@ -171,6 +219,9 @@ export interface TicketOrder {
   payment_status: 'pending' | 'paid' | 'cancelled'
   payment_method?: string
   payment_id?: string
+  /** Parte de amount_cents que é taxa de serviço (não é receita de ingresso) */
+  service_fee_cents?: number
+  mp_preference_id?: string
   notes?: string
   created_at: string
   ticket_batches?: Pick<TicketBatch, 'name' | 'gender' | 'price_cents'>

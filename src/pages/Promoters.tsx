@@ -19,6 +19,9 @@ interface Promoter {
 interface PromoterList {
   id: string; name: string; token: string; event_id: string
   fixed_fee_cents: number; min_entries: number; entry_fee_cents: number; consumacao_cents: number
+  entry_fee_male_cents?: number; entry_fee_female_cents?: number
+  cutoff_exempt?: boolean
+  cutoff_time?: string | null; early_male_cents?: number; early_female_cents?: number
   guest_count?: number; checked_count?: number
   events?: { name: string; event_date: string }
 }
@@ -30,7 +33,19 @@ interface Guest {
 interface UpcomingEvent { id: string; name: string; event_date: string }
 
 const DEF = { full_name: '', phone: '', email: '', commission_pct: 10, notes: '', fixed_fee_cents: '', min_entries: '', entry_fee_cents: '', consumacao_cents: '' }
-const TERMS_DEF = { fixed_fee_cents: '', min_entries: '', entry_fee_cents: '', consumacao_cents: '' }
+const TERMS_DEF = { fixed_fee_cents: '', min_entries: '', entry_fee_male_cents: '', entry_fee_female_cents: '', consumacao_cents: '', cutoff_exempt: false, cutoff_time: '', early_male_cents: '', early_female_cents: '' }
+
+/** Lista fica aberta até 1 dia depois do evento; a partir daí é histórico.
+ *  Data local (toISOString devolveria UTC e viraria o dia à noite, no meio da operação). */
+function listaAberta(eventDate?: string) {
+  if (!eventDate) return true            // sem evento vinculado: não arquiva sozinha
+  const d = new Date()
+  const hoje = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const limite = new Date(eventDate + 'T12:00')
+  limite.setDate(limite.getDate() + 1)
+  const lim = `${limite.getFullYear()}-${String(limite.getMonth() + 1).padStart(2, '0')}-${String(limite.getDate()).padStart(2, '0')}`
+  return hoje <= lim
+}
 
 function fdateShort(d: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -44,6 +59,7 @@ export function PromotersPage({ house }: Props) {
   const [toast, setToast] = useState<ToastState | null>(null)
   const [quickWA, setQuickWA] = useState<QuickWATarget | null>(null)
   const [stats, setStats] = useState<Record<string, number>>({})
+  const [listCounts, setListCounts] = useState<Record<string, number>>({})
   const [noTable, setNoTable] = useState(false)
   const [ldg, setLdg] = useState(true)
 
@@ -51,10 +67,14 @@ export function PromotersPage({ house }: Props) {
   const [selPr, setSelPr] = useState<Promoter | null>(null)
   const [prLists, setPrLists] = useState<PromoterList[]>([])
   const [loadingLists, setLoadingLists] = useState(false)
+  // Listas encerram 1 dia depois do evento: o que passou disso vai para o arquivo,
+  // senão o modal acumula dezenas de listas velhas e esconde as que estão em uso.
+  const [listaAba, setListaAba] = useState<'abertas' | 'arquivo'>('abertas')
+  const [listaBusca, setListaBusca] = useState('')
 
   // ── Editar termos comerciais ──
   const [editTermsId, setEditTermsId] = useState<string | null>(null)
-  const [termsForm, setTermsForm] = useState<Record<string, string>>(TERMS_DEF)
+  const [termsForm, setTermsForm] = useState<{ fixed_fee_cents: string; min_entries: string; entry_fee_male_cents: string; entry_fee_female_cents: string; consumacao_cents: string; cutoff_exempt: boolean; cutoff_time: string; early_male_cents: string; early_female_cents: string }>(TERMS_DEF)
 
   // ── Ver convidados de uma lista ──
   const [viewGuests, setViewGuests] = useState<PromoterList | null>(null)
@@ -64,7 +84,16 @@ export function PromotersPage({ house }: Props) {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [newListEvent, setNewListEvent] = useState('')
   const [creatingList, setCreatingList] = useState(false)
+  const [newListMale, setNewListMale] = useState('')
+  const [newListFemale, setNewListFemale] = useState('')
+  const [newListVip, setNewListVip] = useState(false)
+  const [newListNoTime, setNewListNoTime] = useState(false) // VIP sem horário: ignora a virada do evento
+  // Virada de horário própria da lista (ex.: VIP até 20:30, depois R$ 20)
+  const [newListCut, setNewListCut] = useState('')
+  const [newListEarlyM, setNewListEarlyM] = useState('')
+  const [newListEarlyF, setNewListEarlyF] = useState('')
   const [sendingPortal, setSendingPortal] = useState<string | null>(null)
+  const [portalOn, setPortalOn] = useState<Record<string, boolean>>({})
 
   function st2(m: string, t?: string) { sT(setToast, m, t as 'success' | 'error' | 'warn') }
 
@@ -85,7 +114,37 @@ export function PromotersPage({ house }: Props) {
             ;(cr.data ?? []).forEach(c => { if (c.promoter_id) counts[c.promoter_id] = (counts[c.promoter_id] ?? 0) + 1 })
             setStats(counts)
           })
+        // Listas ativas por promoter: vinculadas a eventos de hoje em diante e não cancelados
+        const today = new Date().toISOString().slice(0, 10)
+        supabase.from('promoter_lists').select('promoter_id,events(event_date,status)').eq('house_id', house.id)
+          .then(lr => {
+            const lc: Record<string, number> = {}
+            ;(lr.data ?? []).forEach((l) => {
+              const ev = (l as { promoter_id?: string; events?: { event_date?: string; status?: string } | null }).events
+              const pid = (l as { promoter_id?: string }).promoter_id
+              if (pid && ev && (ev.event_date ?? '') >= today && ev.status !== 'cancelado') lc[pid] = (lc[pid] ?? 0) + 1
+            })
+            setListCounts(lc)
+          })
+        // Estado do portal por promoter (promoter_tokens.active) — sem token = portal nunca enviado
+        supabase.from('promoter_tokens').select('promoter_id,active').eq('house_id', house.id)
+          .then(tr => {
+            const pm: Record<string, boolean> = {}
+            ;(tr.data ?? []).forEach(t => { if (t.promoter_id) pm[t.promoter_id as string] = !!t.active })
+            setPortalOn(pm)
+          })
       })
+  }
+
+  // Liga/desliga o acesso ao portal do promoter (o portal já valida promoter_tokens.active)
+  async function togglePortal(pr: Promoter) {
+    const cur = portalOn[pr.id]
+    if (cur === undefined) { st2('Envie o portal primeiro para gerar o acesso.', 'warn'); return }
+    const next = !cur
+    const { error } = await supabase.from('promoter_tokens').update({ active: next }).eq('promoter_id', pr.id).eq('house_id', house.id)
+    if (error) { st2('Erro: ' + error.message, 'error'); return }
+    setPortalOn(p => ({ ...p, [pr.id]: next }))
+    st2(next ? '✅ Portal ativado' : '🔒 Portal desativado', 'success')
   }
 
   useEffect(() => { load() }, [house.id])
@@ -100,12 +159,19 @@ export function PromotersPage({ house }: Props) {
   }
 
   async function ensurePromoterToken(pr: Promoter): Promise<string | null> {
+    // Reusa o token existente (mesmo se estiver desativado — reenviar o portal reativa,
+    // em vez de criar um token duplicado e deixar o antigo órfão)
     const { data: existing } = await supabase.from('promoter_tokens')
-      .select('token').eq('promoter_id', pr.id).eq('house_id', house.id).eq('active', true).limit(1).maybeSingle()
-    if (existing?.token) return existing.token
+      .select('token,active').eq('promoter_id', pr.id).eq('house_id', house.id).limit(1).maybeSingle()
+    if (existing?.token) {
+      if (!existing.active) await supabase.from('promoter_tokens').update({ active: true }).eq('promoter_id', pr.id).eq('house_id', house.id)
+      setPortalOn(p => ({ ...p, [pr.id]: true }))
+      return existing.token
+    }
     const token = crypto.randomUUID()
     const { error } = await supabase.from('promoter_tokens').insert({ promoter_id: pr.id, house_id: house.id, token, active: true })
     if (error) { st2('Erro ao gerar portal: ' + error.message, 'error'); return null }
+    setPortalOn(p => ({ ...p, [pr.id]: true }))
     return token
   }
 
@@ -126,16 +192,40 @@ export function PromotersPage({ house }: Props) {
     if (prLists.some(l => l.event_id === newListEvent)) { st2('Este promoter já tem lista neste evento', 'warn'); return }
     setCreatingList(true)
     const token = crypto.randomUUID()
+    // Valor por gênero: VIP = entrada gratuita (0); valor informado sobrepõe o padrão do promoter
+    const cents = (v: string) => Math.round((parseFloat(v.replace(',', '.')) || 0) * 100)
+    const maleCents = newListVip ? 0 : (newListMale.trim() ? cents(newListMale) : (selPr.entry_fee_cents ?? 0))
+    const femaleCents = newListVip ? 0 : (newListFemale.trim() ? cents(newListFemale) : (selPr.entry_fee_cents ?? 0))
     const { error } = await supabase.from('promoter_lists').insert({
       promoter_id: selPr.id, house_id: house.id, event_id: newListEvent,
-      name: `Lista de ${selPr.full_name}`, token,
+      name: `Lista de ${selPr.full_name}${newListVip ? ' · VIP' : ''}`, token,
       fixed_fee_cents: selPr.fixed_fee_cents ?? 0, min_entries: selPr.min_entries ?? 0,
-      entry_fee_cents: selPr.entry_fee_cents ?? 0, consumacao_cents: selPr.consumacao_cents ?? 0,
+      entry_fee_cents: maleCents, // mantém valor geral = masculino (compatibilidade)
+      entry_fee_male_cents: maleCents, entry_fee_female_cents: femaleCents,
+      cutoff_exempt: newListVip && newListNoTime, // VIP sem horário → sempre grátis
+      // Virada própria da lista: até o horário cobra early_*, depois cobra entry_fee_*
+      cutoff_time: (newListVip && newListNoTime) ? null : (newListCut.trim() || null),
+      early_male_cents: newListCut.trim() ? cents(newListEarlyM) : 0,
+      early_female_cents: newListCut.trim() ? cents(newListEarlyF) : 0,
+      consumacao_cents: selPr.consumacao_cents ?? 0,
     })
+    if (error) { setCreatingList(false); st2('Erro: ' + error.message, 'error'); return }
+
+    // Libera este promoter no evento — senão o link público da lista nasce fechado
+    // ("Esta lista está fechada"), pois a página pública exige promoter_enabled OU convite.
+    const { data: ev } = await supabase.from('events')
+      .select('promoter_enabled,promoter_invites').eq('id', newListEvent).single()
+    if (ev && !ev.promoter_enabled) {
+      const invites: string[] = Array.isArray(ev.promoter_invites) ? ev.promoter_invites : []
+      if (!invites.includes(selPr.id)) {
+        await supabase.from('events').update({ promoter_invites: [...invites, selPr.id] }).eq('id', newListEvent)
+      }
+    }
+
     setCreatingList(false)
-    if (error) { st2('Erro: ' + error.message, 'error'); return }
-    setNewListEvent('')
-    st2('✅ Lista criada e vinculada ao evento!', 'success')
+    setNewListEvent(''); setNewListMale(''); setNewListFemale(''); setNewListVip(false); setNewListNoTime(false)
+    setNewListCut(''); setNewListEarlyM(''); setNewListEarlyF('')
+    st2('✅ Lista criada — link liberado para cadastro!', 'success')
     await loadPromoterLists(selPr)
   }
 
@@ -146,7 +236,7 @@ export function PromotersPage({ house }: Props) {
     loadUpcomingEvents()
     const { data } = await supabase
       .from('promoter_lists')
-      .select('id, name, token, event_id, fixed_fee_cents, min_entries, entry_fee_cents, consumacao_cents, events(name, event_date)')
+      .select('id, name, token, event_id, fixed_fee_cents, min_entries, entry_fee_cents, entry_fee_male_cents, entry_fee_female_cents, cutoff_exempt, cutoff_time, early_male_cents, early_female_cents, consumacao_cents, events(name, event_date)')
       .eq('promoter_id', pr.id)
       .eq('house_id', house.id)
       .order('created_at', { ascending: false })
@@ -168,20 +258,35 @@ export function PromotersPage({ house }: Props) {
 
   function openEditTerms(l: PromoterList) {
     setEditTermsId(l.id)
+    const male = l.entry_fee_male_cents ?? l.entry_fee_cents ?? 0
+    const female = l.entry_fee_female_cents ?? l.entry_fee_cents ?? 0
     setTermsForm({
       fixed_fee_cents: l.fixed_fee_cents > 0 ? (l.fixed_fee_cents / 100).toFixed(2) : '',
       min_entries: l.min_entries > 0 ? String(l.min_entries) : '',
-      entry_fee_cents: l.entry_fee_cents > 0 ? (l.entry_fee_cents / 100).toFixed(2) : '',
+      entry_fee_male_cents: male > 0 ? (male / 100).toFixed(2) : '',
+      entry_fee_female_cents: female > 0 ? (female / 100).toFixed(2) : '',
       consumacao_cents: l.consumacao_cents > 0 ? (l.consumacao_cents / 100).toFixed(2) : '',
+      cutoff_exempt: l.cutoff_exempt ?? false,
+      cutoff_time: l.cutoff_time ?? '',
+      early_male_cents: (l.early_male_cents ?? 0) > 0 ? ((l.early_male_cents ?? 0) / 100).toFixed(2) : '',
+      early_female_cents: (l.early_female_cents ?? 0) > 0 ? ((l.early_female_cents ?? 0) / 100).toFixed(2) : '',
     })
   }
 
   async function saveTerms(listId: string) {
+    const maleCents = Math.round((parseFloat(termsForm.entry_fee_male_cents) || 0) * 100)
+    const femaleCents = Math.round((parseFloat(termsForm.entry_fee_female_cents) || 0) * 100)
     const data = {
       fixed_fee_cents: Math.round((parseFloat(termsForm.fixed_fee_cents) || 0) * 100),
       min_entries: parseInt(termsForm.min_entries) || 0,
-      entry_fee_cents: Math.round((parseFloat(termsForm.entry_fee_cents) || 0) * 100),
+      entry_fee_cents: maleCents, // valor geral = masculino (compatibilidade)
+      entry_fee_male_cents: maleCents, entry_fee_female_cents: femaleCents,
       consumacao_cents: Math.round((parseFloat(termsForm.consumacao_cents) || 0) * 100),
+      cutoff_exempt: !!termsForm.cutoff_exempt,
+      // Virada própria: sem horário (ou VIP isento) → limpa
+      cutoff_time: termsForm.cutoff_exempt ? null : (termsForm.cutoff_time.trim() || null),
+      early_male_cents: termsForm.cutoff_time.trim() ? Math.round((parseFloat(termsForm.early_male_cents) || 0) * 100) : 0,
+      early_female_cents: termsForm.cutoff_time.trim() ? Math.round((parseFloat(termsForm.early_female_cents) || 0) * 100) : 0,
     }
     const { error } = await supabase.from('promoter_lists').update(data).eq('id', listId)
     if (error) { st2('Erro: ' + error.message, 'error'); return }
@@ -284,7 +389,7 @@ export function PromotersPage({ house }: Props) {
                 <input type="number" step="0.01" min="0" {...inp} value={String(form.fixed_fee_cents ?? '')} onChange={e => setF('fixed_fee_cents', e.target.value)} placeholder="0,00" />
               </div>
               <div>
-                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🎟️ QTD MÍN. ENTRADAS</label>
+                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🎫 QTD MÍN. ENTRADAS</label>
                 <input type="number" min="0" {...inp} value={String(form.min_entries ?? '')} onChange={e => setF('min_entries', e.target.value)} placeholder="0" />
               </div>
               <div>
@@ -310,7 +415,7 @@ export function PromotersPage({ house }: Props) {
       </Modal>
 
       {/* ── Modal Listas do Promoter ── */}
-      <Modal open={!!selPr && !viewGuests} title={`📋 Listas — ${selPr?.full_name ?? ''}`} onClose={() => { setSelPr(null); setPrLists([]); setEditTermsId(null); setNewListEvent('') }} wide>
+      <Modal open={!!selPr && !viewGuests} title={`📋 Listas — ${selPr?.full_name ?? ''}`} onClose={() => { setSelPr(null); setPrLists([]); setEditTermsId(null); setNewListEvent(''); setNewListMale(''); setNewListFemale(''); setNewListVip(false) }} wide>
         {/* Vincular a evento + enviar portal */}
         {selPr && (
           <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
@@ -318,13 +423,65 @@ export function PromotersPage({ house }: Props) {
             {(() => {
               const available = upcomingEvents.filter(ev => !prLists.some(l => l.event_id === ev.id))
               return (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <select value={newListEvent} onChange={e => setNewListEvent(e.target.value)} style={{ ...SL, flex: '1 1 220px' }}>
                     <option value="">{available.length ? 'Selecione um evento…' : 'Nenhum evento futuro disponível'}</option>
                     {available.map(ev => <option key={ev.id} value={ev.id}>{ev.name} · {fdateShort(ev.event_date)}</option>)}
                   </select>
+                  <input type="number" step="0.01" min="0" inputMode="decimal"
+                    value={newListVip ? '' : newListMale}
+                    onChange={e => setNewListMale(e.target.value)}
+                    disabled={newListVip}
+                    placeholder={selPr.entry_fee_cents ? `♂ padrão R$ ${(selPr.entry_fee_cents / 100).toFixed(2)}` : '♂ Masc R$'}
+                    title="Valor de entrada masculino (vazio = usa o padrão do promoter)"
+                    style={{ ...SL, flex: '0 1 130px', opacity: newListVip ? 0.5 : 1, borderColor: '#60a5fa55' }} />
+                  <input type="number" step="0.01" min="0" inputMode="decimal"
+                    value={newListVip ? '' : newListFemale}
+                    onChange={e => setNewListFemale(e.target.value)}
+                    disabled={newListVip}
+                    placeholder={selPr.entry_fee_cents ? `♀ padrão R$ ${(selPr.entry_fee_cents / 100).toFixed(2)}` : '♀ Fem R$'}
+                    title="Valor de entrada feminino (vazio = usa o padrão do promoter)"
+                    style={{ ...SL, flex: '0 1 130px', opacity: newListVip ? 0.5 : 1, borderColor: '#f472b655' }} />
+                  <button type="button" onClick={() => setNewListVip(v => { if (v) setNewListNoTime(false); return !v })}
+                    title="VIP / Cortesia — entrada gratuita"
+                    style={{ flexShrink: 0, padding: '0 14px', height: 40, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 800, border: `2px solid ${newListVip ? C.gold : C.brd}`, background: newListVip ? C.gold + '22' : 'transparent', color: newListVip ? C.gold : C.mut }}>
+                    ⭐ VIP
+                  </button>
+                  {newListVip && (
+                    <button type="button" onClick={() => setNewListNoTime(v => !v)}
+                      title="Sempre grátis — ignora a virada de preço do evento"
+                      style={{ flexShrink: 0, padding: '0 12px', height: 40, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 800, border: `2px solid ${newListNoTime ? C.grn : C.brd}`, background: newListNoTime ? C.grn + '22' : 'transparent', color: newListNoTime ? C.grn : C.mut }}>
+                      {newListNoTime ? '✅ Sem horário' : '⏰ Sem horário'}
+                    </button>
+                  )}
                   <Btn onClick={createListForEvent} disabled={!newListEvent || creatingList}>{creatingList ? 'Criando...' : '➕ Criar lista'}</Btn>
                 </div>
+                {/* Virada de horário da lista: até HH:MM cobra um valor, depois cobra outro */}
+                {!(newListVip && newListNoTime) && (
+                  <div style={{ marginTop: 10, background: 'var(--c-panel)', border: `1px solid ${C.brd}`, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.txt, marginBottom: 2 }}>⏰ Horário da lista (opcional)</div>
+                    <div style={{ fontSize: 11, color: C.mut, marginBottom: 8 }}>
+                      Ex.: <b>VIP até 20:30</b> (deixe 0) e depois cobra os valores ♂/♀ acima. Em branco = sem virada.
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input type="time" value={newListCut} onChange={e => setNewListCut(e.target.value)}
+                        title="Horário da virada" style={{ ...SL, flex: '0 1 130px' }} />
+                      <input type="number" step="0.01" min="0" inputMode="decimal" value={newListEarlyM}
+                        onChange={e => setNewListEarlyM(e.target.value)} disabled={!newListCut}
+                        placeholder="♂ até o horário (0 = grátis)"
+                        style={{ ...SL, flex: '1 1 150px', opacity: newListCut ? 1 : 0.5, borderColor: '#60a5fa55' }} />
+                      <input type="number" step="0.01" min="0" inputMode="decimal" value={newListEarlyF}
+                        onChange={e => setNewListEarlyF(e.target.value)} disabled={!newListCut}
+                        placeholder="♀ até o horário (0 = grátis)"
+                        style={{ ...SL, flex: '1 1 150px', opacity: newListCut ? 1 : 0.5, borderColor: '#f472b655' }} />
+                    </div>
+                  </div>
+                )}
+                <div style={{ color: C.mut, fontSize: 11, marginTop: 6 }}>
+                  💡 Defina valores <strong style={{ color: '#60a5fa' }}>♂ masculino</strong> e <strong style={{ color: '#f472b6' }}>♀ feminino</strong> para esta lista, ou marque <strong style={{ color: C.gold }}>⭐ VIP</strong> para entrada gratuita. Vazio usa o valor padrão do promoter.
+                </div>
+                </>
               )
             })()}
             {selPr.phone && (
@@ -337,11 +494,44 @@ export function PromotersPage({ house }: Props) {
             )}
           </div>
         )}
+        {(() => {
+          const abertas = prLists.filter(l => listaAberta((l.events as { event_date?: string } | undefined)?.event_date))
+          const arquivo = prLists.filter(l => !listaAberta((l.events as { event_date?: string } | undefined)?.event_date))
+          if (loadingLists || prLists.length === 0) return null
+          return (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              {([['abertas', `🟢 Abertas (${abertas.length})`], ['arquivo', `📦 Arquivo (${arquivo.length})`]] as const).map(([v, lb]) => (
+                <button key={v} onClick={() => setListaAba(v)}
+                  style={{ padding: '6px 14px', borderRadius: 9, border: `1px solid ${listaAba === v ? C.acc : C.brd}`, background: listaAba === v ? C.acc + '22' : 'transparent', color: listaAba === v ? C.acc : C.mut, fontSize: 12.5, fontWeight: listaAba === v ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {lb}
+                </button>
+              ))}
+              {listaAba === 'arquivo' && (
+                <input value={listaBusca} onChange={e => setListaBusca(e.target.value)}
+                  placeholder="🔎 Buscar por evento…"
+                  style={{ flex: '1 1 160px', minWidth: 0, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 9, padding: '7px 11px', color: C.txt, fontSize: 12.5, fontFamily: 'inherit', boxSizing: 'border-box' }} />
+              )}
+            </div>
+          )
+        })()}
+
         {loadingLists
           ? <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>Carregando...</div>
           : prLists.length === 0
             ? <div style={{ color: C.mut, textAlign: 'center', padding: 24 }}>Nenhuma lista criada por este promoter</div>
-            : prLists.map(l => {
+            : (() => {
+              const q = listaBusca.trim().toLowerCase()
+              const visiveis = prLists
+                .filter(l => listaAberta((l.events as { event_date?: string } | undefined)?.event_date) === (listaAba === 'abertas'))
+                .filter(l => !q || `${(l.events as { name?: string } | undefined)?.name ?? ''} ${l.name}`.toLowerCase().includes(q))
+              if (visiveis.length === 0) return (
+                <div style={{ color: C.mut, textAlign: 'center', padding: 24, fontSize: 13, lineHeight: 1.6 }}>
+                  {listaAba === 'abertas'
+                    ? <>Nenhuma lista aberta.<br />As listas de eventos já passados estão em <b style={{ color: C.txt }}>📦 Arquivo</b>.</>
+                    : q ? 'Nenhuma lista encontrada com esse termo.' : 'Nenhuma lista arquivada ainda.'}
+                </div>
+              )
+              return visiveis.map(l => {
               const ev = l.events as { name: string; event_date: string } | undefined
               const isEditing = editTermsId === l.id
               const totalBudget = l.fixed_fee_cents + (l.min_entries * l.entry_fee_cents) + (l.min_entries * l.consumacao_cents)
@@ -366,12 +556,15 @@ export function PromotersPage({ house }: Props) {
                   </div>
 
                   {/* Termos comerciais — visualização */}
-                  {!isEditing && (
+                  {!isEditing && (() => {
+                    const maleCents = l.entry_fee_male_cents ?? l.entry_fee_cents ?? 0
+                    const femaleCents = l.entry_fee_female_cents ?? l.entry_fee_cents ?? 0
+                    const isVip = maleCents === 0 && femaleCents === 0
+                    return (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                       {[
                         { icon: '💰', label: 'Valor Fixo', val: l.fixed_fee_cents },
-                        { icon: '🎟️', label: 'Mín. Entradas', val: null, raw: l.min_entries > 0 ? `${l.min_entries} pessoas` : '—' },
-                        { icon: '🚪', label: 'Valor/Entrada', val: l.entry_fee_cents },
+                        { icon: '🎫', label: 'Mín. Entradas', val: null, raw: l.min_entries > 0 ? `${l.min_entries} pessoas` : '—' },
                         { icon: '🍺', label: 'Consumação', val: l.consumacao_cents },
                       ].map(item => (
                         <div key={item.label} style={{ background: C.bg, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
@@ -382,8 +575,27 @@ export function PromotersPage({ house }: Props) {
                           </div>
                         </div>
                       ))}
+                      {/* Card de entrada ♂/♀ */}
+                      <div style={{ background: C.bg, borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 18, marginBottom: 4 }}>{isVip ? '⭐' : '🚪'}</div>
+                        <div style={{ color: C.mut, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', marginBottom: 2 }}>ENTRADA</div>
+                        {l.cutoff_time
+                          ? <div style={{ lineHeight: 1.25 }}>
+                              <div style={{ color: C.grn, fontWeight: 800, fontSize: 11 }}>até {l.cutoff_time}</div>
+                              <div style={{ color: '#60a5fa', fontSize: 11, fontWeight: 700 }}>♂ {(l.early_male_cents ?? 0) > 0 ? fmtCurrency(l.early_male_cents ?? 0) : 'Grátis'}</div>
+                              <div style={{ color: '#f472b6', fontSize: 11, fontWeight: 700 }}>♀ {(l.early_female_cents ?? 0) > 0 ? fmtCurrency(l.early_female_cents ?? 0) : 'Grátis'}</div>
+                              <div style={{ color: C.mut, fontSize: 9, marginTop: 2 }}>depois ♂ {fmtCurrency(maleCents)} · ♀ {fmtCurrency(femaleCents)}</div>
+                            </div>
+                          : isVip
+                          ? <div style={{ color: C.gold, fontWeight: 800, fontSize: 13 }}>VIP · Grátis{l.cutoff_exempt ? <span style={{ display: 'block', color: C.grn, fontSize: 10, fontWeight: 700 }}>sem horário</span> : null}</div>
+                          : <div style={{ display: 'flex', flexDirection: 'column', gap: 1, lineHeight: 1.2 }}>
+                              <span style={{ color: '#60a5fa', fontWeight: 700, fontSize: 12 }}>♂ {maleCents > 0 ? fmtCurrency(maleCents) : 'Grátis'}</span>
+                              <span style={{ color: '#f472b6', fontWeight: 700, fontSize: 12 }}>♀ {femaleCents > 0 ? fmtCurrency(femaleCents) : 'Grátis'}</span>
+                            </div>}
+                      </div>
                     </div>
-                  )}
+                    )
+                  })()}
 
                   {/* Total estimado */}
                   {!isEditing && totalBudget > 0 && (
@@ -405,16 +617,22 @@ export function PromotersPage({ house }: Props) {
                             placeholder="0,00" style={SL} />
                         </div>
                         <div>
-                          <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🎟️ QTD MÍNIMA DE ENTRADAS</label>
+                          <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🎫 QTD MÍNIMA DE ENTRADAS</label>
                           <input type="number" min="0" value={termsForm.min_entries}
                             onChange={e => setTermsForm(p => ({ ...p, min_entries: e.target.value }))}
                             placeholder="0" style={SL} />
                         </div>
                         <div>
-                          <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🚪 VALOR POR ENTRADA (R$)</label>
-                          <input type="number" step="0.01" min="0" value={termsForm.entry_fee_cents}
-                            onChange={e => setTermsForm(p => ({ ...p, entry_fee_cents: e.target.value }))}
-                            placeholder="0,00" style={SL} />
+                          <label style={{ fontSize: 11, color: '#60a5fa', fontWeight: 600, display: 'block', marginBottom: 4 }}>♂ ENTRADA MASCULINO (R$)</label>
+                          <input type="number" step="0.01" min="0" value={termsForm.entry_fee_male_cents}
+                            onChange={e => setTermsForm(p => ({ ...p, entry_fee_male_cents: e.target.value }))}
+                            placeholder="0,00" style={{ ...SL, borderColor: '#60a5fa55' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: '#f472b6', fontWeight: 600, display: 'block', marginBottom: 4 }}>♀ ENTRADA FEMININO (R$)</label>
+                          <input type="number" step="0.01" min="0" value={termsForm.entry_fee_female_cents}
+                            onChange={e => setTermsForm(p => ({ ...p, entry_fee_female_cents: e.target.value }))}
+                            placeholder="0,00" style={{ ...SL, borderColor: '#f472b655' }} />
                         </div>
                         <div>
                           <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🍺 CONSUMAÇÃO (R$/pessoa)</label>
@@ -423,11 +641,51 @@ export function PromotersPage({ house }: Props) {
                             placeholder="0,00" style={SL} />
                         </div>
                       </div>
+                      {/* Virada de horário desta lista */}
+                      {!termsForm.cutoff_exempt && (
+                        <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: 10, marginBottom: 12 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: C.txt, marginBottom: 2 }}>⏰ Horário desta lista</div>
+                          <div style={{ fontSize: 11, color: C.mut, marginBottom: 8 }}>
+                            Até o horário cobra os valores abaixo (0 = grátis/VIP); depois cobra a <b>entrada ♂/♀</b> acima.
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr', gap: 8 }}>
+                            <div>
+                              <label style={{ fontSize: 10, color: C.mut, fontWeight: 700 }}>VIRADA</label>
+                              <input type="time" value={termsForm.cutoff_time}
+                                onChange={e => setTermsForm(p => ({ ...p, cutoff_time: e.target.value }))} style={SL} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 10, color: '#60a5fa', fontWeight: 700 }}>♂ ATÉ O HORÁRIO</label>
+                              <input type="number" step="0.01" min="0" value={termsForm.early_male_cents} disabled={!termsForm.cutoff_time}
+                                onChange={e => setTermsForm(p => ({ ...p, early_male_cents: e.target.value }))}
+                                placeholder="0 = grátis" style={{ ...SL, opacity: termsForm.cutoff_time ? 1 : 0.5, borderColor: '#60a5fa55' }} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 10, color: '#f472b6', fontWeight: 700 }}>♀ ATÉ O HORÁRIO</label>
+                              <input type="number" step="0.01" min="0" value={termsForm.early_female_cents} disabled={!termsForm.cutoff_time}
+                                onChange={e => setTermsForm(p => ({ ...p, early_female_cents: e.target.value }))}
+                                placeholder="0 = grátis" style={{ ...SL, opacity: termsForm.cutoff_time ? 1 : 0.5, borderColor: '#f472b655' }} />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {/* VIP sem horário: ignora a virada de preço do evento */}
+                      <button type="button" onClick={() => setTermsForm(p => ({ ...p, cutoff_exempt: !p.cutoff_exempt }))}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 10, marginBottom: 12, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', border: `2px solid ${termsForm.cutoff_exempt ? C.grn : C.brd}`, background: termsForm.cutoff_exempt ? C.grn + '18' : 'transparent' }}>
+                        <span>
+                          <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: termsForm.cutoff_exempt ? C.grn : C.txt }}>⭐ VIP sem horário (sempre grátis)</span>
+                          <span style={{ display: 'block', fontSize: 11, color: C.mut, marginTop: 2 }}>Ignora a virada de preço do evento — esta lista nunca passa a cobrar.</span>
+                        </span>
+                        <span style={{ flexShrink: 0, fontSize: 18 }}>{termsForm.cutoff_exempt ? '✅' : '⬜'}</span>
+                      </button>
                       {/* Preview do custo estimado */}
                       {(() => {
                         const fixo = Math.round((parseFloat(termsForm.fixed_fee_cents) || 0) * 100)
                         const minEnt = parseInt(termsForm.min_entries) || 0
-                        const porEnt = Math.round((parseFloat(termsForm.entry_fee_cents) || 0) * 100)
+                        const male = Math.round((parseFloat(termsForm.entry_fee_male_cents) || 0) * 100)
+                        const female = Math.round((parseFloat(termsForm.entry_fee_female_cents) || 0) * 100)
+                        // média ♂/♀ como base de estimativa por entrada
+                        const porEnt = male && female ? Math.round((male + female) / 2) : (male || female)
                         const cons = Math.round((parseFloat(termsForm.consumacao_cents) || 0) * 100)
                         const tot = fixo + minEnt * porEnt + minEnt * cons
                         if (tot === 0) return null
@@ -448,7 +706,8 @@ export function PromotersPage({ house }: Props) {
                   )}
                 </div>
               )
-            })
+              })
+            })()
         }
       </Modal>
 
@@ -503,7 +762,7 @@ export function PromotersPage({ house }: Props) {
                 {(pr.fixed_fee_cents > 0 || pr.min_entries > 0 || pr.entry_fee_cents > 0 || pr.consumacao_cents > 0) && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
                     {pr.fixed_fee_cents > 0 && <span style={{ background: C.gold+'18', color: C.gold, borderRadius: 5, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>💰 {fmtCurrency(pr.fixed_fee_cents)}</span>}
-                    {pr.min_entries > 0 && <span style={{ background: C.acc+'18', color: C.acc, borderRadius: 5, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>🎟️ {pr.min_entries} mín.</span>}
+                    {pr.min_entries > 0 && <span style={{ background: C.acc+'18', color: C.acc, borderRadius: 5, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>🎫 {pr.min_entries} mín.</span>}
                     {pr.entry_fee_cents > 0 && <span style={{ background: C.acc+'18', color: C.acc, borderRadius: 5, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>🚪 {fmtCurrency(pr.entry_fee_cents)}/ent.</span>}
                     {pr.consumacao_cents > 0 && <span style={{ background: C.grn+'18', color: C.grn, borderRadius: 5, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>🍺 {fmtCurrency(pr.consumacao_cents)}/pess.</span>}
                   </div>
@@ -512,7 +771,9 @@ export function PromotersPage({ house }: Props) {
               {/* Stats */}
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
                 <div style={{ color: C.grn, fontWeight: 700, fontSize: 18 }}>{stats[pr.id] ?? 0}</div>
-                <div style={{ color: C.mut, fontSize: 10 }}>check-ins</div>
+                <div style={{ color: C.mut, fontSize: 10, marginBottom: 4 }}>check-ins</div>
+                <div style={{ color: '#a78bfa', fontWeight: 700, fontSize: 14 }}>📋 {listCounts[pr.id] ?? 0}</div>
+                <div style={{ color: C.mut, fontSize: 10, marginBottom: 4 }}>lista{(listCounts[pr.id] ?? 0) !== 1 ? 's' : ''} ativa{(listCounts[pr.id] ?? 0) !== 1 ? 's' : ''}</div>
                 <Pill color={C.acc} small>{pr.commission_pct ?? 10}%</Pill>
               </div>
               {/* Ações */}
@@ -529,6 +790,20 @@ export function PromotersPage({ house }: Props) {
                     {sendingPortal === pr.id ? '...' : '📲 Portal'}
                   </Btn>
                 )}
+                {/* Toggle de acesso ao portal (só aparece depois que o portal foi gerado) */}
+                {portalOn[pr.id] !== undefined && (() => {
+                  const on = portalOn[pr.id]
+                  return (
+                    <button onClick={() => togglePortal(pr)}
+                      title={on ? 'Portal ativo — toque para desativar o acesso' : 'Portal desativado — toque para reativar'}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: on ? '#10b98118' : 'transparent', color: on ? '#10b981' : C.mut, border: `1px solid ${on ? '#10b98155' : C.brd}`, borderRadius: 8, padding: '6px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                      <span style={{ display: 'inline-flex', width: 24, height: 13, borderRadius: 7, background: on ? '#10b981' : C.brd, position: 'relative', flexShrink: 0 }}>
+                        <span style={{ position: 'absolute', top: 2, left: on ? 13 : 2, width: 9, height: 9, borderRadius: '50%', background: '#fff', transition: 'left .15s' }} />
+                      </span>
+                      {on ? 'Ativo' : 'Inativo'}
+                    </button>
+                  )
+                })()}
                 <Btn onClick={() => openEdit(pr)} small variant="ghost">✏️</Btn>
                 <Btn onClick={() => loadPromoterLists(pr)} small variant="secondary">📋 Listas</Btn>
                 <Btn onClick={() => del(pr.id)} small variant="danger">🗑️</Btn>

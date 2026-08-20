@@ -3,11 +3,15 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 
+/* Superfícies e texto seguem o tema (var --c-*); acentos são fixos. */
 @theme {
-  --color-bg: #0a0e1a;
-  --color-bg2: #0d1020;
-  --color-card: #111827;
-  --color-brd: #1e2736;
+  --color-bg: var(--c-bg);
+  --color-bg2: var(--c-bg2);
+  --color-card: var(--c-card);
+  --color-brd: var(--c-brd);
+  --color-txt: var(--c-txt);
+  --color-sub: var(--c-sub);
+  --color-mut: var(--c-mut);
   --color-acc: #3b82f6;
   --color-acc2: #60a5fa;
   --color-grn: #10b981;
@@ -15,9 +19,36 @@
   --color-cyan: #22d3ee;
   --color-purp: #a78bfa;
   --color-pink: #f472b6;
-  --color-txt: #f9fafb;
-  --color-sub: #9ca3af;
-  --color-mut: #6b7280;
+}
+
+/* Paletas de superfície — dark (padrão) e light. Espelham DARK/LIGHT de theme.ts */
+:root, :root[data-theme="dark"] {
+  --c-bg: #0a0e1a;
+  --c-bg2: #111827;
+  --c-card: #111827;
+  --c-brd: #1e2736;
+  --c-txt: #f9fafb;
+  --c-sub: #9ca3af;
+  --c-mut: #6b7280;
+  --c-nav-bg: rgba(10,14,26,0.97);
+  --c-modal-bg: rgba(17,24,39,0.98);
+  --c-kpi-grad: linear-gradient(160deg,rgba(20,28,46,0.98),rgba(10,14,26,0.99));
+  --c-panel: rgba(255,255,255,0.05);
+  --c-panel2: rgba(255,255,255,0.08);
+}
+:root[data-theme="light"] {
+  --c-bg: #f4f6fb;
+  --c-bg2: #e9edf4;
+  --c-card: #ffffff;
+  --c-brd: #e2e8f0;
+  --c-txt: #0f172a;
+  --c-sub: #475569;
+  --c-mut: #64748b;
+  --c-nav-bg: rgba(255,255,255,0.97);
+  --c-modal-bg: rgba(255,255,255,0.99);
+  --c-kpi-grad: linear-gradient(160deg,#ffffff,#eef2f9);
+  --c-panel: rgba(15,23,42,0.045);
+  --c-panel2: rgba(15,23,42,0.075);
 }
 
 @layer base {
@@ -25,13 +56,14 @@
 }
 
 body {
-  background: #0a0e1a;
+  background: var(--c-bg);
   font-family: 'Inter', -apple-system, sans-serif;
-  color: #f9fafb;
+  color: var(--c-txt);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: 'cv11', 'ss01';
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 /* Scrollbar */
@@ -39,6 +71,12 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(59,130,246,0.2); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(59,130,246,0.5); }
+
+/* Barra de rolagem mais visível para listas longas (ex.: convidados) */
+.r-scroll-y { scrollbar-width: thin; scrollbar-color: rgba(124,58,237,0.5) transparent; }
+.r-scroll-y::-webkit-scrollbar { width: 7px; }
+.r-scroll-y::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.5); border-radius: 4px; }
+.r-scroll-y::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.8); }
 
 /* Focus */
 *:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
@@ -49,6 +87,7 @@ button:active:not(:disabled) { transform: scale(0.96) !important; filter: bright
 /* Animations */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+@keyframes badgePulse { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245,158,11,0.7); } 50% { transform: scale(1.2); box-shadow: 0 0 0 5px rgba(245,158,11,0); } }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
@@ -109,7 +148,7 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
   .np-sb.open { transform: translateX(0) !important; }
   .np-main { margin-left: 0 !important; padding: 12px 12px 84px !important; overflow-x: hidden !important; max-width: 100vw; }
   /* Conteúdo ocupa a largura toda no celular (o padding lateral fica só no .np-main) */
-  .np-content { padding-left: 0 !important; padding-right: 0 !important; padding-top: 6px !important; }
+  .np-content { padding-left: 0 !important; padding-right: 0 !important; padding-top: 44px !important; }
   .kpi-grid-r { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   /* min-width:0 impede o conteúdo de "estourar" a coluna (cards desproporcionais) */
   .kpi-grid-r > * { min-width: 0; }
@@ -122,7 +161,8 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
   /* ── Utilidades responsivas (estilos inline vencem CSS, por isso !important) ── */
   /* Empilha qualquer grid de múltiplas colunas em coluna única no celular */
   .r-stack { grid-template-columns: minmax(0, 1fr) !important; }
-  .r-stack > * { min-width: 0 !important; }
+  /* grid-column:auto zera spans (span 2/3) que senão criam colunas implícitas e quebram o empilhamento */
+  .r-stack > * { min-width: 0 !important; grid-column: auto !important; }
   /* Vira 2 colunas no celular (ideal p/ cards de KPI) */
   .r-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .r-grid-2 > * { min-width: 0 !important; }
@@ -137,6 +177,97 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
   .r-head { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
   /* Remove indentação lateral (usada p/ alinhar sob avatar no desktop) no celular */
   .r-noindent { margin-left: 0 !important; padding-left: 0 !important; }
+
+  /* Check-in: faixa de abas rola na horizontal em vez de quebrar feio */
+  .ci-tabs {
+    width: 100%;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .ci-tabs::-webkit-scrollbar { display: none; }
+  .ci-tabs > button { flex: 0 0 auto; white-space: nowrap; }
+
+  /* Check-in: busca empilha (input em cima, botão full-width embaixo) */
+  .ci-search { flex-wrap: wrap; }
+  .ci-search > input { flex: 1 1 100% !important; }
+  .ci-search > button { width: 100%; justify-content: center; }
+
+  /* ── Base mobile: modais viram bottom sheet (sobem de baixo, largura total) ── */
+  .modal-overlay { align-items: flex-end !important; padding: 0 !important; }
+  .modal-sheet {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92vh !important;
+    border-radius: 20px 20px 0 0 !important;
+    animation: sheetUp .26s cubic-bezier(.4,0,.2,1) !important;
+  }
+  /* "Alça" do bottom sheet */
+  .modal-sheet::before {
+    content: ''; display: block;
+    width: 40px; height: 4px; border-radius: 3px;
+    background: rgba(255,255,255,0.22);
+    margin: 8px auto 0;
+  }
+
+  /* ── Relatórios: valores grandes dos cards de DRE não estouram o card ──
+     Mantém o número em UMA linha (sem quebrar no meio do valor) e encolhe a
+     fonte conforme a largura da tela via clamp, cabendo mesmo em telas estreitas. */
+  .dre-kpi-val {
+    font-size: clamp(12px, 3.7vw, 18px) !important;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: keep-all;
+    letter-spacing: -0.02em;
+  }
+
+  /* ── Eventos/Arquivo: linha empilha no celular (ações vão para baixo, sem estourar) ── */
+  .arch-row { flex-wrap: wrap !important; }
+  .arch-row > .arch-info { flex-basis: calc(100% - 52px) !important; }
+  .arch-row > .arch-actions { width: 100% !important; margin-top: 8px; }
+
+  /* ── Equipe (Freelancers): card empilha no celular em vez de espremer ── */
+  /* info ocupa a linha toda (menos o avatar) → valor/status e ações caem para baixo */
+  .fr-card { min-width: 0; }
+  .fr-card > .fr-info {
+    flex-basis: calc(100% - 52px) !important;
+    min-width: 0;
+    /* chave PIX (e-mail / aleatória) é uma palavra só e furava a margem sem isto */
+    overflow-wrap: anywhere;
+  }
+  .fr-card > .fr-rate { margin-top: 8px; }
+  /* As ações são 9 botões com white-space:nowrap: sem wrap viram uma linha de ~600px.
+     Ocupam a largura toda e quebram em várias linhas. */
+  .fr-card > .fr-actions {
+    width: 100%;
+    margin: 8px 0 0 !important;
+    flex-wrap: wrap !important;
+    min-width: 0;
+  }
+  .fr-card > .fr-actions > * { flex-shrink: 1; min-width: 0; }
+
+  /* Cabeçalho da página: os 3 botões não cabem lado a lado em 375px */
+  .fr-head-actions { flex-wrap: wrap !important; width: 100%; }
+  .fr-head-actions > * { flex: 1 1 auto; }
+
+  /* ── Base mobile: inputs sem zoom no iOS (16px) e alvos de toque confortáveis ── */
+  .np-content input:not([type="checkbox"]):not([type="radio"]),
+  .np-content select,
+  .np-content textarea {
+    font-size: 16px !important;
+  }
+  .np-content input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .np-content select {
+    min-height: 44px;
+  }
+}
+
+@keyframes sheetUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* Offline banner */
@@ -149,3 +280,46 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
 }
 
 html { scroll-behavior: smooth; }
+
+/* ── Impressão de relatórios ─────────────────────────────────────────────
+   Limpa a tela (menus, botões, abas) e imprime só o conteúdo do relatório,
+   em fundo branco. O cabeçalho .print-only só aparece no papel.            */
+.print-only { display: none; }
+
+@media print {
+  /* Some com navegação e controles */
+  .np-sb, .np-burger, .np-bottom-nav, .wa-bar, .install-btn { display: none !important; }
+  .np-main { margin-left: 0 !important; padding: 0 !important; max-width: 100% !important; }
+  button, select, input[type="date"] { display: none !important; }
+
+  /* Cabeçalho da folha */
+  .print-only { display: block !important; }
+  .print-head { margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #000; color: #000 !important; }
+
+  /* Papel branco, texto preto (ignora o tema escuro) */
+  html, body { background: #fff !important; color: #000 !important; }
+  * { color: #000 !important; box-shadow: none !important; text-shadow: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  [class*="bg-card"], [style*="background"] { background: #fff !important; }
+
+  /* Cards viram blocos com borda fina e não quebram no meio da página */
+  .rounded-2xl, [class*="card"] { border: 1px solid #999 !important; border-radius: 6px !important; break-inside: avoid; page-break-inside: avoid; margin-bottom: 10px !important; }
+
+  /* Tabelas largas: mostra tudo em vez de cortar na rolagem */
+  .r-scroll-x, .r-scroll-y { overflow: visible !important; max-height: none !important; }
+  .r-scroll-x > div { min-width: 0 !important; }
+
+  /* Gráficos/canvas cabem na folha */
+  canvas, img { max-width: 100% !important; height: auto !important; }
+
+  @page { margin: 12mm; }
+}
+
+/* ── Menu lateral: retorno visual ao passar o mouse ─────────────────────────
+   Os itens inativos não reagiam a nada até serem clicados, o que somado ao
+   contraste baixo deixava o menu "apagado". A cor em si já foi corrigida
+   (mut → sub, de 3,98:1 para 7,58:1 no tema escuro); aqui entra só o hover. */
+.np-nav-item { transition: background-color .15s ease, color .15s ease; }
+.np-nav-item:not(.is-active):hover {
+  background-color: rgba(148,163,184,0.10) !important;
+  color: var(--c-txt, #f9fafb) !important;
+}

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, useMemo} from 'react'
+import { supabasePublico } from '../lib/supabase'
 import { InstallButton } from '../components/InstallButton'
 
 const C = {
@@ -50,6 +50,10 @@ function fdateShort(d: string) {
 }
 
 export function PromoterPortal({ token }: { token: string }) {
+  // Cliente com o token no cabeçalho: o RLS dessas tabelas deixou de ser aberto
+  // e só devolve as linhas deste link.
+  const supabase = useMemo(() => supabasePublico(token), [token])
+
   const [promoter, setPromoter] = useState<PromoterInfo | null>(null)
   const [events, setEvents] = useState<EventItem[]>([])
   const [lists, setLists] = useState<PromoterListItem[]>([])
@@ -121,41 +125,24 @@ export function PromoterPortal({ token }: { token: string }) {
 
   useEffect(() => {
     async function load() {
-      // 1. Find promoter by token
-      const { data: tokenData, error: tokenErr } = await supabase
-        .from('promoter_tokens')
-        .select('promoter_id, house_id, active')
-        .eq('token', token)
-        .single()
+      // 1. Promoter + casa a partir do token, numa RPC só.
+      //    Antes isto lia promoter_tokens direto, e a tabela estava com SELECT aberto:
+      //    dava para listar TODOS os tokens de portal e entrar no de qualquer promoter.
+      const { data: rpc } = await supabase.rpc('get_promoter_by_token', { p_token: token })
+      const info = (rpc?.[0] ?? null) as {
+        promoter_id: string; house_id: string
+        full_name: string; photo_url?: string; phone?: string; status: string
+        house_name?: string; house_logo?: string
+      } | null
 
-      if (tokenErr || !tokenData || !tokenData.active) {
-        setNotFound(true); setLoading(false); return
-      }
+      if (!info) { setNotFound(true); setLoading(false); return }
 
-      const pId: string = tokenData.promoter_id
-      const hId: string = tokenData.house_id
+      const pId = info.promoter_id
+      const hId = info.house_id
       setPromoterId(pId)
       setHouseId(hId)
-
-      // 2. Load promoter info
-      const { data: pData } = await supabase
-        .from('promoters')
-        .select('id, full_name, photo_url, phone, status')
-        .eq('id', pId)
-        .single()
-
-      if (!pData || pData.status === 'inactive') {
-        setNotFound(true); setLoading(false); return
-      }
-      setPromoter(pData as PromoterInfo)
-
-      // 3. Load house info
-      const { data: hData } = await supabase
-        .from('houses')
-        .select('name, logo_url')
-        .eq('id', hId)
-        .single()
-      if (hData) setHouse(hData)
+      setPromoter({ id: pId, full_name: info.full_name, photo_url: info.photo_url, phone: info.phone, status: info.status } as PromoterInfo)
+      setHouse({ name: info.house_name ?? '', logo_url: info.house_logo })
 
       // 4. Eventos futuros liberados a TODOS (promoter_enabled) OU que convidaram este promoter
       const today = new Date().toISOString().slice(0, 10)
@@ -261,7 +248,7 @@ export function PromoterPortal({ token }: { token: string }) {
       }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {house?.logo_url && (
-            <img src={house.logo_url} alt="logo"
+            <img loading="lazy" decoding="async" src={house.logo_url} alt="logo"
               style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'cover', marginBottom: 12 }} />
           )}
           <div style={{ color: C.purpL, fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>
@@ -271,7 +258,7 @@ export function PromoterPortal({ token }: { token: string }) {
           {/* Promoter avatar */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
             {promoter?.photo_url
-              ? <img src={promoter.photo_url} alt={promoter.full_name}
+              ? <img loading="lazy" decoding="async" src={promoter.photo_url} alt={promoter.full_name}
                   style={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: `3px solid ${C.purpL}` }} />
               : <div style={{ width: 72, height: 72, borderRadius: '50%', background: C.purp, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, border: `3px solid ${C.purpL}` }}>👤</div>
             }
@@ -374,7 +361,7 @@ export function PromoterPortal({ token }: { token: string }) {
                   {/* Flyer */}
                   {event.flyer_url ? (
                     <div style={{ position: 'relative', height: 160, overflow: 'hidden' }}>
-                      <img src={event.flyer_url} alt={event.name}
+                      <img loading="lazy" decoding="async" src={event.flyer_url} alt={event.name}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       <div style={{
                         position: 'absolute', inset: 0,
@@ -444,7 +431,7 @@ export function PromoterPortal({ token }: { token: string }) {
                           </button>
                         </div>
                         {isViewingGuests && (
-                          <GuestList listId={list.id} />
+                          <GuestList list={list} supabase={supabase} onAdded={() => setLists(ls => ls.map(x => x.id === list.id ? { ...x, guest_count: (x.guest_count ?? 0) + 1 } : x))} />
                         )}
                       </>
                     ) : (
@@ -485,30 +472,93 @@ export function PromoterPortal({ token }: { token: string }) {
   )
 }
 
-function GuestList({ listId }: { listId: string }) {
+// Recebe o cliente do portal por prop: ele carrega o token no cabeçalho, sem o qual
+// o RLS não devolve convidado nenhum.
+type SB = ReturnType<typeof supabasePublico>
+function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdded?: () => void; supabase: SB }) {
   const [guests, setGuests] = useState<{ id: string; full_name: string; phone?: string; gender?: string }[]>([])
   const [loading, setLoading] = useState(true)
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [gender, setGender] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
     supabase
       .from('promoter_list_guests')
       .select('id, full_name, phone, gender')
-      .eq('list_id', listId)
-      .order('created_at', { ascending: true })
+      .eq('list_id', list.id)
+      // Ordenava por created_at, coluna que não existe nesta tabela: a consulta
+      // devolvia erro e a lista aparecia sempre vazia.
+      .order('full_name', { ascending: true })
       .then(r => { setGuests(r.data ?? []); setLoading(false) })
-  }, [listId])
+  }, [list.id])
 
-  if (loading) return <div style={{ color: C.mut, fontSize: 12, marginTop: 10 }}>Carregando...</div>
-  if (guests.length === 0) return <div style={{ color: C.mut, fontSize: 12, marginTop: 10 }}>Nenhum convidado ainda</div>
+  async function addGuest() {
+    const nm = name.trim()
+    if (!nm) { setErr('Informe o nome do convidado.'); return }
+    setSaving(true); setErr(null)
+    const { data, error } = await supabase.from('promoter_list_guests').insert({
+      house_id: list.house_id, list_id: list.id, promoter_id: list.promoter_id, event_id: list.event_id,
+      full_name: nm, phone: phone.trim() || null, gender: gender || null, list_type: 'promoter',
+    }).select('id, full_name, phone, gender').single()
+    setSaving(false)
+    if (error) { setErr('Erro ao adicionar: ' + error.message); return }
+    if (data) {
+      setGuests(gs => [...gs, data])
+      setName(''); setPhone(''); setGender('')
+      onAdded?.()
+    }
+  }
+
+  const fieldStyle: React.CSSProperties = {
+    flex: 1, minWidth: 0, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8,
+    padding: '9px 11px', color: C.txt, fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box',
+  }
 
   return (
     <div style={{ marginTop: 12, borderTop: `1px solid ${C.brd}`, paddingTop: 12 }}>
-      {guests.map((g, i) => (
-        <div key={g.id} style={{ color: C.txt, fontSize: 13, padding: '4px 0', borderBottom: i < guests.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
-          {i + 1}. {g.gender === 'feminino' ? '♀ ' : g.gender === 'masculino' ? '♂ ' : ''}{g.full_name}
-          {g.phone ? <span style={{ color: C.mut, fontSize: 12 }}> · {g.phone}</span> : ''}
+      {/* Formulário de adição manual */}
+      <div style={{ background: C.bg, border: `1px solid ${C.purp}44`, borderRadius: 10, padding: 10, marginBottom: 12 }}>
+        <div style={{ color: C.purpL, fontSize: 12, fontWeight: 700, marginBottom: 8 }}>➕ Adicionar convidado</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome do convidado *"
+            onKeyDown={e => { if (e.key === 'Enter') addGuest() }} style={fieldStyle} />
+          <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Celular (opcional)" inputMode="tel"
+            onKeyDown={e => { if (e.key === 'Enter') addGuest() }} style={fieldStyle} />
+          <div style={{ display: 'flex', gap: 6 }}>
+            {([['M', '♂ Masc.', C.acc], ['F', '♀ Fem.', '#f472b6']] as const).map(([g, lbl, col]) => {
+              const on = gender === g
+              return (
+                <button key={g} type="button" onClick={() => setGender(on ? '' : g)}
+                  style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: `1px solid ${on ? col : C.brd}`, background: on ? col + '22' : 'transparent', color: on ? col : C.mut, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {lbl}
+                </button>
+              )
+            })}
+          </div>
+          {err && <div style={{ color: C.red, fontSize: 11 }}>{err}</div>}
+          <button onClick={addGuest} disabled={saving}
+            style={{ width: '100%', background: saving ? C.purp + '55' : `linear-gradient(135deg, ${C.purp}, #1d4ed8)`, border: 'none', borderRadius: 8, padding: '10px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: saving ? 0.7 : 1 }}>
+            {saving ? 'Adicionando...' : '✅ Adicionar à lista'}
+          </button>
         </div>
-      ))}
+      </div>
+
+      {/* Lista de convidados */}
+      {loading ? (
+        <div style={{ color: C.mut, fontSize: 12 }}>Carregando...</div>
+      ) : guests.length === 0 ? (
+        <div style={{ color: C.mut, fontSize: 12 }}>Nenhum convidado ainda</div>
+      ) : (
+        guests.map((g, i) => (
+          <div key={g.id} style={{ color: C.txt, fontSize: 13, padding: '4px 0', borderBottom: i < guests.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+            {i + 1}. {(g.gender === 'F' || g.gender === 'feminino') ? '♀ ' : (g.gender === 'M' || g.gender === 'masculino') ? '♂ ' : ''}{g.full_name}
+            {g.phone ? <span style={{ color: C.mut, fontSize: 12 }}> · {g.phone}</span> : ''}
+          </div>
+        ))
+      )}
     </div>
   )
 }

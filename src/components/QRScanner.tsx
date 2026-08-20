@@ -38,7 +38,7 @@ export function QRScanner({ onScan, onClose }: Props) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ color: C.txt, fontWeight: 800, fontSize: 18, marginBottom: 20 }}>🎟️ Scanner de Ingresso</div>
+      <div style={{ color: C.txt, fontWeight: 800, fontSize: 18, marginBottom: 20 }}>🎫 Scanner de Ingresso</div>
 
       {error
         ? <div style={{ color: C.red, fontSize: 14, padding: 20, textAlign: 'center' }}>{error}</div>

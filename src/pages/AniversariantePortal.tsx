@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, useMemo} from 'react'
+import { supabasePublico } from '../lib/supabase'
 
 const C = {
   bg: '#0a0e1a', card: '#111827', brd: '#1e2736',
@@ -78,6 +78,10 @@ const INP: React.CSSProperties = {
 }
 
 export function AniversariantePortal({ token }: { token: string }) {
+  // Cliente com o token no cabeçalho: o RLS dessas tabelas deixou de ser aberto
+  // e só devolve as linhas deste link.
+  const supabase = useMemo(() => supabasePublico(token), [token])
+
   const [bdList, setBdList] = useState<BirthdayList | null>(null)
   const [guests, setGuests] = useState<Guest[]>([])
   const [form, setForm] = useState<GuestForm>(EMPTY_FORM)
@@ -233,7 +237,7 @@ export function AniversariantePortal({ token }: { token: string }) {
       }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {bdList!.houses?.logo_url && (
-            <img src={bdList!.houses.logo_url} alt="logo"
+            <img loading="lazy" decoding="async" src={bdList!.houses.logo_url} alt="logo"
               style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'cover', marginBottom: 12 }} />
           )}
 
@@ -284,7 +288,7 @@ export function AniversariantePortal({ token }: { token: string }) {
             {/* Event card */}
             <div style={{ background: C.card, border: `1px solid ${C.gold}33`, borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
               {ev?.flyer_url && (
-                <img src={ev.flyer_url} alt={ev.name}
+                <img loading="lazy" decoding="async" src={ev.flyer_url} alt={ev.name}
                   style={{ width: '100%', height: 200, objectFit: 'cover', display: 'block' }} />
               )}
               <div style={{ padding: 16 }}>
@@ -464,6 +468,10 @@ interface GuestRegForm {
 }
 
 export function NiverGuestPage({ token }: { token: string }) {
+  // Cliente com o token no cabeçalho: o RLS dessas tabelas deixou de ser aberto
+  // e só devolve as linhas deste link.
+  const supabase = useMemo(() => supabasePublico(token), [token])
+
   const [bdList, setBdList] = useState<BirthdayList | null>(null)
   const [guests, setGuests] = useState<Guest[]>([])
   const [form, setForm] = useState<GuestRegForm>(EMPTY_FORM)
@@ -578,7 +586,7 @@ export function NiverGuestPage({ token }: { token: string }) {
       }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {bdList!.houses?.logo_url && (
-            <img src={bdList!.houses.logo_url} alt="logo"
+            <img loading="lazy" decoding="async" src={bdList!.houses.logo_url} alt="logo"
               style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'cover', marginBottom: 12 }} />
           )}
           <div style={{ fontSize: 40, marginBottom: 8 }}>🎂</div>

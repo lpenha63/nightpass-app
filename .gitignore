@@ -31,3 +31,6 @@ meta-ads-mcp/
 dash-preview.html
 nightpass.html
 design-preview.html
+
+# gerado a cada build
+build-id.json

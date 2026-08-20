@@ -82,19 +82,25 @@ input:focus,textarea:focus,select:focus{border-color:#7c3aed88}
 (function(){
 var SB_URL='https://irghwfzcbazujddfftsx.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw';
-var SB=window.supabase.createClient(SB_URL,SB_KEY);
 var app=document.getElementById('app');
 var params=new URLSearchParams(window.location.search);
 var token=params.get('t');
 var btoken=params.get('b');
+// O RLS dos convidados deixou de ser aberto: só devolve as linhas do link em uso,
+// e identifica o link por este cabeçalho. Sem ele a página não enxerga nada.
+// A página serve reserva (?t=) e aniversário (?b=) — vale o que estiver presente.
+var SB=window.supabase.createClient(SB_URL,SB_KEY,{
+  global:{headers:{'x-np-token':token||btoken||''}}
+});
 var mode=token?'reservation':'birthday';
 var guests=[];
 var event=null;
 var toast=null;
 var data=null;
-var BASE='https://nightpass-app.vercel.app';
+var BASE=location.origin;  // segue o domínio em que a página foi aberta
 
 function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function money(cents){return 'R$ '+((cents||0)/100).toFixed(2).replace('.',',');}
 
 function showToast(msg,type){
   if(toast)toast.remove();
@@ -136,8 +142,10 @@ function render(){
   html+='</div>';
 
   // Detalhes
+  var flyer=(event&&event.flyer_url)||data.flyer_url||'';
   html+='<div class="card">';
   html+='<h2>📋 Detalhes</h2>';
+  if(flyer)html+='<img src="'+escHtml(flyer)+'" alt="Flyer do evento" style="width:100%;border-radius:10px;margin-bottom:12px;display:block" onerror="this.style.display=\'none\'">';
   html+='<div class="info-row">';
   if(evDate)html+='<span>📅 '+evDate+'</span>';
   if(!isBday&&data.expected_arrival)html+='<span>🕐 '+data.expected_arrival.slice(0,5)+'</span>';
@@ -145,6 +153,27 @@ function render(){
   html+='</div>';
   if(!isBday&&data.location)html+='<div class="info-row"><span>📍 '+escHtml(data.location)+'</span></div>';
   if(evName)html+='<div class="info-row"><span class="badge badge-purple">🎉 '+escHtml(evName)+'</span></div>';
+  // Valor de entrada na lista + atrações (apenas reserva, com evento do dia)
+  if(!isBday&&event){
+    var entryStr='';
+    if(data.list_type==='vip'){entryStr='Gratuita (VIP)';}
+    else if(data.list_type==='custom'&&((data.list_male_value_cents||0)>0||(data.list_female_value_cents||0)>0)){
+      var pc=[];
+      if((data.list_male_value_cents||0)>0)pc.push('♂ '+money(data.list_male_value_cents));
+      if((data.list_female_value_cents||0)>0)pc.push('♀ '+money(data.list_female_value_cents));
+      entryStr=pc.join(' · ');
+    }else{
+      var pe=[];
+      if((event.price_male_list_cents||0)>0)pe.push('♂ '+money(event.price_male_list_cents));
+      if((event.price_female_list_cents||0)>0)pe.push('♀ '+money(event.price_female_list_cents));
+      entryStr=pe.join(' · ');
+    }
+    if(entryStr)html+='<div class="info-row"><span>🎫 Entrada na lista: <b style="color:#a78bfa">'+escHtml(entryStr)+'</b></span></div>';
+    var arts=[];
+    if(event.artists&&event.artists.length){event.artists.forEach(function(a){if(a&&a.name&&String(a.name).trim())arts.push(String(a.name).trim());});}
+    if(event.attractions&&String(event.attractions).trim())arts.push(String(event.attractions).trim());
+    if(arts.length)html+='<div class="info-row"><span>🎤 '+escHtml(arts.join(' · '))+'</span></div>';
+  }
   html+='</div>';
 
   // Stats
@@ -178,6 +207,8 @@ function render(){
   if(guests.length===0){
     html+='<div class="empty">Nenhum convidado ainda.<br>Compartilhe o link de convite ou adicione manualmente abaixo.</div>';
   }else{
+    // Lista rolável (barra de rolagem quando há muitos convidados)
+    html+='<div style="max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin:-2px -4px 0;padding:2px 4px 0">';
     // Pendentes primeiro, depois confirmados
     var sorted=[].concat(guests).sort(function(a,b){
       if(a.confirmed===b.confirmed)return 0;
@@ -207,6 +238,7 @@ function render(){
       html+='</div>';
       html+='</div>';
     });
+    html+='</div>'; // fecha a lista rolável
   }
   html+='</div>';
 
@@ -333,8 +365,12 @@ function init(){
     SB.from('reservations').select('*').eq('token',token).single().then(function(r){
       if(r.error||!r.data){app.innerHTML='<div class="closed"><h2>Reserva não encontrada</h2><p>Este link pode ter expirado ou ser inválido.</p></div>';return;}
       data=r.data;
-      if(data.event_id){SB.from('events').select('name,list_locks').eq('id',data.event_id).single().then(function(er){event=er.data||null;loadGuests();subscribeRealtime();});}
-      else{loadGuests();subscribeRealtime();}
+      var evSel='name,list_locks,flyer_url,attractions,artists,start_time,price_male_list_cents,price_female_list_cents';
+      if(data.event_id){
+        SB.from('events').select(evSel).eq('id',data.event_id).single().then(function(er){event=er.data||null;loadGuests();subscribeRealtime();});
+      }else if(data.reservation_date){
+        SB.from('events').select(evSel).eq('house_id',data.house_id).eq('event_date',data.reservation_date).limit(1).then(function(er){event=(er.data&&er.data[0])||null;loadGuests();subscribeRealtime();});
+      }else{loadGuests();subscribeRealtime();}
     });
   }
 }

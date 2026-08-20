@@ -16,11 +16,11 @@ export const DEFAULT_AREAS: WorkArea[] = [
   { key: 'garcom', label: 'Garçom', icon: '🍽️', color: '#10b981' },
   { key: 'cumim', label: 'Cumim', icon: '🥄', color: '#06b6d4' },
   { key: 'recepcao', label: 'Recepção', icon: '💁', color: '#ec4899' },
-  { key: 'atendente', label: 'Atendente', icon: '🎟️', color: '#f87171' },
+  { key: 'atendente', label: 'Atendente', icon: '🎫', color: '#f87171' },
   { key: 'seguranca', label: 'Segurança', icon: '🛡️', color: '#64748b' },
 ]
 
-export const AREA_ICON_OPTIONS = ['📋', '🧹', '👨‍🍳', '🔧', '🍽️', '🥄', '💁', '🎟️', '🛡️', '🍺', '🍸', '🎧', '💡', '🎤', '📦', '🚪', '🅿️', '🎥', '📸', '🚻']
+export const AREA_ICON_OPTIONS = ['📋', '🧹', '👨‍🍳', '🔧', '🍽️', '🥄', '💁', '🎫', '🛡️', '🍺', '🍸', '🎧', '💡', '🎤', '📦', '🚪', '🅿️', '🎥', '📸', '🚻']
 export const AREA_COLOR_OPTIONS = ['#60a5fa', '#f59e0b', '#8b5cf6', '#10b981', '#06b6d4', '#ec4899', '#f87171', '#64748b', '#a78bfa', '#34d399']
 
 const DIACRITICS = /[̀-ͯ]/g

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, useMemo} from 'react'
+import { supabasePublico } from '../lib/supabase'
 
 const C = {
   bg: '#0a0e1a', card: '#111827', brd: '#1e2736',
@@ -84,6 +84,10 @@ function EventDetails({ ev }: { ev?: EventInfo }) {
 }
 
 export function ConfirmarPresencaPage({ token }: { token: string }) {
+  // Cliente com o token no cabeçalho: o RLS dessas tabelas deixou de ser aberto
+  // e só devolve as linhas deste link.
+  const supabase = useMemo(() => supabasePublico(token), [token])
+
   const [guest, setGuest] = useState<GuestInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -174,14 +178,14 @@ export function ConfirmarPresencaPage({ token }: { token: string }) {
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: 'system-ui,sans-serif', padding: '0 0 60px' }}>
       {/* Flyer inteiro (sem corte) */}
       {ev?.flyer_url && (
-        <img src={ev.flyer_url} alt={ev.name} style={{ width: '100%', maxWidth: 480, height: 'auto', display: 'block', margin: '0 auto' }} />
+        <img loading="lazy" decoding="async" src={ev.flyer_url} alt={ev.name} style={{ width: '100%', maxWidth: 480, height: 'auto', display: 'block', margin: '0 auto' }} />
       )}
 
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px' }}>
         {/* Logo + casa */}
         {house && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-            {house.logo_url && <img src={house.logo_url} alt={house.name} style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />}
+            {house.logo_url && <img loading="lazy" decoding="async" src={house.logo_url} alt={house.name} style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />}
             <span style={{ color: C.mut, fontSize: 13, fontWeight: 600 }}>{house.name}</span>
           </div>
         )}

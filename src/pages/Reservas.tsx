@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
-import { Card, Toast, Btn, Modal, FAB } from '../components/ui'
+import { Card, Toast, Btn, Modal } from '../components/ui'
 import { ftel, fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
 import { sendWADirect } from '../utils/whatsapp'
@@ -41,7 +41,23 @@ interface Reservation {
   reservation_items?: ResItem[]
 }
 
-const RDEF = (date: string) => ({ name: '', phone: '', people_count: '', location: '', amount_cents: '', expected_arrival: '', event_id: '', reservation_type: '', flyer_url: '', invite_message: '', reservation_date: date, payment_status: 'free', deposit_cents: '', observations: '', list_type: 'normal', list_custom_value_cents: '', list_male_value_cents: '', list_female_value_cents: '' })
+function parseMoneyInput(raw: string): number {
+  // Máscara por dígitos (mesmo padrão já usado em Events.tsx e em apps bancários BR):
+  // cada tecla reformata o campo em "R$ X,XX", e reinterpretar essa string formatada
+  // como decimal (vírgula = separador) trava a digitação no 1º dígito — o dígito
+  // seguinte cai nas casas decimais já fixas e o valor não muda mais.
+  // Em vez disso, os dígitos digitados (em qualquer posição) formam o valor em
+  // centavos direto, então a reformatação a cada tecla nunca atrapalha.
+  const digits = raw.replace(/\D/g, '')
+  return digits ? parseInt(digits, 10) : 0
+}
+function moneyVal(cents: number | string | undefined): string {
+  const n = typeof cents === 'string' ? parseFloat(cents) : (cents ?? 0)
+  if (!n || n === 0) return ''
+  return 'R$ ' + (n / 100).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+
+const RDEF = (date: string) => ({ name: '', phone: '', people_count: '', location: '', amount_cents: 0, expected_arrival: '', event_id: '', reservation_type: '', flyer_url: '', invite_message: '', reservation_date: date, payment_status: 'free', deposit_cents: 0, observations: '', list_type: 'normal', list_custom_value_cents: 0, list_male_value_cents: 0, list_female_value_cents: 0 })
 const EMPTY_TYPE = { name: '', icon: '🎉', color: '#3b82f6', sort_order: '0' }
 const ICON_OPTS = ['🎉','🎂','🍖','🏢','👶','💍','🎓','🎊','🥂','🍽️','🎭','🎪','🎡','🏆','🌟','🎵','🏖️','🏡','🌺','🎈']
 const STATUS_COLOR: Record<string, string> = { pending: '#f59e0b', confirmed: '#10b981', arrived: '#3b82f6', cancelled: '#f87171' }
@@ -54,13 +70,12 @@ const LIST_LABEL: Record<string, string> = { normal: 'Normal', vip: 'VIP', custo
 const LIST_ICON:  Record<string, string> = { normal: '📋', vip: '⭐', custom: '💲' }
 const LIST_DESC:  Record<string, string> = { normal: 'Paga entrada normal', vip: 'Entrada gratuita', custom: 'Valor combinado' }
 
-const SL: React.CSSProperties = {
-  width: '100%', background: '#0a0e1a', border: `1px solid ${C.brd}`,
-  borderRadius: 8, padding: '10px 12px', color: C.txt,
-  fontSize: 14, minHeight: 44, fontFamily: 'inherit', boxSizing: 'border-box',
-}
-
 export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
+  const SL: React.CSSProperties = {
+    width: '100%', background: C.bg, border: `1px solid ${C.brd}`,
+    borderRadius: 8, padding: '10px 12px', color: C.txt,
+    fontSize: 14, minHeight: 44, fontFamily: 'inherit', boxSizing: 'border-box',
+  }
   const [view, setView] = useState<'list' | 'receivable' | 'settings' | 'spaces' | 'archive'>('list')
   const [archivedList, setArchivedList] = useState<Reservation[]>([])
   const [selDate, setSelDate] = useState(() => {
@@ -72,10 +87,12 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   const [viewOnly, setViewOnly] = useState(false)
   const [editing, setEditing] = useState<Reservation | null>(null)
   const [eventsForDate, setEventsForDate] = useState<Array<{ id: string; name: string }>>([])
+  // Preços de espaço definidos no evento daquela data (sobrepõem o preço padrão do espaço)
+  const [eventSpacePrices, setEventSpacePrices] = useState<Record<string, number>>({})
   const [toast, setToast] = useState<ToastState | null>(null)
   const [form, setForm] = useState(() => RDEF(selDate))
   const [formItems, setFormItems] = useState<Array<{ name: string; quantity: string; sale_cents: string; cost_cents: string; mode: 'unit' | 'total' }>>([])
-  const [viewPeriod, setViewPeriod] = useState<'day' | 'week' | 'month'>('week')
+  const [viewPeriod, setViewPeriod] = useState<'day' | 'week' | 'month' | 'all'>('week')
   const [eventFilter, setEventFilter] = useState<{ id: string; name: string } | null>(null)
   const [periodCounts, setPeriodCounts] = useState<{ day: { res: number; people: number }; week: { res: number; people: number }; month: { res: number; people: number } }>({ day: { res: 0, people: 0 }, week: { res: 0, people: 0 }, month: { res: 0, people: 0 } })
 
@@ -92,7 +109,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   const [spaces, setSpaces] = useState<HouseSpace[]>([])
   const [spaceForm, setSpaceForm] = useState({ name: '', capacity: '', price_cents: '' })
   const [editingSpace, setEditingSpace] = useState<string | null>(null)
-  const [occupiedSpaces, setOccupiedSpaces] = useState<Record<string, string>>({}) // spaceName → reservanteName
+  // spaceName → ocupação do dia (soma de pessoas, nº de reservas, nomes)
+  const [occupiedSpaces, setOccupiedSpaces] = useState<Record<string, { people: number; count: number; names: string[] }>>({})
   const [spaceDropOpen, setSpaceDropOpen] = useState(false)
   const [spaceSearch, setSpaceSearch] = useState('')
   const spaceDropRef = useRef<HTMLDivElement>(null)
@@ -104,13 +122,29 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   }
 
   function loadOccupied(date: string, excludeId?: string) {
-    let q = supabase.from('reservations').select('location,name').eq('house_id', house.id).eq('reservation_date', date).not('location', 'is', null).neq('location', '')
+    let q = supabase.from('reservations').select('location,name,people_count,status').eq('house_id', house.id).eq('reservation_date', date).not('location', 'is', null).neq('location', '')
     if (excludeId) q = q.neq('id', excludeId)
     q.then(r => {
-      const map: Record<string, string> = {}
-      ;(r.data ?? []).forEach(x => { if (x.location) map[x.location] = x.name })
+      const map: Record<string, { people: number; count: number; names: string[] }> = {}
+      ;(r.data ?? []).forEach((x: { location?: string; name?: string; people_count?: number; status?: string }) => {
+        if (!x.location || x.status === 'cancelled') return
+        const m = map[x.location] ?? { people: 0, count: 0, names: [] }
+        m.people += (x.people_count ?? 0); m.count += 1; if (x.name) m.names.push(x.name)
+        map[x.location] = m
+      })
       setOccupiedSpaces(map)
     })
+  }
+
+  // Status de ocupação de um espaço no dia: com capacidade → várias reservas até encher; sem capacidade → 1 reserva
+  function spaceStatus(sp: HouseSpace) {
+    const occ = occupiedSpaces[sp.name]
+    const usado = occ?.people ?? 0
+    const cnt = occ?.count ?? 0
+    const cap = sp.capacity ?? null
+    const isFull = cap ? usado >= cap : cnt >= 1
+    const restante = cap ? Math.max(0, cap - usado) : null
+    return { usado, cnt, cap, isFull, restante, names: occ?.names ?? [] }
   }
 
   function saveSpace() {
@@ -158,11 +192,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     supabase.from('reservation_types').delete().eq('id', id).then(() => loadTypes())
   }
 
-  function loadRes(date?: string, period?: 'day' | 'week' | 'month', evFilter?: { id: string; name: string } | null) {
+  function loadRes(date?: string, period?: 'day' | 'week' | 'month' | 'all', evFilter?: { id: string; name: string } | null) {
     const d = date ?? selDate
     const p = period ?? viewPeriod
     const ef = evFilter !== undefined ? evFilter : eventFilter
-    let q = supabase.from('reservations').select('*,events(name,event_date),reservation_items(*)')
+    let q = supabase.from('reservations').select('*,events(name,event_date),reservation_items(*),reservation_guests(id,confirmed,checked_in)')
       .eq('house_id', house.id)
       .is('archived_at', null)
     if (p === 'day') {
@@ -174,16 +208,19 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
       const fmt = (x: Date) => x.toISOString().split('T')[0]
       q = q.gte('reservation_date', fmt(mon)).lte('reservation_date', fmt(sun))
-    } else {
+    } else if (p === 'month') {
       const dt = new Date(d + 'T12:00')
       const ms = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-01`
       const me = new Date(dt.getFullYear(), dt.getMonth()+1, 0).toISOString().split('T')[0]
       q = q.gte('reservation_date', ms).lte('reservation_date', me)
     }
+    // p === 'all': sem filtro de data
     if (ef?.id) q = q.eq('event_id', ef.id)
     q.order('reservation_date').order('expected_arrival').then(r => setResList(r.data ?? []))
-    supabase.from('events').select('id,name,event_date').eq('house_id', house.id).eq('event_date', d)
-      .then(r => setEventsForDate(r.data ?? []))
+    if (p !== 'all') {
+      supabase.from('events').select('id,name,event_date').eq('house_id', house.id).eq('event_date', d)
+        .then(r => setEventsForDate(r.data ?? []))
+    }
   }
 
   // Arquiva automaticamente reservas com data anterior a hoje
@@ -214,7 +251,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
   function loadArchived() {
     supabase.from('reservations')
-      .select('*,events(name,event_date),reservation_items(*)')
+      .select('*,events(name,event_date),reservation_items(*),reservation_guests(id,confirmed,checked_in)')
       .eq('house_id', house.id)
       .not('archived_at', 'is', null)
       .order('archived_at', { ascending: false })
@@ -235,7 +272,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     const me = new Date(dt.getFullYear(), dt.getMonth()+1, 0).toISOString().split('T')[0]
 
     const sum = (rows: { people_count: number | null }[]) => rows.reduce((acc, r) => acc + (r.people_count ?? 0), 0)
-    const base = () => supabase.from('reservations').select('people_count').eq('house_id', house.id).is('archived_at', null)
+    const base = () => supabase.from('reservations').select('people_count').eq('house_id', house.id).is('archived_at', null).neq('status', 'cancelled')
     Promise.all([
       base().eq('reservation_date', d),
       base().gte('reservation_date', fmt(mon)).lte('reservation_date', fmt(sun)),
@@ -268,6 +305,20 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
   useEffect(() => { loadTypes() }, [house.id])
   useEffect(() => { loadSpaces() }, [house.id])
+  // Carrega os preços de espaço do(s) evento(s) da data da reserva (mescla se houver mais de um)
+  useEffect(() => {
+    const date = form.reservation_date as string
+    if (!date || !formOpen) { setEventSpacePrices({}); return }
+    supabase.from('events').select('space_prices').eq('house_id', house.id).eq('event_date', date)
+      .then(r => {
+        const merged: Record<string, number> = {}
+        for (const ev of r.data ?? []) {
+          const sp = (ev as { space_prices?: Record<string, number> | null }).space_prices
+          if (sp) for (const [k, v] of Object.entries(sp)) merged[k] = v
+        }
+        setEventSpacePrices(merged)
+      })
+  }, [form.reservation_date, formOpen, house.id])
   useEffect(() => { loadPeriodCounts(selDate) }, [selDate, house.id])
   useEffect(() => { autoArchivePast().then(() => loadRes()) }, [house.id])
 
@@ -331,6 +382,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   }
 
   // Valor de venda total dos opcionais (entra no valor da reserva)
+  // Preço real do espaço: usa o valor definido no evento da data, se houver; senão o padrão do espaço
+  function effectiveSpacePrice(sp: { id: string; price_cents: number }): number {
+    return eventSpacePrices[sp.id] ?? sp.price_cents
+  }
+
   function itemsTotal(items: Array<{ quantity: string; sale_cents: string; mode?: 'unit' | 'total' }>) {
     return items.reduce((s, it) => {
       const val = Math.round((parseFloat(it.sale_cents) || 0) * 100)
@@ -339,15 +395,35 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     }, 0)
   }
 
+  // Auto: ao incluir QUALQUER item que gere valor (base, opcionais ou valores de lista),
+  // o status sai de "Free" e vai para "A pagar". Só em nova reserva, e só na borda de
+  // subida (0 → valor) para não impedir o usuário de marcar Free deliberadamente depois.
+  const valueGenerated =
+    ((form.amount_cents as number) || 0) +
+    itemsTotal(formItems) +
+    (form.list_type === 'custom'
+      ? ((form.list_custom_value_cents as number) || 0) +
+        ((form.list_male_value_cents as number) || 0) +
+        ((form.list_female_value_cents as number) || 0)
+      : 0)
+  const prevValueRef = useRef(0)
+  useEffect(() => {
+    if (!editing && !viewOnly && prevValueRef.current === 0 && valueGenerated > 0 && form.payment_status === 'free') {
+      setForm(p => ({ ...p, payment_status: 'unpaid' }))
+    }
+    prevValueRef.current = valueGenerated
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valueGenerated, editing, viewOnly])
+
   async function saveRes() {
     if (!form.name.trim()) { sT(setToast, 'Nome do responsável obrigatório', 'error'); return }
     if ((form.phone || '').replace(/\D/g, '').length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
     const isFree = form.payment_status === 'free'
-    const baseCents = Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
+    const baseCents = (form.amount_cents as number) || 0
     const optCents = itemsTotal(formItems)
     const totalCents = isFree ? 0 : baseCents + optCents
     const depositCents = form.payment_status === 'partial'
-      ? Math.round((parseFloat(String(form.deposit_cents)) || 0) * 100)
+      ? (form.deposit_cents as number) || 0
       : form.payment_status === 'paid' ? totalCents : 0
     const d = {
       house_id: house.id, name: form.name, phone: form.phone || null,
@@ -363,9 +439,9 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       observations: form.observations?.trim() || null,
       invite_message: (form as any).invite_message?.trim() || null,
       list_type: form.list_type || 'normal',
-      list_custom_value_cents: form.list_type === 'custom' ? Math.round((parseFloat(String(form.list_custom_value_cents)) || 0) * 100) : 0,
-      list_male_value_cents: form.list_type === 'custom' ? Math.round((parseFloat(String(form.list_male_value_cents)) || 0) * 100) : 0,
-      list_female_value_cents: form.list_type === 'custom' ? Math.round((parseFloat(String(form.list_female_value_cents)) || 0) * 100) : 0,
+      list_custom_value_cents: form.list_type === 'custom' ? ((form.list_custom_value_cents as number) || 0) : 0,
+      list_male_value_cents: form.list_type === 'custom' ? ((form.list_male_value_cents as number) || 0) : 0,
+      list_female_value_cents: form.list_type === 'custom' ? ((form.list_female_value_cents as number) || 0) : 0,
       status: editing?.status ?? 'pending',
       token: editing?.token ?? crypto.randomUUID(),
       max_guests: 10,
@@ -416,12 +492,20 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     supabase.from('reservations').update({ status: 'arrived', arrived_at: new Date().toISOString() }).eq('id', id).then(() => loadRes())
   }
 
+  // Cancela a reserva: permanece na lista com a tarja "Cancelado" (não arquiva),
+  // mas deixa de contar na ocupação/capacidade.
+  function cancelRes(id: string) {
+    if (!confirm('Cancelar esta reserva? Ela ficará marcada como "Cancelada" na lista.')) return
+    supabase.from('reservations').update({ status: 'cancelled' }).eq('id', id)
+      .then(() => { loadRes(); loadPeriodCounts(selDate); sT(setToast, 'Reserva cancelada.', 'success') })
+  }
+
   function editRes(r: Reservation) {
     setEditing(r)
     // amount_cents salvo = base + venda dos opcionais; ao editar, isolamos a base
     const saleItemsCents = (r.reservation_items ?? []).reduce((s, it) => s + (it.quantity || 0) * (it.unit_price_cents ?? it.unit_cost_cents ?? 0), 0)
     const baseCents = Math.max(0, (r.amount_cents ?? 0) - saleItemsCents)
-    setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: baseCents ? String(baseCents / 100) : '', expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ? String(r.deposit_cents / 100) : '', observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ? String(r.list_custom_value_cents / 100) : '', list_male_value_cents: r.list_male_value_cents ? String(r.list_male_value_cents / 100) : '', list_female_value_cents: r.list_female_value_cents ? String(r.list_female_value_cents / 100) : '' })
+    setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: baseCents, expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ?? 0, observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ?? 0, list_male_value_cents: r.list_male_value_cents ?? 0, list_female_value_cents: r.list_female_value_cents ?? 0 })
     setFormItems((r.reservation_items ?? []).map(it => ({
       name: it.name, quantity: String(it.quantity),
       sale_cents: String((it.unit_price_cents ?? it.unit_cost_cents ?? 0) / 100),
@@ -446,7 +530,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     setEditing(r)
     const saleItemsCents = (r.reservation_items ?? []).reduce((s, it) => s + (it.quantity || 0) * (it.unit_price_cents ?? it.unit_cost_cents ?? 0), 0)
     const baseCents = Math.max(0, (r.amount_cents ?? 0) - saleItemsCents)
-    setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: baseCents ? String(baseCents / 100) : '', expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ? String(r.deposit_cents / 100) : '', observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ? String(r.list_custom_value_cents / 100) : '', list_male_value_cents: r.list_male_value_cents ? String(r.list_male_value_cents / 100) : '', list_female_value_cents: r.list_female_value_cents ? String(r.list_female_value_cents / 100) : '' })
+    setForm({ name: r.name, phone: r.phone ?? '', people_count: r.people_count ? String(r.people_count) : '', location: r.location ?? '', amount_cents: baseCents, expected_arrival: r.expected_arrival ?? '', event_id: r.event_id ?? '', reservation_type: r.reservation_type ?? '', flyer_url: r.flyer_url ?? '', invite_message: r.invite_message ?? '', reservation_date: r.reservation_date ?? selDate, payment_status: r.payment_status ?? 'unpaid', deposit_cents: r.deposit_cents ?? 0, observations: r.observations ?? '', list_type: r.list_type ?? 'normal', list_custom_value_cents: r.list_custom_value_cents ?? 0, list_male_value_cents: r.list_male_value_cents ?? 0, list_female_value_cents: r.list_female_value_cents ?? 0 })
     setFormItems((r.reservation_items ?? []).map(it => ({
       name: it.name, quantity: String(it.quantity),
       sale_cents: String((it.unit_price_cents ?? it.unit_cost_cents ?? 0) / 100),
@@ -534,7 +618,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   }
 
   async function sendListLink(r: Reservation) {
-    const url = `https://nightpass-app.vercel.app/lista.html?t=${r.token}`
+    const url = `${window.location.origin}/lista.html?t=${r.token}`
     const resType = resTypes.find(t => t.id === r.reservation_type)
     const typeLabel = resType ? `${resType.icon} ${resType.name}` : ''
     const dateStr = r.reservation_date
@@ -545,23 +629,78 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       ? '\n\n📦 *Itens inclusos:*\n' + items.map(i => `• ${i.quantity > 1 ? `${i.quantity}× ` : ''}${i.name}`).join('\n')
       : ''
 
+    // Busca o evento do dia (pelo vínculo da reserva ou pela data) para incluir flyer, valores de lista e atrações
+    type EvInfo = { name?: string; flyer_url?: string; attractions?: string; start_time?: string; artists?: Array<{ name?: string }>; price_male_list_cents?: number; price_female_list_cents?: number }
+    let ev: EvInfo | null = null
+    const evSelect = 'name,flyer_url,attractions,start_time,artists,price_male_list_cents,price_female_list_cents'
+    if (r.event_id) {
+      const { data } = await supabase.from('events').select(evSelect).eq('id', r.event_id).limit(1)
+      ev = (data?.[0] as EvInfo) ?? null
+    } else if (r.reservation_date) {
+      const { data } = await supabase.from('events').select(evSelect).eq('house_id', house.id).eq('event_date', r.reservation_date).limit(1)
+      ev = (data?.[0] as EvInfo) ?? null
+    }
+
+    // Linhas do evento: valor de entrada na lista + atrações
+    const evLines: string[] = []
+    if (ev) {
+      if (r.list_type === 'vip') {
+        evLines.push('🎫 Entrada na lista: *Gratuita (VIP)*')
+      } else if (r.list_type === 'custom' && ((r.list_male_value_cents ?? 0) > 0 || (r.list_female_value_cents ?? 0) > 0)) {
+        const parts: string[] = []
+        if ((r.list_male_value_cents ?? 0) > 0) parts.push(`♂ ${fmtCurrency(r.list_male_value_cents ?? 0)}`)
+        if ((r.list_female_value_cents ?? 0) > 0) parts.push(`♀ ${fmtCurrency(r.list_female_value_cents ?? 0)}`)
+        evLines.push(`🎫 Entrada na lista: ${parts.join(' · ')}`)
+      } else {
+        const parts: string[] = []
+        if ((ev.price_male_list_cents ?? 0) > 0) parts.push(`♂ ${fmtCurrency(ev.price_male_list_cents ?? 0)}`)
+        if ((ev.price_female_list_cents ?? 0) > 0) parts.push(`♀ ${fmtCurrency(ev.price_female_list_cents ?? 0)}`)
+        if (parts.length) evLines.push(`🎫 Entrada na lista: ${parts.join(' · ')}`)
+      }
+      const artistNames = (ev.artists ?? []).map(a => a?.name).filter((n): n is string => !!n && n.trim() !== '')
+      const attractionParts = [...artistNames]
+      if (ev.attractions && ev.attractions.trim()) attractionParts.push(ev.attractions.trim())
+      if (attractionParts.length) evLines.push(`🎤 *Atrações:* ${attractionParts.join(' · ')}`)
+    }
+
+    // Resumo financeiro
+    const total = r.amount_cents ?? 0
+    const deposito = r.deposit_cents ?? 0
+    const restante = total - deposito
+    const payStatus = r.payment_status ?? 'free'
+    const finLines: string[] = []
+    if (payStatus !== 'free' && total > 0) {
+      finLines.push(`\n💳 *Financeiro:*`)
+      finLines.push(`• Total: *${fmtCurrency(total)}*`)
+      if (payStatus === 'partial' && deposito > 0) {
+        finLines.push(`• Sinal pago: *${fmtCurrency(deposito)}*`)
+        finLines.push(`• Saldo a pagar: *${fmtCurrency(restante)}*`)
+      } else if (payStatus === 'paid') {
+        finLines.push(`• ✅ Pagamento: *Quitado*`)
+      } else if (payStatus === 'unpaid') {
+        finLines.push(`• ⚠️ A pagar na chegada: *${fmtCurrency(total)}*`)
+      }
+    }
+
     const lines = [
       `Olá ${r.name}! 🎉`,
-      typeLabel ? `Sua reserva de *${typeLabel}* está confirmada.` : 'Sua reserva está confirmada!',
+      ev?.name ? `Sua reserva para *${ev.name}* está confirmada!` : (typeLabel ? `Sua reserva de *${typeLabel}* está confirmada.` : 'Sua reserva está confirmada!'),
       '',
-      dateStr ? `📅 *${dateStr}*` : '',
+      dateStr ? `📅 *${dateStr}*${ev?.start_time ? ` às ${ev.start_time.slice(0, 5)}` : ''}` : '',
       r.expected_arrival ? `🕐 Chegada prevista: *${r.expected_arrival.slice(0, 5)}*` : '',
       r.location ? `📍 Local: *${r.location}*` : '',
       r.people_count ? `👥 *${r.people_count} pessoas*` : '',
+      evLines.length ? '\n' + evLines.join('\n') : '',
       itemLines,
+      finLines.join('\n'),
       '',
       '👇 Acesse o link para cadastrar sua lista de convidados:',
       url,
-      r.flyer_url ? `\n🖼️ Flyer do evento:\n${r.flyer_url}` : '',
     ].filter(l => l !== '').join('\n')
 
     if (!r.phone) { sT(setToast, 'Reserva sem telefone cadastrado', 'warn'); return }
-    const res = await sendWADirect(house.id, r.phone, lines, { type: 'reservation_list' })
+    const imageUrl = ev?.flyer_url || r.flyer_url || house.logo_url || undefined
+    const res = await sendWADirect(house.id, r.phone, lines, { type: 'reservation_list', mediaUrl: imageUrl })
 
     // Marca que o link foi enviado (confirmação de envio)
     const ts = new Date().toISOString()
@@ -616,7 +755,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
           {/* ── Tipo de Lista — mesmo modelo do Pagamento ── */}
           <div style={{ gridColumn: 'span 3', background: 'rgba(167,139,250,0.05)', border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 16px' }}>
-            <div style={{ color: '#a78bfa', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 12 }}>🎟️ TIPO DE LISTA</div>
+            <div style={{ color: '#a78bfa', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 12 }}>🎫 TIPO DE LISTA</div>
             <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
               {/* Botões de tipo — mesma altura/estilo dos botões de pagamento */}
@@ -625,7 +764,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                 <div style={{ display: 'flex', gap: 6, height: 56 }}>
                   {(['normal','vip','custom'] as const).map(lt => (
                     <button key={lt} type="button"
-                      onClick={() => setForm(p => ({ ...p, list_type: lt, list_male_value_cents: lt !== 'custom' ? '' : p.list_male_value_cents, list_female_value_cents: lt !== 'custom' ? '' : p.list_female_value_cents }))}
+                      onClick={() => setForm(p => ({ ...p, list_type: lt, list_male_value_cents: lt !== 'custom' ? 0 : p.list_male_value_cents, list_female_value_cents: lt !== 'custom' ? 0 : p.list_female_value_cents }))}
                       style={{ flex: 1, borderRadius: 8, border: `2px solid ${form.list_type === lt ? LIST_COLOR[lt] : LIST_COLOR[lt] + '33'}`, background: form.list_type === lt ? LIST_COLOR[lt] + '22' : 'transparent', color: form.list_type === lt ? LIST_COLOR[lt] : C.mut, fontSize: 11, fontWeight: form.list_type === lt ? 800 : 500, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, transition: 'all .15s' }}>
                       <span style={{ fontSize: 15 }}>{LIST_ICON[lt]}</span>
                       <span>{LIST_LABEL[lt]}</span>
@@ -650,19 +789,19 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                     <div style={{ display: 'flex', gap: 8 }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 10, color: '#60a5fa', fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>👨 HOMEM</div>
-                        <input type="number" step="0.01" min="0" autoFocus
+                        <input inputMode="decimal" autoFocus
                           style={{ ...SL, borderColor: '#60a5fa55' }}
-                          value={form.list_male_value_cents}
-                          onChange={e => setForm(p => ({ ...p, list_male_value_cents: e.target.value }))}
-                          placeholder="Ex: 40,00" />
+                          value={moneyVal(form.list_male_value_cents as number)}
+                          onChange={e => setForm(p => ({ ...p, list_male_value_cents: parseMoneyInput(e.target.value) }))}
+                          placeholder="R$ 0,00" />
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 10, color: '#f472b6', fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>👩 MULHER</div>
-                        <input type="number" step="0.01" min="0"
+                        <input inputMode="decimal"
                           style={{ ...SL, borderColor: '#f472b655' }}
-                          value={form.list_female_value_cents}
-                          onChange={e => setForm(p => ({ ...p, list_female_value_cents: e.target.value }))}
-                          placeholder="Ex: 20,00" />
+                          value={moneyVal(form.list_female_value_cents as number)}
+                          onChange={e => setForm(p => ({ ...p, list_female_value_cents: parseMoneyInput(e.target.value) }))}
+                          placeholder="R$ 0,00" />
                       </div>
                     </div>
                   </div>
@@ -712,18 +851,19 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       {form.location
                         ? (() => {
                             const sp = spaces.find(s => s.name === form.location)
-                            const isOcc = sp ? !!occupiedSpaces[sp.name] : false
+                            const st = sp ? spaceStatus(sp) : null
+                            const isFull = st?.isFull ?? false
                             return (
                               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ color: isOcc ? '#ef4444' : C.txt, fontWeight: 600 }}>
-                                  {isOcc ? '🔴' : '🟢'} {form.location}
+                                <span style={{ color: isFull ? '#ef4444' : C.txt, fontWeight: 600 }}>
+                                  {isFull ? '🔴' : '🟢'} {form.location}
                                 </span>
                                 {sp && sp.price_cents > 0 && (
                                   <span style={{ color: C.gold, fontSize: 12, fontWeight: 700 }}>· {fmtCurrency(sp.price_cents)}</span>
                                 )}
-                                {sp && sp.capacity && (
-                                  <span style={{ color: C.mut, fontSize: 11 }}>· 👥 {sp.capacity}</span>
-                                )}
+                                {sp && sp.capacity
+                                  ? <span style={{ color: isFull ? '#ef4444' : C.mut, fontSize: 11 }}>· 👥 {st!.usado}/{sp.capacity}</span>
+                                  : null}
                               </span>
                             )
                           })()
@@ -737,7 +877,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   {spaceDropOpen && (
                     <div style={{
                       position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 200,
-                      background: '#0d1120', border: `1px solid ${C.acc}44`, borderRadius: 12,
+                      background: C.card, border: `1px solid ${C.acc}44`, borderRadius: 12,
                       boxShadow: '0 8px 32px rgba(0,0,0,0.6)', overflow: 'hidden',
                     }}>
                       {/* Search */}
@@ -767,45 +907,54 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                         {spaces
                           .filter(sp => sp.name.toLowerCase().includes(spaceSearch.toLowerCase()))
                           .map((sp, idx, arr) => {
-                            const isOccupied = !!occupiedSpaces[sp.name]
+                            const st = spaceStatus(sp)
+                            const isFull = st.isFull
                             const isSel = form.location === sp.name
                             return (
                               <button
                                 key={sp.id}
                                 type="button"
-                                disabled={isOccupied}
                                 onClick={() => {
-                                  if (isOccupied) return
-                                  setForm(p => ({
-                                    ...p,
-                                    location: sp.name,
-                                    // auto-preenche valor se espaço tem preço e campo ainda está zerado
-                                    amount_cents: sp.price_cents > 0 && (parseFloat(String(p.amount_cents)) || 0) === 0
-                                      ? String(sp.price_cents / 100)
-                                      : p.amount_cents,
-                                  }))
+                                  // Não bloqueia mesmo cheio — só avisa visualmente
+                                  setForm(p => {
+                                    const eff = effectiveSpacePrice(sp)
+                                    return {
+                                      ...p,
+                                      location: sp.name,
+                                      // auto-preenche valor se espaço tem preço (do evento ou padrão) e campo ainda está zerado
+                                      amount_cents: eff > 0 && ((p.amount_cents as number) || 0) === 0
+                                        ? eff
+                                        : p.amount_cents,
+                                      payment_status: eff > 0 && ((p.amount_cents as number) || 0) === 0 && p.payment_status === 'free'
+                                        ? 'unpaid' : p.payment_status,
+                                    }
+                                  })
                                   setSpaceDropOpen(false); setSpaceSearch('')
                                 }}
                                 style={{
                                   width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-                                  padding: '10px 14px', background: isSel ? C.acc + '18' : isOccupied ? '#ef444408' : 'transparent',
+                                  padding: '10px 14px', background: isSel ? C.acc + '18' : isFull ? '#ef444408' : 'transparent',
                                   border: 'none', borderBottom: idx < arr.length - 1 ? `1px solid ${C.brd}` : 'none',
-                                  color: isOccupied ? '#ef4444' : isSel ? C.acc : C.txt,
-                                  fontSize: 13, cursor: isOccupied ? 'not-allowed' : 'pointer',
-                                  fontFamily: 'inherit', textAlign: 'left', opacity: isOccupied ? 0.8 : 1,
+                                  color: isFull ? '#ef4444' : isSel ? C.acc : C.txt,
+                                  fontSize: 13, cursor: 'pointer',
+                                  fontFamily: 'inherit', textAlign: 'left',
                                 }}
                               >
                                 {/* Indicator dot */}
-                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: isOccupied ? '#ef4444' : '#10b981', flexShrink: 0, boxShadow: `0 0 6px ${isOccupied ? '#ef4444' : '#10b981'}` }} />
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: isFull ? '#ef4444' : st.cap && st.usado > 0 ? '#f59e0b' : '#10b981', flexShrink: 0, boxShadow: `0 0 6px ${isFull ? '#ef4444' : st.cap && st.usado > 0 ? '#f59e0b' : '#10b981'}` }} />
                                 <span style={{ flex: 1, fontWeight: isSel ? 700 : 400 }}>{sp.name}</span>
-                                <span style={{ fontSize: 11, color: isOccupied ? '#ef4444' : C.mut, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                                  {isOccupied
-                                    ? <span>🔴 {occupiedSpaces[sp.name]}</span>
-                                    : <>
-                                        {sp.capacity && <span>👥 {sp.capacity}</span>}
-                                        {sp.price_cents > 0 && <span style={{ color: C.gold, fontWeight: 700 }}>{fmtCurrency(sp.price_cents)}</span>}
-                                        {!sp.capacity && sp.price_cents === 0 && <span>✅ Livre</span>}
-                                      </>
+                                <span style={{ fontSize: 11, color: isFull ? '#ef4444' : C.mut, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                                  {(() => {
+                                    const eff = effectiveSpacePrice(sp)
+                                    const isEvent = eventSpacePrices[sp.id] !== undefined && eventSpacePrices[sp.id] !== sp.price_cents
+                                    return <>
+                                      {st.cap
+                                        ? <span style={{ fontWeight: 700 }}>👥 {st.usado}/{st.cap}{isFull ? ' · cheio' : ` · ${st.restante} vaga${st.restante !== 1 ? 's' : ''}`}</span>
+                                        : (st.isFull ? <span>🔴 {st.names[0] ?? 'ocupado'}</span> : null)}
+                                      {eff > 0 && <span style={{ color: C.gold, fontWeight: 700 }}>{fmtCurrency(eff)}{isEvent && <span title="Valor definido no evento" style={{ color: C.acc, fontSize: 9, marginLeft: 3 }}>★</span>}</span>}
+                                      {!st.cap && !st.isFull && eff === 0 && <span>✅ Livre</span>}
+                                    </>
+                                  })()
                                   }
                                 </span>
                                 {isSel && <span style={{ color: C.acc, fontSize: 14, flexShrink: 0 }}>✓</span>}
@@ -838,6 +987,44 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             }
           </div>
 
+          {/* Valor do espaço selecionado — editável diretamente */}
+          {form.location && (() => {
+            const sp = spaces.find(s => s.name === form.location)
+            return (
+              <div style={{ gridColumn: 'span 1' }}>
+                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  💰 Valor do Espaço {sp ? `(${sp.name})` : ''}
+                </label>
+                <input
+                  inputMode="decimal"
+                  style={SL}
+                  value={moneyVal(form.amount_cents as number)}
+                  onChange={e => {
+                    const cents = parseMoneyInput(e.target.value)
+                    setForm(p => ({
+                      ...p,
+                      amount_cents: cents,
+                      payment_status: cents > 0 && p.payment_status === 'free' ? 'unpaid' : p.payment_status,
+                    }))
+                  }}
+                  placeholder="R$ 0,00"
+                />
+                {sp && (() => {
+                  const eff = effectiveSpacePrice(sp)
+                  const isEvent = eventSpacePrices[sp.id] !== undefined && eventSpacePrices[sp.id] !== sp.price_cents
+                  if (eff <= 0 || (form.amount_cents as number) === eff) return null
+                  return (
+                    <button type="button"
+                      onClick={() => setForm(p => ({ ...p, amount_cents: eff, payment_status: p.payment_status === 'free' ? 'unpaid' : p.payment_status }))}
+                      style={{ marginTop: 4, fontSize: 11, color: C.acc, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+                      ↩ Restaurar {isEvent ? 'valor do evento' : 'padrão'} ({fmtCurrency(eff)})
+                    </button>
+                  )
+                })()}
+              </div>
+            )
+          })()}
+
           {/* ── Linha: Evento do dia | Flyer ── */}
           {eventsForDate.length > 0
             ? <div>
@@ -852,9 +1039,9 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
           <div style={{ gridColumn: eventsForDate.length > 0 ? undefined : 'span 2' }}>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Flyer do Evento</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#0a0e1a', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 12, color: C.mut }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 12, color: C.mut }}>
               {form.flyer_url
-                ? <img src={form.flyer_url} alt="flyer" style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
+                ? <img loading="lazy" decoding="async" src={form.flyer_url} alt="flyer" style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
                 : <span>📁</span>
               }
               <span style={{ flex: 1 }}>{form.flyer_url ? 'Trocar imagem' : 'Selecionar imagem (JPG, PNG, WEBP)'}</span>
@@ -874,11 +1061,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
           {/* ── Pagamento — última linha (finaliza o total) ── */}
           {(() => {
-            const baseCentsForm = Math.round((parseFloat(String(form.amount_cents)) || 0) * 100)
+            const baseCentsForm = (form.amount_cents as number) || 0
             const optCentsForm  = itemsTotal(formItems)
             const grandTotal    = form.payment_status === 'free' ? 0 : baseCentsForm + optCentsForm
-            const depositVal    = parseFloat(String(form.deposit_cents)) || 0
-            const remaining     = grandTotal / 100 - depositVal
+            const depositCents  = (form.deposit_cents as number) || 0
+            const remaining     = grandTotal - depositCents
             return (
               <div style={{ order: 90, gridColumn: 'span 3', background: 'rgba(59,130,246,0.05)', border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 16px' }}>
                 <div style={{ color: C.sub, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 12 }}>💳 PAGAMENTO</div>
@@ -886,13 +1073,20 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                 {/* Breakdown: base + opcionais → total */}
                 <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Valor base (R$)</label>
+                    <label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Valor base</label>
                     <input
-                      type="number" step="0.01" min="0"
-                      value={form.amount_cents}
-                      onChange={e => setForm(p => ({ ...p, amount_cents: e.target.value }))}
-                      placeholder="0,00"
-                      style={{ background: 'transparent', border: 'none', color: C.txt, fontSize: 14, fontWeight: 700, textAlign: 'right', width: 120, outline: 'none', fontFamily: 'inherit' }}
+                      inputMode="decimal"
+                      value={moneyVal(form.amount_cents as number)}
+                      onChange={e => {
+                        const cents = parseMoneyInput(e.target.value)
+                        setForm(p => ({
+                          ...p,
+                          amount_cents: cents,
+                          payment_status: cents > 0 && p.payment_status === 'free' ? 'unpaid' : p.payment_status,
+                        }))
+                      }}
+                      placeholder="R$ 0,00"
+                      style={{ background: 'transparent', border: 'none', color: C.txt, fontSize: 14, fontWeight: 700, textAlign: 'right', width: 140, outline: 'none', fontFamily: 'inherit' }}
                     />
                   </div>
                   {optCentsForm > 0 && (
@@ -917,7 +1111,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   <div style={{ display: 'flex', gap: 6, height: 44 }}>
                     {(['unpaid','partial','paid','free'] as const).map(ps => (
                       <button key={ps} type="button"
-                        onClick={() => setForm(p => ({ ...p, payment_status: ps, amount_cents: ps === 'free' ? '0' : p.amount_cents, deposit_cents: (ps === 'unpaid' || ps === 'free') ? '' : p.deposit_cents }))}
+                        onClick={() => setForm(p => ({ ...p, payment_status: ps, amount_cents: ps === 'free' ? 0 : p.amount_cents, deposit_cents: (ps === 'unpaid' || ps === 'free') ? 0 : p.deposit_cents }))}
                         style={{ flex: 1, borderRadius: 8, border: `2px solid ${form.payment_status === ps ? PAY_COLOR[ps] : PAY_COLOR[ps] + '33'}`, background: form.payment_status === ps ? PAY_COLOR[ps] + '22' : 'transparent', color: form.payment_status === ps ? PAY_COLOR[ps] : C.mut, fontSize: 11, fontWeight: form.payment_status === ps ? 800 : 500, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, transition: 'all .15s' }}>
                         <span style={{ fontSize: 14 }}>{PAY_ICON[ps]}</span>
                         <span>{PAY_LABEL[ps]}</span>
@@ -930,16 +1124,16 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                 {form.payment_status === 'partial' && (
                   <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
-                      <label style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600, display: 'block', marginBottom: 4 }}>💰 Valor do Sinal (R$)</label>
-                      <input type="number" step="0.01" min="0" max={String(grandTotal / 100)}
-                        style={{ ...SL, borderColor: '#f59e0b55' }} value={form.deposit_cents}
-                        onChange={e => setForm(p => ({ ...p, deposit_cents: e.target.value }))} placeholder="Ex: 200,00" />
+                      <label style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600, display: 'block', marginBottom: 4 }}>💰 Valor do Sinal</label>
+                      <input inputMode="decimal"
+                        style={{ ...SL, borderColor: '#f59e0b55' }} value={moneyVal(form.deposit_cents as number)}
+                        onChange={e => setForm(p => ({ ...p, deposit_cents: parseMoneyInput(e.target.value) }))} placeholder="R$ 0,00" />
                     </div>
                     <div>
                       <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Saldo Restante no Caixa</label>
                       <div style={{ ...SL, display: 'flex', alignItems: 'center', gap: 8, background: remaining > 0 ? '#ef444411' : '#10b98111', borderColor: remaining > 0 ? '#ef444433' : '#10b98133' }}>
                         <span style={{ fontSize: 16 }}>{remaining > 0 ? '💸' : '✅'}</span>
-                        <span style={{ fontWeight: 800, fontSize: 15, color: remaining > 0 ? '#ef4444' : '#10b981' }}>{fmtCurrency(Math.round(remaining * 100))}</span>
+                        <span style={{ fontWeight: 800, fontSize: 15, color: remaining > 0 ? '#ef4444' : '#10b981' }}>{fmtCurrency(remaining)}</span>
                         {remaining <= 0 && <span style={{ fontSize: 11, color: '#10b981' }}>Quitado!</span>}
                       </div>
                     </div>
@@ -1075,7 +1269,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             <h1 style={{ fontSize: 26, fontWeight: 900, color: C.txt, marginBottom: 4 }}>🪑 Reservas</h1>
             <p style={{ color: C.mut, fontSize: 14 }}>
               {view === 'list'
-                ? `${resList.length} reserva${resList.length !== 1 ? 's' : ''} · ${viewPeriod === 'day' ? new Date(selDate + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }) : viewPeriod === 'week' ? 'esta semana' : new Date(selDate + 'T12:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`
+                ? `${resList.length} reserva${resList.length !== 1 ? 's' : ''} · ${viewPeriod === 'day' ? new Date(selDate + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }) : viewPeriod === 'week' ? 'esta semana' : viewPeriod === 'month' ? new Date(selDate + 'T12:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : 'todas as reservas ativas'}`
                 : view === 'archive'
                   ? `${archivedList.length} reserva${archivedList.length !== 1 ? 's' : ''} arquivada${archivedList.length !== 1 ? 's' : ''}`
                   : 'Tipos de celebração configuráveis'}
@@ -1094,7 +1288,13 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
         {/* Period filters + date picker */}
         {view === 'list' && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input type="date" value={selDate} onChange={e => setSelDate(e.target.value)}
+            <input type="date" value={selDate}
+              onChange={e => {
+                if (!e.target.value || !/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) return
+                setSelDate(e.target.value)
+                // Escolher uma data específica deve mostrar só as reservas daquele dia
+                if (viewPeriod !== 'day') { setEventFilter(null); setViewPeriod('day') }
+              }}
               style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '8px 12px', color: C.txt, fontSize: 14, minHeight: 40, fontFamily: 'inherit' }} />
             {(['day', 'week', 'month'] as const).map(p => {
               const { res, people } = periodCounts[p]
@@ -1118,6 +1318,14 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                 </button>
               )
             })}
+            <button style={TAB(viewPeriod === 'all' && !eventFilter)} onClick={() => { setEventFilter(null); setViewPeriod('all'); loadRes(selDate, 'all', null) }}>
+              📋 Todas
+              {viewPeriod === 'all' && resList.length > 0 && (
+                <span style={{ marginLeft: 6, background: C.acc, color: '#fff', borderRadius: 20, padding: '1px 7px', fontSize: 11, fontWeight: 800, lineHeight: 1.6 }}>
+                  {resList.length}
+                </span>
+              )}
+            </button>
             {eventFilter && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.acc + '18', border: `1px solid ${C.acc}44`, borderRadius: 10, padding: '6px 12px' }}>
                 <span style={{ color: C.acc, fontSize: 13, fontWeight: 600 }}>🎉 {eventFilter.name}</span>
@@ -1162,8 +1370,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
               const lm = r.list_male_value_cents ?? 0
               const lf = r.list_female_value_cents ?? 0
               const statusCol = STATUS_COLOR[r.status] ?? C.mut
+              const guests = (r as { reservation_guests?: Array<{ confirmed?: boolean; checked_in?: boolean }> }).reservation_guests ?? []
+              const confirmedByLink = guests.filter(g => g.confirmed).length
+              const checkedInCount = guests.filter(g => g.checked_in).length
               return (
-                <div key={r.id} style={{ display: 'flex', borderBottom: idx < resList.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+                <div key={r.id} style={{ display: 'flex', borderBottom: idx < resList.length - 1 ? `1px solid ${C.brd}` : 'none', opacity: r.status === 'cancelled' ? 0.6 : 1 }}>
 
                   {/* Barra lateral colorida por status */}
                   <div style={{ width: 4, flexShrink: 0, background: statusCol, borderRadius: idx === 0 ? '4px 0 0 0' : idx === resList.length - 1 ? '0 0 0 4px' : '0', opacity: 0.8 }} />
@@ -1175,7 +1386,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       {/* Ícone / flyer thumb */}
                       {r.flyer_url
                         ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: 'hidden', flexShrink: 0 }}>
-                            <img src={r.flyer_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            <img loading="lazy" decoding="async" src={r.flyer_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                               onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }} />
                           </div>
                         : <div style={{ width: 44, height: 44, borderRadius: 10, background: resType ? resType.color + '18' : '#ffffff0a', border: `2px solid ${resType ? resType.color + '44' : C.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
@@ -1239,6 +1450,18 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                           <strong style={{ color: C.txt }}>{r.people_count} pessoas</strong>
                         </span>
                       )}
+                      {confirmedByLink > 0 && (
+                        <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <i className="bi bi-check2-circle" style={{ color: '#10b981' }} />
+                          <strong style={{ color: '#10b981' }}>{confirmedByLink} confirmados pelo link</strong>
+                        </span>
+                      )}
+                      {checkedInCount > 0 && (
+                        <span style={{ color: C.mut, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <i className="bi bi-door-open-fill" style={{ color: '#3b82f6' }} />
+                          <strong style={{ color: '#3b82f6' }}>{checkedInCount} check-ins</strong>
+                        </span>
+                      )}
                       {r.location && (
                         <span style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                           <i className="bi bi-geo-alt-fill" style={{ color: C.acc }} />
@@ -1286,7 +1509,12 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                       <Btn onClick={() => editRes(r)} small variant="ghost">
                         <i className="bi bi-pencil-fill" /> Editar
                       </Btn>
-                      <Btn onClick={() => deleteRes(r.id)} small variant="danger">
+                      {r.status !== 'cancelled' && (
+                        <Btn onClick={() => cancelRes(r.id)} small style={{ background: '#f8717122', color: '#f87171', border: '1px solid #f8717144' }}>
+                          <i className="bi bi-x-circle-fill" /> Cancelar
+                        </Btn>
+                      )}
+                      <Btn onClick={() => deleteRes(r.id)} small variant="danger" title="Excluir permanentemente">
                         <i className="bi bi-trash3-fill" />
                       </Btn>
                     </div>
@@ -1440,7 +1668,6 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
         </div>
       )}
 
-      {view === 'list' && <FAB onClick={openNew} icon="➕" title="Nova reserva" />}
 
       {/* ── Painel lateral de convidados ── */}
       {guestPanel && (
@@ -1451,9 +1678,10 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
 
           {/* Drawer */}
           <div style={{
-            position: 'fixed', top: 0, right: 0, bottom: 0, width: 400,
-            background: '#0d1120', borderLeft: `1px solid ${C.brd}`,
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(400px, 100vw)', maxWidth: '100vw',
+            background: C.card, borderLeft: `1px solid ${C.brd}`,
             zIndex: 1001, display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 32px rgba(0,0,0,0.5)',
+            boxSizing: 'border-box',
           }}>
             {/* Header */}
             <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.brd}`, flexShrink: 0 }}>
@@ -1483,14 +1711,14 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                 )}
                 {guestPanel.people_count && (
                   <span style={{ background: C.card, color: C.mut, borderRadius: 20, padding: '2px 10px', fontSize: 12 }}>
-                    👥 {guestPanel.people_count} esperados
+                    👥 {guestPanel.people_count} convidados
                   </span>
                 )}
               </div>
             </div>
 
             {/* Lista de convidados */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+            <div className="r-scroll-y" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 16px' }}>
               {guestLoading
                 ? <div style={{ color: C.mut, textAlign: 'center', padding: 32 }}>Carregando...</div>
                 : guestList.length === 0
@@ -1539,7 +1767,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             </div>
 
             {/* Formulário para adicionar convidado */}
-            <div style={{ padding: '14px 16px', borderTop: `1px solid ${C.brd}`, flexShrink: 0, background: '#0a0e1a' }}>
+            <div style={{ padding: '14px 16px', borderTop: `1px solid ${C.brd}`, flexShrink: 0, background: C.bg }}>
               <div style={{ color: '#a78bfa', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginBottom: 4 }}>➕ ADICIONAR CONVIDADO</div>
               <div style={{ fontSize: 11, color: C.mut, marginBottom: 10 }}>
                 💡 Fone + nascimento = check-in automático · sem eles, completa na portaria
@@ -1599,7 +1827,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   {/* Link de gestão (aniversariante) */}
                   <div style={{ padding: '7px 12px', background: '#7c3aed11', border: '1px solid #7c3aed33', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ color: '#a78bfa', fontSize: 11, fontWeight: 600 }}>📋 Gerenciar lista</span>
-                    <button onClick={() => { navigator.clipboard.writeText(`https://nightpass-app.vercel.app/lista.html?t=${guestPanel.token}`); sT(setToast, 'Link de gestão copiado!', 'success') }}
+                    <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista.html?t=${guestPanel.token}`); sT(setToast, 'Link de gestão copiado!', 'success') }}
                       style={{ background: '#7c3aed22', border: '1px solid #7c3aed44', borderRadius: 6, padding: '3px 10px', color: '#a78bfa', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       Copiar
                     </button>
@@ -1607,7 +1835,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   {/* Link de convite (convidados) */}
                   <div style={{ padding: '7px 12px', background: '#10b98111', border: '1px solid #10b98133', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ color: '#10b981', fontSize: 11, fontWeight: 600 }}>📲 Link de convite (convidados)</span>
-                    <button onClick={() => { navigator.clipboard.writeText(`https://nightpass-app.vercel.app/convite.html?t=${guestPanel.token}`); sT(setToast, 'Link de convite copiado!', 'success') }}
+                    <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/convite.html?t=${guestPanel.token}`); sT(setToast, 'Link de convite copiado!', 'success') }}
                       style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 10px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       Copiar
                     </button>
@@ -1633,6 +1861,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
               const statusCol = STATUS_COLOR[r.status] ?? '#94a3b8'
               const total = r.amount_cents ? (r.amount_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : null
               const archivedDate = r.archived_at ? new Date(r.archived_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : ''
+              const aGuests = (r as { reservation_guests?: Array<{ checked_in?: boolean }> }).reservation_guests ?? []
+              const aChecked = aGuests.filter(g => g.checked_in).length
               return (
                 <div key={r.id} style={{ display: 'flex', borderBottom: i < archivedList.length - 1 ? `1px solid ${C.brd}` : 'none', opacity: 0.85 }}>
                   <div style={{ width: 4, flexShrink: 0, background: statusCol }} />
@@ -1649,6 +1879,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                         {r.events?.name && <span style={{ fontSize: 11, color: C.mut }}><i className="bi bi-calendar-event-fill" /> {r.events.name}</span>}
                         {r.reservation_date && <span style={{ fontSize: 11, color: C.mut }}><i className="bi bi-calendar3" /> {new Date(r.reservation_date + 'T12:00').toLocaleDateString('pt-BR')}</span>}
                         {archivedDate && <span style={{ fontSize: 11, color: C.mut }}><i className="bi bi-archive-fill" /> Arquivado em {archivedDate}</span>}
+                        <span style={{ fontSize: 11, color: '#3b82f6', fontWeight: 700 }}><i className="bi bi-door-open-fill" /> {aChecked} check-in{aChecked !== 1 ? 's' : ''}</span>
                         <span style={{ fontSize: 11, color: statusCol, fontWeight: 700 }}>{STATUS_LABEL[r.status] ?? r.status}</span>
                       </div>
                     </div>

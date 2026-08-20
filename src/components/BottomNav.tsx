@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { C } from '../constants/theme'
 import type { PageId } from './Sidebar'
 
@@ -6,13 +7,15 @@ interface BottomNavItem {
   icon: string
   label: string
   emoji: string
+  hasFill?: boolean
 }
 
+// speedometer2 não tem variante "-fill" no Bootstrap Icons — usá-la faz o ícone sumir ao ativar
 const BOTTOM_NAV: BottomNavItem[] = [
-  { id: 'checkin',   icon: 'door-open',      emoji: '🚪', label: 'Check-in' },
-  { id: 'dashboard', icon: 'speedometer2',   emoji: '📊', label: 'Dashboard' },
-  { id: 'reservas',  icon: 'bookmark-check', emoji: '🎫', label: 'Reservas' },
-  { id: 'events',    icon: 'calendar-event', emoji: '📅', label: 'Eventos' },
+  { id: 'checkin',   icon: 'door-open',      emoji: '🚪', label: 'Check-in', hasFill: true },
+  { id: 'dashboard', icon: 'speedometer2',   emoji: '📊', label: 'Dashboard', hasFill: false },
+  { id: 'reservas',  icon: 'bookmark-check', emoji: '🎫', label: 'Reservas', hasFill: true },
+  { id: 'events',    icon: 'calendar-event', emoji: '📅', label: 'Eventos', hasFill: true },
 ]
 
 interface Props {
@@ -23,7 +26,7 @@ interface Props {
   pendingRatings?: number
 }
 
-export function BottomNav({ active, setActive, setMOpen, newCI, pendingRatings = 0 }: Props) {
+function BottomNavImpl({ active, setActive, setMOpen, newCI, pendingRatings = 0 }: Props) {
   const isBottomTab = (id: PageId) => BOTTOM_NAV.some(n => n.id === id)
 
   return (
@@ -31,7 +34,7 @@ export function BottomNav({ active, setActive, setMOpen, newCI, pendingRatings =
       className="np-bottom-nav"
       style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 150,
-        background: 'rgba(10,14,26,0.97)',
+        background: 'var(--c-nav-bg)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         borderTop: `1px solid rgba(59,130,246,0.12)`,
@@ -53,7 +56,7 @@ export function BottomNav({ active, setActive, setMOpen, newCI, pendingRatings =
               alignItems: 'center', justifyContent: 'center',
               gap: 2,
               background: 'none', border: 'none',
-              color: isActive ? C.acc : C.mut,
+              color: isActive ? C.acc : C.sub,
               cursor: 'pointer',
               fontFamily: 'inherit',
               position: 'relative',
@@ -73,7 +76,7 @@ export function BottomNav({ active, setActive, setMOpen, newCI, pendingRatings =
 
             <div style={{ position: 'relative' }}>
               <i
-                className={`bi bi-${item.icon}${isActive ? '-fill' : ''}`}
+                className={`bi bi-${item.icon}${isActive && item.hasFill !== false ? '-fill' : ''}`}
                 style={{ fontSize: 20, lineHeight: 1 }}
               />
               {showBadge && (
@@ -106,7 +109,7 @@ export function BottomNav({ active, setActive, setMOpen, newCI, pendingRatings =
           alignItems: 'center', justifyContent: 'center',
           gap: 2,
           background: 'none', border: 'none',
-          color: !isBottomTab(active) ? C.acc : C.mut,
+          color: !isBottomTab(active) ? C.acc : C.sub,
           cursor: 'pointer',
           fontFamily: 'inherit',
           position: 'relative',
@@ -143,3 +146,5 @@ export function BottomNav({ active, setActive, setMOpen, newCI, pendingRatings =
     </nav>
   )
 }
+
+export const BottomNav = memo(BottomNavImpl)

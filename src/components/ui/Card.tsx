@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
+import { C } from '../../constants/theme'
 
 interface CardProps {
   style?: CSSProperties
@@ -13,8 +14,8 @@ export function Card({ style, children, className, onClick }: CardProps) {
       onClick={onClick}
       className={className ?? ''}
       style={{
-        background: '#111827',
-        border: '1px solid #1e2736',
+        background: C.card,
+        border: `1px solid ${C.brd}`,
         borderRadius: 16,
         padding: '16px 18px',
         ...style,

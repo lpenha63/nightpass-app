@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { ROLE_PAGES, ALL_PAGES } from '../constants/permissions'
+import { guardarCasa, casaPreferida } from '../hooks/useSession'
+import type { House } from '../types'
 
 const INP: React.CSSProperties = {
   width: '100%', background: '#1f2937', border: `1px solid #1e2736`,
@@ -35,10 +37,23 @@ export function LoginPage({ onLogin }: { onLogin: (s: any) => void }) {
     const userEmail = data.session.user.email ?? ''
 
     // Load active house access
-    const [profRes, houseRes] = await Promise.all([
+    const [profRes, vincRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', uid).single(),
-      supabase.from('house_users').select('*,houses(*)').eq('user_id', uid).eq('is_active', true).limit(1).single(),
+      // Todas as casas do usuário. Antes era .limit(1) sem ordenar: quem tem mais de
+      // uma casa entrava numa qualquer, e a escolha mudava entre um login e outro.
+      supabase.from('house_users').select('*,houses(*)').eq('user_id', uid).eq('is_active', true),
     ])
+
+    const vincs = (vincRes.data ?? []).filter(v => (v as { houses?: House }).houses)
+    const preferida = casaPreferida()
+    const todasCasas = [...vincs]
+      .map(v => (v as unknown as { houses: House }).houses)
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+    const houseRes = {
+      data: vincs.find(v => v.house_id === preferida)
+        ?? [...vincs].sort((a, b) => ((a as { houses?: House }).houses?.name ?? '').localeCompare((b as { houses?: House }).houses?.name ?? ''))[0]
+        ?? null,
+    }
 
     if (!houseRes.data) {
       // Check for a pending invite
@@ -54,7 +69,7 @@ export function LoginPage({ onLogin }: { onLogin: (s: any) => void }) {
         if (newHu?.houses) {
           const effectivePages: string[] = newHu.allowed_pages?.length
             ? newHu.allowed_pages : (ROLE_PAGES[newHu.role] ?? [...ALL_PAGES])
-          onLogin({ user: { id: uid, email: userEmail, full_name: profRes.data?.full_name }, house: (newHu as any).houses, role: newHu.role, allowedPages: effectivePages, freelancerId: newHu.freelancer_id ?? null })
+          onLogin({ user: { id: uid, email: userEmail, full_name: profRes.data?.full_name }, house: (newHu as any).houses, role: newHu.role, allowedPages: effectivePages, freelancerId: newHu.freelancer_id ?? null, isSaasAdmin: !!profRes.data?.is_saas_admin })
           setLoading(false); return
         }
       }
@@ -67,12 +82,16 @@ export function LoginPage({ onLogin }: { onLogin: (s: any) => void }) {
     const effectivePages: string[] = houseRes.data.allowed_pages?.length
       ? houseRes.data.allowed_pages : (ROLE_PAGES[houseRes.data.role] ?? [...ALL_PAGES])
 
+    const casaAtual = (houseRes.data as any).houses as House
+    guardarCasa(casaAtual.id)
     onLogin({
       user: { id: uid, email: userEmail, full_name: profRes.data?.full_name },
-      house: (houseRes.data as any).houses,
+      house: casaAtual,
       role: houseRes.data.role,
       allowedPages: effectivePages,
       freelancerId: houseRes.data.freelancer_id ?? null,
+      isSaasAdmin: !!profRes.data?.is_saas_admin,
+      houses: todasCasas,
     })
     setLoading(false)
   }

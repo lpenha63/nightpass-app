@@ -44,10 +44,13 @@ input:focus{border-color:#f59e0b66}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
 <script>
 (function(){
-var SB=window.supabase.createClient('https://irghwfzcbazujddfftsx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw');
-var app=document.getElementById('app');
+// O token TEM que ser lido ANTES de criar o client: o RLS de event_tasks passou a
+// liberar so a linha cujo token vem no cabecalho x-np-token.
 var params=new URLSearchParams(window.location.search);
 var token=params.get('t');
+var SB=window.supabase.createClient('https://irghwfzcbazujddfftsx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw',
+  { global: { headers: token ? { 'x-np-token': token } : {} }, auth: { persistSession: false, autoRefreshToken: false } });
+var app=document.getElementById('app');
 var task=null;
 var event=null;
 var toast=null;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
-import { Card, Btn, Modal, FAB } from '../components/ui'
+import { Card, Btn, Modal } from '../components/ui'
 import { fd, ftel, cn } from '../utils/format'
 import { _err, type ToastState } from '../utils/toast'
 import type { House, Client, BirthdayList, Event } from '../types'
@@ -252,7 +252,6 @@ export function AniversariosPage({ house }: Props) {
         </div>
       }
 
-      <FAB onClick={() => { setBdEditing(null); setBdForm({ birthday_person_name: '', birthday_date: '', phone: '', status: 'pendente', event_id: '' }); setBdModal(true) }} icon="🎂" title="Nova lista" />
     </div>
   )
 }

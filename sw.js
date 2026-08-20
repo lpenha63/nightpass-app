@@ -1,4 +1,5 @@
-const CACHE = 'nightpass-v8';
+// Trocado no build (copy-static.js). Em dev fica o literal, o que não faz mal.
+const CACHE = 'nightpass-__APP_BUILD__';
 const STATIC = ['/manifest.json', '/icon.svg'];
 const OFFLINE_QUEUE_KEY = 'np-offline-queue';
 
@@ -128,6 +129,12 @@ self.addEventListener('push', function(e) {
   if (!e.data) return;
   try {
     var data = e.data.json();
+    // Bolinha com numero no icone do app (padrao WhatsApp). O contador vem no payload
+    // porque o service worker nao consulta o banco.
+    if (typeof data.badge_count === 'number' && self.navigator && self.navigator.setAppBadge) {
+      if (data.badge_count > 0) self.navigator.setAppBadge(data.badge_count);
+      else if (self.navigator.clearAppBadge) self.navigator.clearAppBadge();
+    }
     e.waitUntil(
       self.registration.showNotification(data.title || 'NightPass', {
         body: data.body || '',
