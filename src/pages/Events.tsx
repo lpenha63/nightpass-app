@@ -2139,11 +2139,35 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     const rule = String(form.repeat_rule ?? 'none')
     const extras = repeatDates(String(form.event_date ?? ''), rule).filter(dt => !eventDates.has(dt))
     const rows = [d, ...extras.map(dt => ({ ...d, event_date: dt, repeat_rule: 'none' }))]
-    supabase.from('events').insert(rows).select().then(async r => {
+    ;(async () => {
+      const datas = rows.map(x => String((x as Record<string, unknown>).event_date ?? ''))
+      // Dia de operação naquela data vira ESTE evento. Convertemos o registro em vez de
+      // apagar e recriar: ele pode já ter ponto batido e tarefas feitas, e recriar
+      // destruiria registro de jornada de quem trabalhou.
+      const { data: ops } = await supabase.from('events')
+        .select('id,event_date').eq('house_id', house.id).eq('is_operation', true)
+        .in('event_date', datas).neq('status', 'cancelado')
+      const opPorData = new Map((ops ?? []).map(o => [o.event_date as string, o.id as string]))
+
+      const convertidos: EventWithCounts[] = []
+      for (const [dt, opId] of opPorData) {
+        const linha = rows.find(x => String((x as Record<string, unknown>).event_date) === dt)
+        if (!linha) continue
+        const { data: up } = await supabase.from('events')
+          .update({ ...linha, is_operation: false }).eq('id', opId).select().single()
+        if (up) convertidos.push(up as EventWithCounts)
+      }
+      const restantes = rows.filter(x => !opPorData.has(String((x as Record<string, unknown>).event_date)))
+
+      const r = restantes.length > 0
+        ? await supabase.from('events').insert(restantes).select()
+        : { data: [] as unknown[], error: null }
       if (r.error) { st2('Erro: ' + r.error.message, 'error'); return }
-      st2(extras.length > 0 ? `Criado! +${extras.length} eventos repetidos` : 'Criado!')
+      const createdRows = [...convertidos, ...((r.data ?? []) as EventWithCounts[])]
+      st2(convertidos.length > 0
+        ? `Criado! O Dia de operação virou este evento (escala e ponto preservados).`
+        : (extras.length > 0 ? `Criado! +${extras.length} eventos repetidos` : 'Criado!'))
       load()
-      const createdRows = (r.data ?? []) as EventWithCounts[]
       // Cria os itens de Produção das promoções para cada evento criado (inclui repetições)
       // e vincula reservas já existentes daquela data (que ainda não têm evento) ao evento novo.
       for (const ev of createdRows) {
@@ -2155,6 +2179,15 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
           .is('event_id', null)
           .neq('status', 'cancelled')
       }
+      // Funcionario fixo estara la de qualquer jeito: a escala nasce pronta pelo
+      // calendario de trabalho de cada um. Nao duplica quem ja estiver escalado.
+      let fixos = 0
+      for (const ev of createdRows) {
+        const { data: esc } = await supabase.rpc('escalar_fixos_no_evento', { p_event: ev.id })
+        fixos += Number((esc as { escalados?: number } | null)?.escalados ?? 0)
+      }
+      if (fixos > 0) st2(`👷 ${fixos} funcionário(s) fixo(s) escalado(s) pelo calendário.`, 'success')
+
       const created = createdRows[0]
       if (created) {
         setEditing(created.id)
@@ -2162,7 +2195,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       } else {
         setModal(false)
       }
-    })
+    })()
   }
 
   async function generateRepeats() {

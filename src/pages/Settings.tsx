@@ -109,6 +109,40 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
   const [showNewPass, setShowNewPass] = useState(false)
   const [myEmail, setMyEmail] = useState('')
   const [painelOn, setPainelOn] = useState(painelUnidadesLigado())
+  // Dias em que a casa abre SEM evento (rotina de bar). Sem isto, a criação
+  // automática do Dia de operação abriria a casa no dia em que ela está fechada.
+  const [func, setFunc] = useState<{ days: string[]; open: string; close: string; auto: boolean }>(
+    { days: [], open: '18:00', close: '02:00', auto: false })
+  const [funcSaving, setFuncSaving] = useState(false)
+
+  useEffect(() => {
+    supabase.from('houses').select('open_days,open_time,close_time,auto_operation').eq('id', house.id).maybeSingle()
+      .then(r => {
+        const h = r.data as { open_days?: string[] | null; open_time?: string | null; close_time?: string | null; auto_operation?: boolean } | null
+        if (!h) return
+        setFunc({
+          days: h.open_days ?? [],
+          open: (h.open_time ?? '18:00').slice(0, 5),
+          close: (h.close_time ?? '02:00').slice(0, 5),
+          auto: !!h.auto_operation,
+        })
+      })
+  }, [house.id])
+
+  async function salvarFuncionamento() {
+    setFuncSaving(true)
+    const { error } = await supabase.from('houses').update({
+      open_days: func.days.length ? func.days : null,
+      open_time: func.open || null,
+      close_time: func.close || null,
+      auto_operation: func.auto,
+    }).eq('id', house.id)
+    setFuncSaving(false)
+    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    sT(setToast, func.auto && func.days.length === 0
+      ? 'Salvo, mas sem dias marcados nada será criado.'
+      : '✅ Funcionamento salvo', func.auto && func.days.length === 0 ? 'warn' : 'success')
+  }
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
   const [instanceStatus, setInstanceStatus] = useState<'unknown' | 'open' | 'close' | 'connecting'>('unknown')
@@ -508,6 +542,55 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
           ))}
         </div>
         <div style={{ color: C.mut, fontSize: 11, marginTop: 8 }}>A preferência fica salva neste dispositivo.</div>
+      </Section>
+
+      {/* ── Funcionamento: base da rotina de quem não vive de evento ── */}
+      <Section title="Funcionamento da casa" icon="🕒">
+        <div style={{ color: C.sub, fontSize: 13, marginBottom: 12 }}>
+          Em que dias a casa abre <b>sem evento</b>. É o que permite criar o Dia de operação
+          sozinho, já escalando os funcionários fixos pelo calendário de cada um.
+        </div>
+        <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, display: 'block', marginBottom: 6, letterSpacing: '.07em' }}>DIAS DE FUNCIONAMENTO</label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+          {([['seg', 'Seg'], ['ter', 'Ter'], ['qua', 'Qua'], ['qui', 'Qui'], ['sex', 'Sex'], ['sab', 'Sáb'], ['dom', 'Dom']] as const).map(([k, l]) => {
+            const on = func.days.includes(k)
+            return (
+              <button key={k} type="button"
+                onClick={() => setFunc(f => ({ ...f, days: on ? f.days.filter(x => x !== k) : [...f.days, k] }))}
+                style={{ padding: '7px 13px', borderRadius: 9, border: `1px solid ${on ? C.acc : C.brd}`, background: on ? C.acc + '22' : 'transparent', color: on ? C.acc : C.mut, fontSize: 13, fontWeight: on ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {l}
+              </button>
+            )
+          })}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+          <div>
+            <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, display: 'block', marginBottom: 4, letterSpacing: '.07em' }}>ABRE</label>
+            <input style={INP} type="time" value={func.open} onChange={e => setFunc(f => ({ ...f, open: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, display: 'block', marginBottom: 4, letterSpacing: '.07em' }}>FECHA</label>
+            <input style={INP} type="time" value={func.close} onChange={e => setFunc(f => ({ ...f, close: e.target.value }))} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 12, padding: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: C.txt, fontSize: 14, fontWeight: 700 }}>Criar o Dia de operação sozinho</div>
+            <div style={{ color: C.mut, fontSize: 12, marginTop: 3 }}>
+              Nos dias marcados acima em que não houver evento. Se depois você criar um evento
+              nesse dia, ele <b>substitui</b> a operação sem perder escala nem ponto batido.
+            </div>
+          </div>
+          <button
+            onClick={() => setFunc(f => ({ ...f, auto: !f.auto }))}
+            aria-label="Criar o Dia de operação automaticamente"
+            style={{ position: 'relative', width: 52, height: 30, flexShrink: 0, border: 'none', borderRadius: 999, cursor: 'pointer', padding: 0, background: func.auto ? C.grn : C.brd, transition: 'background .2s' }}>
+            <i style={{ position: 'absolute', top: 3, left: func.auto ? 25 : 3, width: 24, height: 24, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+          </button>
+        </div>
+        <Btn onClick={salvarFuncionamento} disabled={funcSaving} style={{ width: '100%', marginTop: 12 }}>
+          {funcSaving ? 'Salvando…' : '💾 Salvar funcionamento'}
+        </Btn>
       </Section>
 
       {/* ── Multi-unidades: só faz sentido para quem tem mais de uma casa ── */}
