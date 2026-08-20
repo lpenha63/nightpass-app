@@ -9,6 +9,11 @@ const id = JSON.parse(readFileSync(join(root, 'build-id.json'), 'utf8'))
 const APP_BUILD = id.build
 const BUILD_AT = id.at
 
+// Supabase do ambiente (Production ou Preview). Definidas na Vercel por escopo.
+const SB_URL = process.env.VITE_SUPABASE_URL
+const SB_ANON = process.env.VITE_SUPABASE_ANON_KEY
+const ESTATICOS_COM_SUPABASE = ['agenda.html', 'lista.html', 'convite.html', 'tarefa.html', 'nightpass.html']
+
 const files = [
   'nightpass.html',
   'lista.html',
@@ -34,6 +39,20 @@ for (const file of files) {
       const txt = readFileSync(dest, 'utf8').split('__APP_BUILD__').join(APP_BUILD)
       writeFileSync(dest, txt)
       console.log(`  ↳ versão carimbada em ${file}`)
+    }
+    // As paginas estaticas tinham a URL e a chave do Supabase escritas dentro delas.
+    // Num ambiente de teste isso seria um furo: metade do app pareceria isolada e a
+    // outra metade continuaria gravando em producao. Aqui elas passam a seguir a env
+    // do build. Sem env definida, o arquivo fica como esta (util no dev local).
+    if (SB_URL && SB_ANON && ESTATICOS_COM_SUPABASE.includes(file)) {
+      let txt = readFileSync(dest, 'utf8')
+      const antes = txt
+      txt = txt.replace(/https:\/\/[a-z0-9]{20}\.supabase\.co/g, SB_URL)
+               .replace(/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, SB_ANON)
+      if (txt !== antes) {
+        writeFileSync(dest, txt)
+        console.log(`  ↳ Supabase do ambiente aplicado em ${file}`)
+      }
     }
     console.log(`Copied: ${file}`)
   } else {

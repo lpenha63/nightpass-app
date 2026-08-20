@@ -34,3 +34,7 @@ design-preview.html
 
 # gerado a cada build
 build-id.json
+
+# Supabase CLI (local)
+supabase/.temp
+supabase/.branches

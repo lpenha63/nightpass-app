@@ -1,0 +1,11 @@
+-- O CHECK enumerava os tipos de mensagem, mas 14 tipos usados pelo app ficaram de fora
+-- (agenda_colaborador, promoter_portal, fr_convocate, montagem, guest_invite, gift...).
+--
+-- O efeito era pior que um log perdido: em sendWADirect o insert do log fica DENTRO
+-- do try do envio. A mensagem saía pela API, o insert estourava a restrição, a exceção
+-- pulava o `return {ok, viaApi:true}` e o código caía no fallback wa.me — abrindo o
+-- WhatsApp na tela e fazendo o destinatário receber a mesma mensagem duas vezes.
+--
+-- Enumerar tipo de log em CHECK é frágil: cada recurso novo exigiria migration, e
+-- esquecer uma quebra o envio. Log não é dado crítico de integridade — vira texto livre.
+ALTER TABLE whatsapp_logs DROP CONSTRAINT IF EXISTS whatsapp_logs_message_type_check;

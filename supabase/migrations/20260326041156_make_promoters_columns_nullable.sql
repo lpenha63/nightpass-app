@@ -1,0 +1,5 @@
+
+ALTER TABLE promoters 
+  ALTER COLUMN cpf DROP NOT NULL,
+  ALTER COLUMN full_name DROP NOT NULL,
+  ALTER COLUMN status SET DEFAULT 'active';
