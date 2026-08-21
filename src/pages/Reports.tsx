@@ -13,6 +13,7 @@ import type { House } from '../types'
 // para fora da tela, e a de promoters cortava em 8 escondendo o resto de vez.
 const LINHAS_VISIVEIS = 12
 const ALTURA_LINHA = 35   // padding 8+8 + linha ~18 + borda
+const ALTURA_LINHA_DRE = 64  // a linha do DRE traz a faixa de custos embaixo
 
 
 interface Props { house: House }
@@ -1458,6 +1459,7 @@ export function ReportsPage({ house }: Props) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 70px 90px 80px', gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
               <div>EVENTO</div><div style={{ textAlign: 'right' }}>TOTAL</div><div style={{ textAlign: 'right' }}>PAG./CORT.</div><div style={{ textAlign: 'right' }}>♂ / ♀</div><div style={{ textAlign: 'right' }}>OCUPAÇÃO</div>
             </div>
+            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
             {eventCI.map(e => {
               const occ = e.capacity > 0 ? Math.round(e.total / e.capacity * 100) : 0
               return (
@@ -1485,6 +1487,12 @@ export function ReportsPage({ house }: Props) {
                 </div>
               )
             })}
+            </div>
+            {eventCI.length > LINHAS_VISIVEIS && (
+              <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', padding: '6px 0 0' }}>
+                ↕ role para ver os {eventCI.length} eventos
+              </div>
+            )}
           </div></div>
         }
       </Card>
@@ -1520,6 +1528,7 @@ export function ReportsPage({ house }: Props) {
               ))}
             </div>
 
+            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA_DRE, overflowY: 'auto' }}>
             {evPnL.map(e => {
               const rev = pnlRev(e)
               const cost = pnlCost(e)
@@ -1555,6 +1564,12 @@ export function ReportsPage({ house }: Props) {
                 </div>
               )
             })}
+            </div>
+            {evPnL.length > LINHAS_VISIVEIS && (
+              <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', padding: '6px 0 0' }}>
+                ↕ role para ver os {evPnL.length} eventos
+              </div>
+            )}
             </div></div>
           </>
         }
