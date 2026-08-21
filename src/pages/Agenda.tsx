@@ -1009,6 +1009,12 @@ function AdminAgenda({ house }: { house: House }) {
               const resN = resByEvent[ev.id] ?? resByDate[ev.event_date] ?? 0
               const listN = listByEvent[ev.id] ?? 0
               const isToday = ev.event_date === todayStr
+              // Precisa ficar aqui (e nao dentro do bloco de tarefas) porque o botao de
+              // fechar mora no cabecalho e depende do mesmo estado.
+              const grupos = agruparPorArea(evTasks)
+              const unicaArea = grupos.length === 1 ? grupos[0][0] : null
+              const aberta = areaAberta[ev.id] !== undefined ? areaAberta[ev.id] : unicaArea
+              const daAberta = grupos.find(g => g[0] === aberta)?.[1] ?? []
               return (
                 <Card key={ev.id} style={{ marginBottom: 12, padding: 0, overflow: 'hidden' }}>
                   <div style={{ padding: '14px 16px', borderBottom: evTasks.length ? `1px solid ${C.brd}` : 'none' }}>
@@ -1023,6 +1029,14 @@ function AdminAgenda({ house }: { house: House }) {
                       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                         {tpls.length > 0 && <button onClick={() => setApplyEv(ev)} title="Gerar as tarefas de um modelo neste evento" style={{ background: '#a78bfa18', border: '1px solid #a78bfa55', borderRadius: 8, padding: '6px 10px', color: '#a78bfa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>⚡ Gerar</button>}
                         <button onClick={() => openAssign(null, ev.id)} title="Enviar tarefa deste evento" style={{ background: C.acc + '18', border: `1px solid ${C.acc}44`, borderRadius: 8, padding: '6px 10px', color: C.acc, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>➕ Tarefa</button>
+                        {aberta && daAberta.length > 0 && (
+                          <button onClick={() => setAreaAberta(p => ({ ...p, [ev.id]: null }))}
+                            title="Ocultar as tarefas deste card"
+                            aria-label="Ocultar as tarefas"
+                            style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, width: 30, height: 30, color: C.mut, fontSize: 14, lineHeight: 1, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            ✕
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 10, fontSize: 12 }}>
@@ -1034,29 +1048,20 @@ function AdminAgenda({ house }: { house: House }) {
                   </div>
                   {evTasks.length > 0 && (
                     <div style={{ padding: '4px 16px 12px' }}>
-                      {(() => {
-                        const grupos = agruparPorArea(evTasks)
-                        // Com uma area so, exigir o clique seria burocracia inutil
-                        const unica = grupos.length === 1 ? grupos[0][0] : null
-                        const aberta = areaAberta[ev.id] !== undefined ? areaAberta[ev.id] : unica
-                        const daAberta = grupos.find(g => g[0] === aberta)?.[1] ?? []
-                        return (<>
-                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            {grupos.map(([area]) => cartaoArea(
-                              area,
-                              allEvTasks.filter(x => (x.area || 'Geral') === area),
-                              aberta === area,
-                              () => setAreaAberta(p => ({ ...p, [ev.id]: p[ev.id] === area ? null : area })),
-                            ))}
-                          </div>
-                          {aberta && daAberta.length > 0 && (
-                            <div style={{ marginTop: 4 }}>
-                              {faixaArea(aberta, allEvTasks.filter(x => (x.area || 'Geral') === aberta))}
-                              {daAberta.map(t => taskRow(t, false, true))}
-                            </div>
-                          )}
-                        </>)
-                      })()}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {grupos.map(([area]) => cartaoArea(
+                          area,
+                          allEvTasks.filter(x => (x.area || 'Geral') === area),
+                          aberta === area,
+                          () => setAreaAberta(p => ({ ...p, [ev.id]: p[ev.id] === area ? null : area })),
+                        ))}
+                      </div>
+                      {aberta && daAberta.length > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          {faixaArea(aberta, allEvTasks.filter(x => (x.area || 'Geral') === aberta))}
+                          {daAberta.map(t => taskRow(t, false, true))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </Card>
