@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { diaOperacional, viradaDa, VIRADA_PADRAO } from '../utils/diaOperacional'
+import { diaOperacional, inicioDoDia, viradaDa, VIRADA_PADRAO } from '../utils/diaOperacional'
 import { painelUnidadesLigado } from '../hooks/useSession'
 import { C } from '../constants/theme'
 import { Toast, ScrollBox } from '../components/ui'
@@ -24,8 +24,10 @@ function bizTodayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 function bizDayStartISO(): string {
-  const d = bizRefDate()
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).toISOString()
+  // Comeca na HORA DA VIRADA, nao a meia-noite: com virada 6h, o dia de trabalho de
+  // 20/08 vai das 06h do dia 20 as 06h do dia 21. Comecando a meia-noite, a
+  // madrugada do dia 20 (que pertence a noite do 19) entrava na conta de hoje.
+  return inicioDoDia(viradaDaCasa).toISOString()
 }
 
 interface UnidadeResumo {
@@ -444,7 +446,10 @@ export function DashboardPage({ house, role, houses = [], onTrocarCasa }: Props)
         arr.push({ d: ds, n: byDay[ds]?.n ?? 0, r: byDay[ds]?.r ?? 0, invited: invByDay[ds] ?? 0 })
       }
       setWeekData(arr)
-      setStats(s => ({ ...s, dayInvited: invByDay[localDay(new Date())] ?? 0 }))
+      // Dia OPERACIONAL, nao a data do calendario. As 00h30 de uma sexta a casa ainda
+      // esta na noite de quinta: o card mostrava o evento de quinta com as previstas
+      // de sexta, misturando dois eventos na mesma linha.
+      setStats(s => ({ ...s, dayInvited: invByDay[bizTodayStr()] ?? 0 }))
     })
 
     // Birthdays today/week/month
