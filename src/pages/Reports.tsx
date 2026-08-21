@@ -73,7 +73,7 @@ interface FinSummary { faturamento: number; revCheckins: number; revTickets: num
 interface ClientStats { novos: number; distinct: number; recorrentes: number; recorrenciaPct: number }
 interface OpsStats { bestDayLabel: string; bestDayN: number; peakHour: number; peakHourN: number; resTotal: number; resArrived: number }
 interface DailyCI { day: string; label: string; n: number; rev: number }
-interface EventCI { id: string; name: string; date: string; genre?: string; total: number; pagantes: number; cortesias: number; male: number; female: number; capacity: number; rev: number }
+interface EventCI { id: string; name: string; date: string; genre?: string; total: number; pagantes: number; cortesias: number; male: number; female: number; capacity: number; rev: number; reservas: number }
 interface AcessoItem { name: string; phone: string; gender: string; time: string; pay: string; amount: number; event: string }
 interface ListaGuestItem { name: string; phone: string; listName: string; isVip: boolean; confirmed: boolean; checkedIn: boolean; eventName: string }
 interface ListaReservaItem { id: string; name: string; phone: string; peopleCount: number; status: string; location: string; expectedArrival: string; eventName: string }
@@ -365,12 +365,22 @@ export function ReportsPage({ house }: Props) {
 
     // ── Check-ins por evento (público, pagantes × cortesias, gênero, ocupação) ──
     const evMap: Record<string, EventCI> = {}
-    events.forEach(ev => { evMap[ev.id] = { id: ev.id, name: ev.name, date: ev.event_date, genre: (ev as { genre?: string }).genre ?? '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: (ev as { capacity?: number }).capacity ?? 0, rev: 0 } })
-    const livre: EventCI = { id: '__livre__', name: 'Entrada Livre / Bar', date: '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: 0, rev: 0 }
+    events.forEach(ev => { evMap[ev.id] = { id: ev.id, name: ev.name, date: ev.event_date, genre: (ev as { genre?: string }).genre ?? '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: (ev as { capacity?: number }).capacity ?? 0, rev: 0, reservas: 0 } })
+    const livre: EventCI = { id: '__livre__', name: 'Entrada Livre / Bar', date: '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: 0, rev: 0, reservas: 0 }
     // Check-ins feitos sem selecionar o evento (event_id nulo) são atribuídos ao evento do
     // dia operacional, quando houver exatamente UM evento naquela data (senão ficam em "Entrada Livre")
     const evByDate: Record<string, string[]> = {}
     events.forEach(ev => { (evByDate[ev.event_date] ??= []).push(ev.id) })
+    // Reservas por evento. Prioriza o vínculo; sem ele, casa pela data — e só quando
+    // houver UM evento naquele dia, senão a reserva seria atribuída ao evento errado.
+    // Mesma regra usada logo abaixo para o check-in sem evento selecionado.
+    resv.forEach(r => {
+      if ((r.status ?? '') === 'cancelled') return
+      const porVinculo = r.event_id && evMap[r.event_id] ? r.event_id : null
+      const doDia = evByDate[r.reservation_date]
+      const eid = porVinculo ?? (doDia && doDia.length === 1 ? doDia[0] : null)
+      if (eid && evMap[eid]) evMap[eid].reservas++
+    })
     const opDate = (c: { created_at: string }) => {
       const dt = new Date(c.created_at)
       return localDay(dt.getHours() < 8 ? new Date(dt.getTime() - 86400000) : dt)
@@ -983,10 +993,10 @@ export function ReportsPage({ house }: Props) {
   }
 
   function exportEventCICSV() {
-    const hdr = 'Evento,Data,Total Check-ins,Pagantes,Cortesias,Masculino,Feminino,Capacidade,Ocupacao %,Receita'
+    const hdr = 'Evento,Data,Reservas,Total Check-ins,Pagantes,Cortesias,Masculino,Feminino,Capacidade,Ocupacao %,Receita'
     const lines = eventCI.map(e => {
       const occ = e.capacity > 0 ? Math.round(e.total / e.capacity * 100) : ''
-      return [e.name, e.date, e.total, e.pagantes, e.cortesias, e.male, e.female, e.capacity || '', occ, (e.rev / 100).toFixed(2).replace('.', ',')]
+      return [e.name, e.date, e.reservas, e.total, e.pagantes, e.cortesias, e.male, e.female, e.capacity || '', occ, (e.rev / 100).toFixed(2).replace('.', ',')]
         .map(v => typeof v === 'number' ? v : `"${String(v).replace(/"/g, '""')}"`).join(';')
     })
     download(`publico-por-evento-${start}-${end}.csv`, hdr + '\n' + lines.join('\n'), ';')
@@ -1455,19 +1465,22 @@ export function ReportsPage({ house }: Props) {
         </div>
         {eventCI.length === 0
           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem check-ins no período.</div>
-          : <div className="r-scroll-x"><div style={{ minWidth: 600 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 70px 90px 80px', gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
-              <div>EVENTO</div><div style={{ textAlign: 'right' }}>TOTAL</div><div style={{ textAlign: 'right' }}>PAG./CORT.</div><div style={{ textAlign: 'right' }}>♂ / ♀</div><div style={{ textAlign: 'right' }}>OCUPAÇÃO</div>
+          : <div className="r-scroll-x"><div style={{ minWidth: 665 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 62px 70px 70px 90px 80px', gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
+              <div>EVENTO</div>
+              <div style={{ textAlign: 'right' }} title="Reservas do evento (não canceladas)">RESERVAS</div>
+              <div style={{ textAlign: 'right' }}>TOTAL</div><div style={{ textAlign: 'right' }}>PAG./CORT.</div><div style={{ textAlign: 'right' }}>♂ / ♀</div><div style={{ textAlign: 'right' }}>OCUPAÇÃO</div>
             </div>
             <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
             {eventCI.map(e => {
               const occ = e.capacity > 0 ? Math.round(e.total / e.capacity * 100) : 0
               return (
-                <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 70px 90px 80px', gap: 4, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
+                <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '1fr 62px 70px 70px 90px 80px', gap: 4, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ color: C.txt, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</div>
                     {e.date && <div style={{ color: C.mut, fontSize: 11 }}>{fd(e.date)}</div>}
                   </div>
+                  <div style={{ textAlign: 'right', color: e.reservas > 0 ? C.gold : C.mut, fontWeight: 700 }}>{e.reservas || '—'}</div>
                   <div style={{ textAlign: 'right', color: C.acc, fontWeight: 800 }}>{e.total}</div>
                   <div style={{ textAlign: 'right', fontSize: 12 }}>
                     <span style={{ color: C.grn, fontWeight: 700 }}>{e.pagantes}</span>
