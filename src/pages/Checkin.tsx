@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
+import { inicioDoDia, viradaDa } from '../utils/diaOperacional'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn } from '../components/ui'
 import { cn, fcpf, ftel, fmtCurrency, loyalTier } from '../utils/format'
@@ -1019,9 +1020,7 @@ export function CheckinPage({ house, user }: Props) {
     // Anti-duplicidade robusta (count, não maybeSingle — que falharia se já houvesse duplicata):
     if (isBar) {
       // Entrada livre / bar: bloqueia se já entrou HOJE (dia operacional começa às 6h)
-      const nd = new Date()
-      const opd = nd.getHours() < 6 ? new Date(nd.getTime() - 86400000) : nd
-      const dayStart = new Date(opd.getFullYear(), opd.getMonth(), opd.getDate(), 6, 0, 0).toISOString()
+      const dayStart = inicioDoDia(viradaDa(house)).toISOString()
       supabase.from('checkins').select('id', { count: 'exact', head: true }).eq('house_id', house.id).eq('client_id', c.id).gte('created_at', dayStart)
         .then(({ count }) => {
           if ((count ?? 0) > 0) { releaseLock(); sT(setToast, `✅ Check-in já feito — ${c.full_name} já entrou hoje!`, 'warn'); return }

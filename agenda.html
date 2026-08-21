@@ -232,7 +232,8 @@ function pontoAbre(e){
   if(!e.entry_time)return null;
   var hm=String(e.entry_time).slice(0,5).split(':');
   var d=new Date(e.event_date+'T00:00:00');
-  if(parseInt(hm[0],10)<6)d.setDate(d.getDate()+1);   // madrugada = noite seguinte
+  var vir = (data && data.house && typeof data.house.day_start_hour === 'number') ? data.house.day_start_hour : 6;
+  if(parseInt(hm[0],10)<vir)d.setDate(d.getDate()+1);   // antes da virada = dia seguinte
   d.setHours(parseInt(hm[0],10),parseInt(hm[1],10),0,0);
   return new Date(d.getTime()-10*60000);
 }
@@ -277,7 +278,9 @@ function render(){
   // a madrugada não some da tela às 00h (e o ponto continua funcionando).
   var now=new Date();
   var ref=new Date(now);
-  if(now.getHours()<6) ref.setDate(ref.getDate()-1);
+  // A virada vem da casa: 6h em casa noturna, 0h em comercio diurno.
+  var virada = (data.house && typeof data.house.day_start_hour === 'number') ? data.house.day_start_hour : 6;
+  if(now.getHours()<virada) ref.setDate(ref.getDate()-1);
   var todayStr=ref.getFullYear()+'-'+('0'+(ref.getMonth()+1)).slice(-2)+'-'+('0'+ref.getDate()).slice(-2);
 
   // allEvs guarda tudo (inclusive encerrados) — usado só pelo histórico "Feitas".

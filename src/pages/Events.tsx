@@ -1862,7 +1862,10 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       const nome = `Operação — ${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`
       const { error } = await supabase.from('events').insert({
         house_id: house.id, name: nome, event_date: dateStr, genre: 'Operação',
-        start_time: '18:00', end_time: '02:00', status: 'ativo', is_operation: true,
+        // Horário da casa, não 18h-02h fixo: uma padaria abre 6h, um restaurante 11h.
+        start_time: (house.open_time ?? '18:00').slice(0, 5),
+        end_time: (house.close_time ?? '02:00').slice(0, 5),
+        status: 'ativo', is_operation: true,
         price_male_cents: 0, price_female_cents: 0, price_male_list_cents: 0, price_female_list_cents: 0,
       })
       if (error) { st2('Erro: ' + error.message, 'error'); return }

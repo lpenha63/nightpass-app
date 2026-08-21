@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
+import { diaOperacionalStr, viradaDa } from '../utils/diaOperacional'
 import { C } from '../constants/theme'
 import { Card, Toast, Modal, Btn } from '../components/ui'
 import { sT, type ToastState } from '../utils/toast'
@@ -161,7 +162,7 @@ function MyAgenda({ house }: Props) {
   const allTasks = [...evsAll.flatMap(e => e.tasks), ...(data?.avulsas ?? [])]
   const doneN = allTasks.filter(t => t.status === 'done').length
   // Abre sozinho o evento de hoje (ou o próximo): com 1 evento ninguém precisa clicar
-  const hojeStr = (() => { const n = new Date(); if (n.getHours() < 6) n.setDate(n.getDate() - 1); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}` })()
+  const hojeStr = diaOperacionalStr(viradaDa(house))
   const autoOpen = evs.find(e => e.event_date === hojeStr)?.id ?? evs[0]?.id
   const isOpen = (e: EvAgenda) => openEv[e.id] ?? (e.id === autoOpen)
 

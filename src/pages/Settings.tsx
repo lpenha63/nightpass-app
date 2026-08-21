@@ -111,20 +111,21 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
   const [painelOn, setPainelOn] = useState(painelUnidadesLigado())
   // Dias em que a casa abre SEM evento (rotina de bar). Sem isto, a criação
   // automática do Dia de operação abriria a casa no dia em que ela está fechada.
-  const [func, setFunc] = useState<{ days: string[]; open: string; close: string; auto: boolean }>(
-    { days: [], open: '18:00', close: '02:00', auto: false })
+  const [func, setFunc] = useState<{ days: string[]; open: string; close: string; auto: boolean; virada: number }>(
+    { days: [], open: '18:00', close: '02:00', auto: false, virada: 6 })
   const [funcSaving, setFuncSaving] = useState(false)
 
   useEffect(() => {
-    supabase.from('houses').select('open_days,open_time,close_time,auto_operation').eq('id', house.id).maybeSingle()
+    supabase.from('houses').select('open_days,open_time,close_time,auto_operation,day_start_hour').eq('id', house.id).maybeSingle()
       .then(r => {
-        const h = r.data as { open_days?: string[] | null; open_time?: string | null; close_time?: string | null; auto_operation?: boolean } | null
+        const h = r.data as { open_days?: string[] | null; open_time?: string | null; close_time?: string | null; auto_operation?: boolean; day_start_hour?: number | null } | null
         if (!h) return
         setFunc({
           days: h.open_days ?? [],
           open: (h.open_time ?? '18:00').slice(0, 5),
           close: (h.close_time ?? '02:00').slice(0, 5),
           auto: !!h.auto_operation,
+          virada: typeof h.day_start_hour === 'number' ? h.day_start_hour : 6,
         })
       })
   }, [house.id])
@@ -136,6 +137,7 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
       open_time: func.open || null,
       close_time: func.close || null,
       auto_operation: func.auto,
+      day_start_hour: func.virada,
     }).eq('id', house.id)
     setFuncSaving(false)
     if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
@@ -572,6 +574,18 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
             <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, display: 'block', marginBottom: 4, letterSpacing: '.07em' }}>FECHA</label>
             <input style={INP} type="time" value={func.close} onChange={e => setFunc(f => ({ ...f, close: e.target.value }))} />
           </div>
+        </div>
+        <label style={{ fontSize: 11, color: C.sub, fontWeight: 700, display: 'block', marginBottom: 4, letterSpacing: '.07em' }}>QUANDO COMEÇA UM NOVO DIA DE TRABALHO</label>
+        <select style={{ ...INP, marginBottom: 6 }} value={String(func.virada)}
+          onChange={e => setFunc(f => ({ ...f, virada: Number(e.target.value) }))}>
+          <option value="6">06:00 — casa noturna (a madrugada conta como a noite anterior)</option>
+          <option value="5">05:00</option>
+          <option value="4">04:00</option>
+          <option value="0">00:00 — comércio diurno (o dia é o dia do calendário)</option>
+        </select>
+        <div style={{ color: C.mut, fontSize: 11, marginBottom: 14 }}>
+          Define o que entra em "hoje" no Dashboard, no check-in e no app da equipe. Numa balada, o
+          movimento das 2h pertence à noite que começou ontem; numa padaria, o das 5h é de hoje mesmo.
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 12, padding: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>

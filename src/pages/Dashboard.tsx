@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { diaOperacional, viradaDa, VIRADA_PADRAO } from '../utils/diaOperacional'
 import { painelUnidadesLigado } from '../hooks/useSession'
 import { C } from '../constants/theme'
 import { Toast, ScrollBox } from '../components/ui'
@@ -12,11 +13,11 @@ import type { House } from '../types'
 
 // Casa noturna em horário local (não UTC): até as 6h da manhã ainda conta como a
 // "noite"/dia de negócio anterior. Corrige o evento do dia e a contagem de check-ins.
+// A virada vem da casa (6h em balada, 0h em comércio diurno). O módulo guarda a regra;
+// aqui ela é só lida — antes cada tela repetia o "< 6" por conta própria.
+let viradaDaCasa = VIRADA_PADRAO
 function bizRefDate(): Date {
-  const now = new Date()
-  const d = new Date(now)
-  if (now.getHours() < 6) d.setDate(d.getDate() - 1)
-  return d
+  return diaOperacional(viradaDaCasa)
 }
 function bizTodayStr(): string {
   const d = bizRefDate()
@@ -144,6 +145,7 @@ const KPIS = (s: Stats, cash: number) => [
 const reservaArrived = (status: string) => status === 'arrived' || status === 'confirmado' || status === 'confirmed'
 
 export function DashboardPage({ house, role, houses = [], onTrocarCasa }: Props) {
+  viradaDaCasa = viradaDa(house)
   // Painel consolidado: só existe para quem tem mais de uma unidade
   const [unidades, setUnidades] = useState<UnidadeResumo[]>([])
   useEffect(() => {

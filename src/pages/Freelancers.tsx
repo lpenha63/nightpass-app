@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { viradaDa } from '../utils/diaOperacional'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { fmtCurrency, cn } from '../utils/format'
@@ -411,7 +412,9 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     const h = Number(m[1]), min = Number(m[2])
     if (h > 23 || min > 59) return null
     const d = new Date(evDate + 'T00:00:00')
-    if (h < 6) d.setDate(d.getDate() + 1)
+    // Hora antes da virada pertence ao dia seguinte no calendário (madrugada da balada).
+    // Numa casa diurna a virada é 0 e nada é transposto.
+    if (h < viradaDa(house)) d.setDate(d.getDate() + 1)
     d.setHours(h, min, 0, 0)
     return d.toISOString()
   }

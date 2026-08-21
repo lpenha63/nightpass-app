@@ -4,6 +4,13 @@ export interface House {
   slug?: string
   logo_url?: string
   created_at: string
+  /** Dias em que a casa abre sem evento (seg..dom) */
+  open_days?: string[] | null
+  open_time?: string | null
+  close_time?: string | null
+  auto_operation?: boolean
+  /** Hora em que vira o dia de trabalho: 6 = casa noturna, 0 = comércio diurno */
+  day_start_hour?: number | null
 }
 
 export interface UserProfile {
