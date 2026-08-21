@@ -1790,6 +1790,12 @@ export function CheckinPage({ house, user }: Props) {
                                         ✅ Confirmar
                                       </button>
                                     )}
+                                    {/* Quem chega sem estar na lista mas entra na contagem.
+                                        A funcao ja existia nas outras telas de reserva; faltava aqui. */}
+                                    <button onClick={() => openAddGuest(res)} title="Adicionar quem chegou fora da lista"
+                                      style={{ background: C.acc + '22', border: `1px solid ${C.acc}55`, borderRadius: 8, width: 30, height: 26, color: C.acc, fontSize: 16, fontWeight: 800, lineHeight: 1, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      +
+                                    </button>
                                   </div>
                                 </div>
                                 <div style={{ color: C.mut, fontSize: 12, marginTop: 4, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -1812,8 +1818,12 @@ export function CheckinPage({ house, user }: Props) {
                                 })()}
                               </div>
                               {guests.length === 0
-                                ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '12px 0', fontStyle: 'italic' }}>
-                                    Nenhum convidado cadastrado nesta reserva
+                                ? <div style={{ color: C.mut, fontSize: 12, textAlign: 'center', padding: '14px 0' }}>
+                                    <div style={{ fontStyle: 'italic', marginBottom: 8 }}>Nenhum convidado cadastrado nesta reserva</div>
+                                    <button onClick={() => openAddGuest(res)}
+                                      style={{ background: C.acc + '22', border: `1px solid ${C.acc}55`, borderRadius: 8, padding: '7px 14px', color: C.acc, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                      + Adicionar quem chegou
+                                    </button>
                                   </div>
                                 : <div className="r-scroll-y" style={{ maxHeight: 308, overflowY: 'auto', paddingRight: 2, overscrollBehavior: 'contain' }}>
                                   {[...guests].sort((a, b) => { const ci = (a.checked_in ? 1 : 0) - (b.checked_in ? 1 : 0); return ci !== 0 ? ci : (a.name ?? '').localeCompare(b.name ?? '', 'pt-BR') }).map(g => reservaGuestRow(g, res))}
