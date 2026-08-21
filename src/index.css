@@ -66,17 +66,33 @@ body {
   transition: background 0.2s ease, color 0.2s ease;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* Scrollbar — 5px era fino demais para acertar com o mouse, e o polegar quase
+   transparente (alpha .2) sumia no fundo escuro. A borda transparente com
+   background-clip da um respiro: a trilha fica larga para pegar, o polegar
+   desenhado um pouco menor. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(59,130,246,0.2); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(59,130,246,0.5); }
+::-webkit-scrollbar-thumb {
+  background: rgba(59,130,246,0.38);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(59,130,246,0.65); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:active { background: rgba(59,130,246,0.85); background-clip: padding-box; }
+/* Firefox nao tem os pseudo-elementos: 'auto' e a largura padrao do sistema */
+html { scrollbar-width: auto; scrollbar-color: rgba(59,130,246,0.45) transparent; }
 
 /* Barra de rolagem mais visível para listas longas (ex.: convidados) */
-.r-scroll-y { scrollbar-width: thin; scrollbar-color: rgba(124,58,237,0.5) transparent; }
-.r-scroll-y::-webkit-scrollbar { width: 7px; }
-.r-scroll-y::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.5); border-radius: 4px; }
-.r-scroll-y::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.8); }
+.r-scroll-y { scrollbar-width: auto; scrollbar-color: rgba(124,58,237,0.6) transparent; }
+.r-scroll-y::-webkit-scrollbar { width: 14px; }
+.r-scroll-y::-webkit-scrollbar-thumb {
+  background: rgba(124,58,237,0.6);
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.r-scroll-y::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.9); background-clip: padding-box; }
 
 /* Focus */
 *:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
