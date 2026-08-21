@@ -427,7 +427,7 @@ function AdminAgenda({ house }: { house: House }) {
   const [resByDate, setResByDate] = useState<Record<string, number>>({})
   const [listByEvent, setListByEvent] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<'colaborador' | 'evento' | 'diaadia'>('evento')
+  const [view, setView] = useState<'colaborador' | 'evento' | 'diaadia' | 'area'>('evento')
   const [expiredTasks, setExpiredTasks] = useState<AdminTask[]>([])
   const [showExpired, setShowExpired] = useState(false)
   const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'overdue' | 'done' | 'unassigned'>('all')
@@ -614,6 +614,39 @@ function AdminAgenda({ house }: { house: House }) {
   const unassigned = useMemo(() => tasks.filter(t => !ownerOf(t) && (t.assignee_name || t.title)), [tasks, ownerOf])
 
   const now = Date.now()
+  // Agrupa por area preservando a ordem cadastrada da casa (e nao alfabetica),
+  // porque o gestor le a lista na mesma ordem em que ela aparece na Equipe.
+  function agruparPorArea(list: AdminTask[]): Array<[string, AdminTask[]]> {
+    const m = new Map<string, AdminTask[]>()
+    list.forEach(t => {
+      const k = t.area || 'Geral'
+      m.set(k, [...(m.get(k) ?? []), t])
+    })
+    const ordem = new Map(workAreas.map((a, i) => [a.key, i]))
+    return [...m.entries()].sort((a, b) =>
+      (ordem.get(a[0]) ?? 999) - (ordem.get(b[0]) ?? 999) || a[0].localeCompare(b[0]))
+  }
+
+  // Cabecalho de uma area: e daqui que se ve, de relance, quem ja terminou.
+  function faixaArea(area: string, list: AdminTask[]) {
+    const s = statOf(list)
+    const completa = s.total > 0 && s.done === s.total
+    const pct = s.total ? Math.round(s.done / s.total * 100) : 0
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0 4px' }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: completa ? C.grn : C.txt, whiteSpace: 'nowrap' }}>
+          {completa ? '✅ ' : ''}{wlabel(area)}
+        </span>
+        <div style={{ flex: 1, height: 5, background: C.bg, borderRadius: 3, overflow: 'hidden', minWidth: 40 }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: completa ? C.grn : `linear-gradient(90deg,${C.acc},#1d4ed8)`, borderRadius: 3, transition: 'width .3s' }} />
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 700, color: completa ? C.grn : C.mut, whiteSpace: 'nowrap' }}>
+          {s.done}/{s.total}{s.overdue > 0 ? ` · ${s.overdue} vencida(s)` : ''}
+        </span>
+      </div>
+    )
+  }
+
   const statOf = (list: AdminTask[]) => {
     const pend = list.filter(t => t.status !== 'done')
     const overdue = pend.filter(t => t.deadline && new Date(t.deadline).getTime() < now).length
@@ -832,7 +865,7 @@ function AdminAgenda({ house }: { house: House }) {
       {/* Visão + nova tarefa (some quando há filtro ativo) */}
       {taskFilter === 'all' && (<>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        {([['evento', '🎉 Por evento'], ['colaborador', '👤 Por colaborador'], ['diaadia', '🧹 Dia a dia']] as const).map(([v, l]) => (
+        {([['evento', '🎉 Por evento'], ['area', '🍳 Por área'], ['colaborador', '👤 Por colaborador'], ['diaadia', '🧹 Dia a dia']] as const).map(([v, l]) => (
           <button key={v} onClick={() => setView(v)} style={{ padding: '8px 14px', borderRadius: 10, border: `1px solid ${view === v ? C.acc : C.brd}`, background: view === v ? C.acc + '22' : 'transparent', color: view === v ? C.acc : C.mut, fontSize: 13, fontWeight: view === v ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit' }}>{l}</button>
         ))}
         <div style={{ flex: 1 }} />
@@ -964,9 +997,48 @@ function AdminAgenda({ house }: { house: House }) {
                   </div>
                   {evTasks.length > 0 && (
                     <div style={{ padding: '4px 16px 12px' }}>
-                      {evTasks.map(t => taskRow(t, false, true))}
+                      {agruparPorArea(evTasks).map(([area, list]) => (
+                        <div key={area}>
+                          {faixaArea(area, allEvTasks.filter(x => (x.area || 'Geral') === area))}
+                          {list.map(t => taskRow(t, false, true))}
+                        </div>
+                      ))}
                     </div>
                   )}
+                </Card>
+              )
+            })}
+        </>)
+      })()}
+
+      {/* ── VISÃO POR ÁREA — "o que ainda falta na cozinha" ── */}
+      {taskFilter === 'all' && view === 'area' && (() => {
+        const base = tasks.filter(t => showDone || t.status !== 'done')
+        const grupos = agruparPorArea(base)
+        return (<>
+          {grupos.length === 0
+            ? <Card><div style={{ textAlign: 'center', color: C.mut, padding: 40 }}>Nenhuma tarefa no período.</div></Card>
+            : grupos.map(([area, list]) => {
+              const todasDaArea = tasks.filter(x => (x.area || 'Geral') === area)
+              const s = statOf(todasDaArea)
+              const completa = s.total > 0 && s.done === s.total
+              return (
+                <Card key={area} style={{ marginBottom: 12, border: completa ? `1px solid ${C.grn}44` : undefined }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: completa ? C.grn : C.txt }}>
+                      {completa ? '✅ ' : ''}{wlabel(area)}
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, fontSize: 12 }}>
+                      <span style={{ color: completa ? C.grn : C.acc, fontWeight: 700 }}>{s.done}/{s.total} feitas</span>
+                      {s.overdue > 0 && <span style={{ color: C.red, fontWeight: 700 }}>{s.overdue} vencida(s)</span>}
+                    </div>
+                  </div>
+                  <div style={{ height: 6, background: C.bg, borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
+                    <div style={{ height: '100%', width: `${s.total ? Math.round(s.done / s.total * 100) : 0}%`, background: completa ? C.grn : `linear-gradient(90deg,${C.acc},#1d4ed8)`, borderRadius: 4, transition: 'width .3s' }} />
+                  </div>
+                  {list.length === 0
+                    ? <div style={{ color: C.grn, fontSize: 13, padding: '6px 0' }}>Tudo pronto nesta área. 🎉</div>
+                    : list.map(t => taskRow(t, !ownerOf(t), true))}
                 </Card>
               )
             })}
