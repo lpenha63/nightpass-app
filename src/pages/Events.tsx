@@ -243,6 +243,9 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   // ── Montagem: envia todas as reservas do dia a um montador ──
   const [montagemEv, setMontagemEv] = useState<EventWithCounts | null>(null)
   const [montagemFr, setMontagemFr] = useState('')
+  // Escalados do dia. Antes a lista trazia a equipe inteira (49 pessoas), incluindo
+  // quem nem trabalha naquela data — e o montador saia escolhido de um catalogo.
+  const [montagemEscala, setMontagemEscala] = useState<Array<{ id: string; full_name: string; phone?: string; role?: string }>>([])
   const [montagemMsg, setMontagemMsg] = useState('')
 
   // Budget modal
@@ -903,7 +906,17 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
 
   // Monta a tarefa de montagem consolidando TODAS as reservas do dia do evento
   async function openMontagem(ev: EventWithCounts) {
-    setMontagemEv(ev); setMontagemFr('')
+    setMontagemEv(ev); setMontagemFr(''); setMontagemEscala([])
+    supabase.from('event_freelancers')
+      .select('role, freelancers(id, full_name, phone)')
+      .eq('event_id', ev.id)
+      .then(r => {
+        const rows = (r.data ?? []) as unknown as Array<{ role?: string; freelancers?: { id: string; full_name: string; phone?: string } | null }>
+        setMontagemEscala(rows
+          .filter(x => x.freelancers)
+          .map(x => ({ id: x.freelancers!.id, full_name: x.freelancers!.full_name, phone: x.freelancers!.phone, role: x.role }))
+          .sort((a, b) => a.full_name.localeCompare(b.full_name)))
+      })
     const { data } = await supabase.from('reservations')
       .select('name, location, people_count, expected_arrival, observations, archived_at, reservation_items(name, quantity)')
       .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled')
@@ -928,10 +941,31 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   }
 
   async function sendMontagem() {
-    const fr = allFreelancers.find(f => f.id === montagemFr)
-    if (!fr?.phone) { st2('Selecione um responsável com telefone', 'warn'); return }
+    const fr = montagemEscala.find(f => f.id === montagemFr)
+    if (!fr) { st2('Selecione o montador entre os escalados do dia', 'warn'); return }
+    if (!fr.phone) { st2(`${fr.full_name} está sem telefone no cadastro — inclua na aba Equipe.`, 'warn'); return }
+
+    // A montagem vira TAREFA, não só mensagem. Antes ela só saía no WhatsApp: não
+    // aparecia na agenda de quem ia montar, não dava para marcar como feita e o
+    // gestor não tinha como saber se foi executada.
+    let virouTarefa = false
+    if (montagemEv) {
+      const { error } = await supabase.from('event_tasks').insert({
+        house_id: house.id, event_id: montagemEv.id,
+        area: 'salao', area_icon: '📐',
+        title: 'Montagem das reservas',
+        description: montagemMsg,
+        freelancer_id: fr.id, assignee_name: fr.full_name, assignee_phone: fr.phone ?? null,
+        status: 'pending', sort_order: 0,
+      })
+      virouTarefa = !error
+      if (error) st2('A tarefa não pôde ser criada: ' + error.message, 'error')
+    }
+
     const r = await sendWADirect(house.id, fr.phone, montagemMsg, { eventId: montagemEv?.id, type: 'montagem' })
-    st2(r.viaApi ? '✅ Montagem enviada pela API' : '📲 Abrindo WhatsApp...', 'success')
+    st2(virouTarefa
+      ? `✅ Na agenda de ${fr.full_name.split(' ')[0]}${r.viaApi ? ' e enviada no WhatsApp' : ' — abrindo WhatsApp...'}`
+      : (r.viaApi ? '✅ Montagem enviada pela API' : '📲 Abrindo WhatsApp...'), 'success')
     setMontagemEv(null)
   }
 
@@ -3843,19 +3877,27 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       <Modal open={!!montagemEv} title={`📐 Montagem — ${montagemEv?.name ?? ''}`} onClose={() => setMontagemEv(null)} zIndex={1300}>
         <div style={{ display: 'grid', gap: 12 }}>
           <div>
-            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Montador (equipe / freelancer)</label>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Montador — escalados deste dia</label>
             <select value={montagemFr} onChange={e => setMontagemFr(e.target.value)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }}>
               <option value="">— Selecionar montador —</option>
-              {allFreelancers.map(f => <option key={f.id} value={f.id}>{f.full_name}{f.phone ? ` · ${f.phone}` : ' · sem telefone'}</option>)}
+              {montagemEscala.map(f => (
+                <option key={f.id} value={f.id}>
+                  {f.full_name}{f.role ? ` · ${wlabel(f.role)}` : ''}{f.phone ? '' : ' · sem telefone'}
+                </option>
+              ))}
             </select>
-            {allFreelancers.length === 0 && <div style={{ fontSize: 11, color: C.mut, marginTop: 4 }}>Nenhum freelancer cadastrado. Cadastre na aba Equipe.</div>}
+            {montagemEscala.length === 0 && (
+              <div style={{ fontSize: 11, color: C.gold, marginTop: 4 }}>
+                Ninguém escalado neste evento ainda. Escale a equipe pelo botão 👷 Equipe.
+              </div>
+            )}
           </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Tarefa de montagem (todas as reservas do dia)</label>
             <textarea value={montagemMsg} onChange={e => setMontagemMsg(e.target.value)} style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box', minHeight: 220, resize: 'vertical' }} />
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <Btn onClick={sendMontagem} disabled={!montagemFr} style={{ flex: 1, background: '#25d36622', color: '#25d366', border: '1px solid #25d36644' }}>📲 Enviar pelo WhatsApp</Btn>
+            <Btn onClick={sendMontagem} disabled={!montagemFr} style={{ flex: 1, background: '#25d36622', color: '#25d366', border: '1px solid #25d36644' }}>✅ Enviar e criar tarefa</Btn>
             <Btn onClick={() => setMontagemEv(null)} variant="ghost">Cancelar</Btn>
           </div>
         </div>
