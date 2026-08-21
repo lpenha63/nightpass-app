@@ -213,7 +213,26 @@ export function ReportsPage({ house }: Props) {
   const [totalClients, setTotalClients] = useState(0)
   const [fin, setFin] = useState<FinSummary>({ faturamento: 0, revCheckins: 0, revTickets: 0, checkins: 0, ticketMedio: 0 })
   const [payStats, setPayStats] = useState<PayStat[]>([])
-  const [monthly, setMonthly] = useState<MonthRev[]>([])
+  // Evolucao do faturamento NAO segue o filtro de periodo: com "Mes atual" o
+  // grafico virava uma barra so, que nao mostra evolucao nenhuma. Vem sempre
+  // dos ultimos 12 meses, agregado no servidor.
+  const [evolucao, setEvolucao] = useState<MonthRev[]>([])
+  useEffect(() => {
+    if (!house) return
+    supabase.rpc('faturamento_mensal', { p_house: house.id, p_meses: 12 })
+      .then(r => {
+        const linhas = (r.data ?? []) as Array<{ ym: string; receita: number; checkins: number }>
+        // Corta os meses vazios do comeco (antes de a casa usar o sistema): 12 barras
+        // com 6 zeradas so desperdicam espaco.
+        const primeiro = linhas.findIndex(l => Number(l.receita) > 0 || Number(l.checkins) > 0)
+        const uteis = primeiro < 0 ? [] : linhas.slice(primeiro)
+        setEvolucao(uteis.map(l => ({
+          ym: l.ym,
+          label: new Date(l.ym + '-02T12:00').toLocaleDateString('pt-BR', { month: 'short' }),
+          rev: Number(l.receita), n: Number(l.checkins),
+        })))
+      })
+  }, [house])
   const [evPnL, setEvPnL] = useState<EvPnL[]>([])
   const [promoterRank, setPromoterRank] = useState<PromoterRank[]>([])
   const [freelancerRank, setFreelancerRank] = useState<FreelancerRank[]>([])
@@ -316,15 +335,6 @@ export function ReportsPage({ house }: Props) {
     const pm: Record<string, number> = {}
     cins.forEach(c => { const k = c.payment_method ?? 'outros'; pm[k] = (pm[k] ?? 0) + effAmt(c) })
     setPayStats(Object.entries(pm).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v))
-
-    // Monthly evolution
-    const byMonth: Record<string, { rev: number; n: number }> = {}
-    cins.forEach(c => { const ym = c.created_at.slice(0, 7); if (!byMonth[ym]) byMonth[ym] = { rev: 0, n: 0 }; byMonth[ym].rev += effAmt(c); byMonth[ym].n++ })
-    tks.forEach(t => { const ym = (t.created_at ?? '').slice(0, 7); if (!ym) return; if (!byMonth[ym]) byMonth[ym] = { rev: 0, n: 0 }; byMonth[ym].rev += (t.amount_cents ?? 0) })
-    const months: MonthRev[] = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0])).map(([ym, v]) => ({
-      ym, label: new Date(ym + '-02T12:00').toLocaleDateString('pt-BR', { month: 'short' }), rev: v.rev, n: v.n,
-    }))
-    setMonthly(months)
 
     // Top clients (from period check-ins)
     const cmap: Record<string, TopClient> = {}
@@ -1060,7 +1070,7 @@ export function ReportsPage({ house }: Props) {
   const totCost = evPnL.reduce((s, e) => s + pnlCost(e), 0)
   const totProfit = totRev - totCost
   const avgMargin = totRev > 0 ? Math.round(totProfit / totRev * 100) : 0
-  const monthMax = Math.max(...monthly.map(m => m.rev), 1)
+  const monthMax = Math.max(...evolucao.map(m => m.rev), 1)
   const dayMax = Math.max(...dailyCI.map(d => d.n), 1)
   const ciPagantes = eventCI.reduce((s, e) => s + e.pagantes, 0)
   const ciCortesias = eventCI.reduce((s, e) => s + e.cortesias, 0)
@@ -1261,11 +1271,16 @@ export function ReportsPage({ house }: Props) {
       {/* Evolução mensal + Formas de pagamento */}
       <div className="r-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <Card>
-          {sectionTitle('📈 Evolução do faturamento')}
-          {monthly.length === 0
-            ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '36px 0' }}>Sem dados no período.</div>
+          <div className="print-title" style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: C.txt }}>📈 Evolução do faturamento</div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 2 }}>
+              Últimos {evolucao.length} {evolucao.length === 1 ? 'mês' : 'meses'} — não segue o período selecionado acima
+            </div>
+          </div>
+          {evolucao.length === 0
+            ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '36px 0' }}>Sem faturamento registrado ainda.</div>
             : <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 140 }}>
-              {monthly.map((m, i) => (
+              {evolucao.map((m, i) => (
                 <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
                   <div style={{ fontSize: 10, color: C.sub, fontWeight: 700, marginBottom: 3 }}>{(m.rev / 100) >= 1000 ? `${Math.round(m.rev / 100000)}k` : Math.round(m.rev / 100)}</div>
                   <div className="pbar pbar-azul" style={{ width: '100%', maxWidth: 46, background: 'linear-gradient(180deg,#3b82f6,#1e3a8a)', borderRadius: 6, height: `${Math.max(4, (m.rev / monthMax) * 100)}%`, transition: 'height .4s' }} />
