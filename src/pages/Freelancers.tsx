@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { viradaDa, diaOperacionalStr } from '../utils/diaOperacional'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { fmtCurrency, cn } from '../utils/format'
+import { preencher, paraHtmlImpressao, type DocTemplate, type DocAssinado } from '../utils/documentos'
 import { sT, type ToastState } from '../utils/toast'
 import { sendWADirect } from '../utils/whatsapp'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -30,6 +31,7 @@ const WEEK_DAYS = [
 const DEF = {
   full_name: '', address: '', phone: '', pix_key: '',
   daily_rate_cents: '', hourly_rate_cents: '', work_types: [] as string[], notes: '', status: 'ativo', staff_type: 'freelancer',
+  cpf: '',
   shift_hours: '' as '' | '8' | '12',
   work_entry: '', work_break: '', work_exit: '',
   work_days: [] as string[],
@@ -229,6 +231,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       notes: fr.notes ?? '',
       status: fr.status,
       staff_type: fr.staff_type ?? 'freelancer',
+      cpf: (fr as { cpf?: string }).cpf ?? '',
       shift_hours: meta.shift_hours ?? '',
       work_entry: meta.work_entry ?? '',
       work_break: meta.work_break ?? '',
@@ -261,6 +264,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       notes: form.notes || null,
       status: form.status,
       updated_at: new Date().toISOString(),
+      cpf: form.cpf.trim() || null,
       work_meta: {
         shift_hours: form.shift_hours || null,
         work_entry: form.work_entry || null,
@@ -639,6 +643,73 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     st2(next ? '✅ Pode enviar tarefas à equipe' : 'Envio de tarefas desativado', 'success')
   }
   const [sendingAgenda, setSendingAgenda] = useState<string | null>(null)
+  // ── Documentos (termo de imagem e o que vier) ──
+  const [modelo, setModelo] = useState<DocTemplate | null>(null)
+  const [docs, setDocs] = useState<DocAssinado[]>([])
+  const [docPessoa, setDocPessoa] = useState<Freelancer | null>(null)
+  const [docTexto, setDocTexto] = useState('')
+  const [docTrava, setDocTrava] = useState(true)
+  const [docBusy, setDocBusy] = useState(false)
+
+  const carregarDocs = useCallback(() => {
+    // Modelo da casa quando existir; senão o do sistema (house_id nulo)
+    supabase.from('document_templates').select('*').eq('kind', 'imagem_equipe').eq('active', true)
+      .then(r => {
+        const linhas = (r.data ?? []) as DocTemplate[]
+        setModelo(linhas.find(m => m.house_id === house.id) ?? linhas.find(m => m.house_id === null) ?? null)
+      })
+    supabase.from('signed_documents')
+      .select('id,freelancer_id,kind,title,status,signed_at,signed_method,revoked_at,created_at')
+      .eq('house_id', house.id).eq('kind', 'imagem_equipe').is('revoked_at', null)
+      .then(r => setDocs((r.data ?? []) as DocAssinado[]))
+  }, [house.id])
+  useEffect(() => { carregarDocs() }, [carregarDocs])
+
+  const docDe = (id: string) => docs.find(d => d.freelancer_id === id) ?? null
+
+  function abrirDoc(fr: Freelancer) {
+    if (!modelo) { st2('Modelo de termo não encontrado.', 'error'); return }
+    setDocPessoa(fr)
+    setDocTrava(true)
+    setDocTexto(preencher(modelo.body, house as Parameters<typeof preencher>[1], {
+      full_name: fr.full_name,
+      address: (fr as { address?: string }).address,
+      staff_type: (fr as { staff_type?: string }).staff_type,
+      cpf: (fr as { cpf?: string }).cpf,
+    }))
+  }
+
+  // Grava o texto JÁ PREENCHIDO. Guardar só o id do modelo faria uma edição futura
+  // mudar retroativamente aquilo que a pessoa aceitou.
+  async function gravarDoc(enviar: boolean) {
+    if (!docPessoa || !modelo) return
+    setDocBusy(true)
+    const { error } = await supabase.from('signed_documents').insert({
+      house_id: house.id, freelancer_id: docPessoa.id, kind: modelo.kind, title: modelo.title,
+      body_snapshot: docTexto, template_id: modelo.id, template_version: modelo.version,
+      status: enviar ? 'pendente' : 'assinado',
+      blocks_access: enviar ? docTrava : false,
+      sent_at: enviar ? new Date().toISOString() : null,
+      signed_at: enviar ? null : new Date().toISOString(),
+      signed_method: enviar ? null : 'papel',
+      signer_name: enviar ? null : docPessoa.full_name,
+      signer_doc: (docPessoa as { cpf?: string }).cpf ?? null,
+    })
+    setDocBusy(false)
+    if (error) { st2('Erro: ' + error.message, 'error'); return }
+    st2(enviar
+      ? `📄 Enviado para o app de ${docPessoa.full_name.split(' ')[0]}`
+      : `✅ Registrado como assinado em papel`, 'success')
+    setDocPessoa(null)
+    carregarDocs()
+  }
+
+  function imprimirDoc() {
+    if (!docPessoa || !modelo) return
+    const rodape = `Gerado em ${new Date().toLocaleDateString('pt-BR')} — ${house.name} · NightPass`
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(paraHtmlImpressao(modelo.title, docTexto, rodape)); w.document.close() }
+  }
   async function sendAgenda(fr: Freelancer) {
     if (!fr.access_token) { st2('Recarregue a página para gerar o link', 'warn'); return }
     const link = agendaLink(fr)
@@ -698,6 +769,71 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       <Toast toast={toast} />
 
       {/* Form modal */}
+      {/* Termo de imagem — gerar, enviar pelo app ou imprimir */}
+      <Modal open={!!docPessoa} title={`📄 Termo de imagem — ${docPessoa?.full_name ?? ''}`} maxWidth={780}
+        onClose={() => setDocPessoa(null)} noDirtyCheck>
+        {(() => {
+          const d = docPessoa ? docDe(docPessoa.id) : null
+          const faltas: string[] = []
+          if (!(house as { cnpj?: string }).cnpj) faltas.push('CNPJ da casa')
+          if (!(house as { city?: string }).city) faltas.push('cidade da casa')
+          if (!(docPessoa as { cpf?: string } | null)?.cpf) faltas.push('CPF da pessoa')
+          return (
+            <div style={{ display: 'grid', gap: 12 }}>
+              {d && (
+                <div style={{ background: (d.status === 'assinado' ? C.grn : d.status === 'recusado' ? C.red : C.gold) + '18', border: `1px solid ${(d.status === 'assinado' ? C.grn : d.status === 'recusado' ? C.red : C.gold)}44`, borderRadius: 10, padding: '10px 12px', fontSize: 13, color: C.txt }}>
+                  {d.status === 'assinado' ? `✅ Já aceito em ${d.signed_at ? new Date(d.signed_at).toLocaleString('pt-BR') : ''}${d.signed_method === 'app' ? ' pelo app' : ' em papel'}.`
+                    : d.status === 'recusado' ? '❌ A pessoa registrou que NÃO concorda com este termo.'
+                    : '⏳ Já enviado — aguardando a resposta no app.'}
+                  <div style={{ color: C.mut, fontSize: 11, marginTop: 3 }}>Gerar de novo cria um segundo registro; o anterior continua arquivado.</div>
+                </div>
+              )}
+
+              {faltas.length > 0 && (
+                <div style={{ background: C.gold + '18', border: `1px solid ${C.gold}44`, borderRadius: 10, padding: '10px 12px', fontSize: 13, color: C.txt }}>
+                  ⚠️ Falta preencher: <b>{faltas.join(', ')}</b>. O documento sai com linha em branco nesses pontos.
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Texto do termo <span style={{ fontWeight: 400 }}>— pode ajustar antes de enviar</span>
+                </label>
+                <textarea value={docTexto} onChange={e => setDocTexto(e.target.value)}
+                  className="r-scroll-y"
+                  style={{ width: '100%', height: 260, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: 12, color: C.txt, fontSize: 12.5, lineHeight: 1.6, fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical' }} />
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input type="checkbox" checked={docTrava} onChange={e => setDocTrava(e.target.checked)}
+                  style={{ width: 18, height: 18, marginTop: 2, accentColor: C.acc, flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, color: C.sub, lineHeight: 1.5 }}>
+                  Travar o app até responder
+                  <span style={{ display: 'block', color: C.gold, fontSize: 11, marginTop: 2 }}>
+                    Cuidado: condicionar o acesso ao trabalho enfraquece o argumento de que o
+                    consentimento foi livre — que é justamente o ponto atacado num termo de imagem.
+                  </span>
+                </span>
+              </label>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Btn onClick={() => gravarDoc(true)} disabled={docBusy} style={{ flex: '1 1 180px' }}>
+                  {docBusy ? 'Enviando…' : '📲 Enviar para o app'}
+                </Btn>
+                <Btn onClick={imprimirDoc} variant="secondary" style={{ flex: '1 1 130px' }}>🖨️ Imprimir</Btn>
+                <Btn onClick={() => gravarDoc(false)} disabled={docBusy} variant="ghost" style={{ flex: '1 1 170px' }}>
+                  ✍️ Assinou em papel
+                </Btn>
+              </div>
+              <div style={{ color: C.mut, fontSize: 11 }}>
+                O texto é arquivado exatamente como está acima. Editar o modelo depois não altera
+                o que já foi enviado ou aceito.
+              </div>
+            </div>
+          )
+        })()}
+      </Modal>
+
       <Modal open={modal} title={editing ? 'Editar Cadastro' : 'Novo Cadastro'} onClose={() => { setModal(false); setEditing(null) }}>
         <div style={{ display: 'grid', gap: 12 }}>
           {/* Tipo: freelancer / funcionário */}
@@ -767,6 +903,13 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                 )
               })}
             </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              CPF <span style={{ fontWeight: 400 }}>— usado no termo de imagem e em contratos</span>
+            </label>
+            <input {...inp} value={form.cpf} onChange={e => setForm(p => ({ ...p, cpf: e.target.value }))} placeholder="000.000.000-00" inputMode="numeric" />
           </div>
 
           {/* Período de trabalho */}
@@ -1349,6 +1492,21 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                       📋 Agenda
                     </button>
                   )}
+                  {(() => {
+                    const d = docDe(fr.id)
+                    const cor = d?.status === 'assinado' ? C.grn : d?.status === 'recusado' ? C.red : d ? C.gold : C.mut
+                    const rot = d?.status === 'assinado' ? '📄 Termo ✓' : d?.status === 'recusado' ? '📄 Recusou' : d ? '📄 Aguardando' : '📄 Termo'
+                    const dica = d?.status === 'assinado'
+                      ? `Termo aceito em ${d.signed_at ? new Date(d.signed_at).toLocaleDateString('pt-BR') : ''}${d.signed_method === 'app' ? ' pelo app' : ' em papel'}`
+                      : d?.status === 'recusado' ? 'A pessoa não concordou com o termo'
+                      : d ? 'Enviado, aguardando resposta no app' : 'Gerar o termo de uso de imagem'
+                    return (
+                      <button onClick={() => abrirDoc(fr)} title={dica}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: cor + '22', color: cor, border: `1px solid ${cor}44`, borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                        {rot}
+                      </button>
+                    )
+                  })()}
                   <button onClick={() => sendAgenda(fr)} disabled={sendingAgenda === fr.id}
                     title="Enviar o link do portal (agenda de tarefas) para o colaborador"
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#3b82f622', color: '#3b82f6', border: '1px solid #3b82f644', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: sendingAgenda === fr.id ? 0.6 : 1 }}>
