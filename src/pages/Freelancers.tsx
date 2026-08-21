@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { viradaDa } from '../utils/diaOperacional'
+import { viradaDa, diaOperacionalStr } from '../utils/diaOperacional'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { fmtCurrency, cn } from '../utils/format'
@@ -291,6 +291,8 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
   }
 
   // Link pessoal da "Minha Agenda" (tarefas + eventos do colaborador, sem senha)
+  // Dia de trabalho de hoje segundo a virada da casa (6h em balada, 0h no diurno)
+  const hojeOper = diaOperacionalStr(viradaDa(house))
   function agendaLink(fr: Freelancer) { return `${window.location.origin}/agenda.html?t=${fr.access_token}` }
   // ── Consulta de horários: histórico de ponto do colaborador ──
   interface ShiftRow {
@@ -618,11 +620,6 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     if (w) { w.document.write(html); w.document.close() }
   }
 
-  // Abre a agenda do colaborador para o gestor visualizar
-  function openAgenda(fr: Freelancer) {
-    if (!fr.access_token) { st2('Recarregue a página para gerar o link', 'warn'); return }
-    window.open(agendaLink(fr), '_blank')
-  }
   // Liga/desliga o acesso do membro à agenda de TODOS os eventos da casa
   // (desligado = vê só os eventos em que está escalado / tem tarefa)
   async function toggleSeeAll(fr: Freelancer) {
@@ -879,9 +876,15 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                   {shifts.map(s => {
                     const hhmm = (v?: string) => v ? new Date(v).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null
                     const h = shiftHours(s)
-                    const faltou = !s.checkin
+                    // Sem check-in num evento que ainda NAO aconteceu nao e falta: e escala
+                    // futura. Antes qualquer ausencia de ponto virava "faltou" em vermelho,
+                    // acusando gente que sequer tinha o dia de trabalho chegado.
+                    const jaAconteceu = !!s.date && s.date < hojeOper
+                    const faltou = jaAconteceu && !s.checkin
+                    const aguardando = !jaAconteceu && !s.checkin
                     return (
-                      <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '1fr 62px 62px 52px 84px', gap: 4, padding: '9px 6px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13, opacity: faltou ? 0.55 : 1 }}>
+                      <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '1fr 62px 62px 52px 84px', gap: 4, padding: '9px 6px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13, opacity: faltou ? 0.55 : 1 }}
+                        title={aguardando ? 'Evento ainda não aconteceu' : undefined}>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ color: C.txt, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.event}</div>
                           <div style={{ color: C.mut, fontSize: 10 }}>
@@ -889,13 +892,13 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                             {s.role ? ` · ${s.role}` : ''}
                           </div>
                         </div>
-                        <div style={{ textAlign: 'center', color: faltou ? C.red : C.grn, fontWeight: 700 }}>
-                          {hhmm(s.checkin) ?? 'faltou'}
+                        <div style={{ textAlign: 'center', color: faltou ? C.red : aguardando ? C.mut : C.grn, fontWeight: 700 }}>
+                          {hhmm(s.checkin) ?? (aguardando ? '—' : 'faltou')}
                           {s.checkin_source === 'app' && <div style={{ fontSize: 8, color: C.mut, fontWeight: 400 }}>app</div>}
                         </div>
                         <div style={{ textAlign: 'center', color: C.gold, fontWeight: 700 }}>{hhmm(s.checkout) ?? '—'}</div>
                         <div style={{ textAlign: 'center', color: '#22d3ee', fontWeight: 700 }}>{h != null ? `${h.toFixed(1)}h` : '—'}</div>
-                        <div style={{ textAlign: 'right', color: faltou ? C.mut : C.txt, fontWeight: 700 }}>{faltou ? '—' : fmtCurrency(s.fee)}</div>
+                        <div style={{ textAlign: 'right', color: faltou || aguardando ? C.mut : C.txt, fontWeight: 700 }}>{faltou ? '—' : fmtCurrency(s.fee)}</div>
                       </div>
                     )
                   })}
@@ -1331,11 +1334,21 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                   <Pill color={fr.status === 'ativo' ? C.grn : C.mut} small>{fr.status}</Pill>
                 </div>
                 <div className="fr-actions" style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  <button onClick={() => openAgenda(fr)}
-                    title="Ver a agenda de tarefas deste colaborador"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-                    📋 Agenda
-                  </button>
+                  {fr.status === 'ativo' && fr.access_token ? (
+                    <a href={agendaLink(fr)} target="_blank" rel="noreferrer"
+                      title="Ver a agenda de tarefas deste colaborador"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap', textDecoration: 'none' }}>
+                      📋 Agenda
+                    </a>
+                  ) : (
+                    <button onClick={() => st2(fr.access_token
+                        ? `${fr.full_name.split(' ')[0]} está inativo — a agenda só abre para quem está ativo. Mude o status na ficha.`
+                        : 'Recarregue a página para gerar o link da agenda.', 'warn')}
+                      title="Colaborador inativo — a agenda não abre"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', color: C.mut, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                      📋 Agenda
+                    </button>
+                  )}
                   <button onClick={() => sendAgenda(fr)} disabled={sendingAgenda === fr.id}
                     title="Enviar o link do portal (agenda de tarefas) para o colaborador"
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#3b82f622', color: '#3b82f6', border: '1px solid #3b82f644', borderRadius: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', whiteSpace: 'nowrap', opacity: sendingAgenda === fr.id ? 0.6 : 1 }}>
