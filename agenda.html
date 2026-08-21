@@ -467,6 +467,12 @@ function render(){
       html+='</div>';
       if(todayEv.scaled&&!todayEv.checkin_at&&f.geo_on)html+='<div class="task-meta" style="margin-top:8px">📍 O ponto é validado pela sua localização — precisa estar na casa.</div>';
       html+='</div>';
+    }else if(mine.length===0 && pend.length===0 && done.length===0){
+      // Nada de nada: uma mensagem so, em vez de dois avisos parciais que nao somam
+      // a "nao ha nada". E o que o gestor ve ao abrir a agenda de alguem sem escala.
+      html+='<div class="empty"><div class="ic">📭</div>'
+        +'<div style="color:#e8ecf5;font-weight:700;font-size:15px">Agenda vazia</div>'
+        +'<div style="margin-top:4px">Nenhum evento escalado e nenhuma tarefa no momento.</div></div>';
     }else{
       var next=mine.filter(function(e){return e.event_date>todayStr;})[0];
       html+='<div class="ev"><div class="task-desc" style="padding:4px 0">'
@@ -476,7 +482,8 @@ function render(){
         +'</div></div>';
     }
 
-    html+='<div class="upc-h">📋 Minhas tarefas'+(pend.length?' ('+pend.length+')':'')+'</div>';
+    var vazioTotal = !todayEv && mine.length===0 && pend.length===0 && done.length===0;
+    if(!vazioTotal)html+='<div class="upc-h">📋 Minhas tarefas'+(pend.length?' ('+pend.length+')':'')+'</div>';
     // Progresso do dia: dá a noção de conjunto ("quanto falta") sem esconder nada
     (function(){
       var doneHoje=done.length, totalHoje=pend.length+doneHoje;
@@ -490,7 +497,9 @@ function render(){
         +(travadas?'<div class="prog-warn">⚠️ '+travadas+' com problema relatado</div>':'')
         +'</div>';
     })();
-    if(pend.length===0){
+    if(vazioTotal){
+      /* ja mostramos "Agenda vazia" acima */
+    }else if(pend.length===0){
       html+='<div class="ev"><div class="task-desc" style="padding:6px 0">🎉 Nenhuma tarefa pendente. Bom trabalho!</div></div>';
     }else{
       // Não repete o nome do evento quando é o mesmo já mostrado no card acima
