@@ -8,6 +8,13 @@ import { sT, type ToastState } from '../utils/toast'
 import { Toast } from '../components/ui'
 import type { House } from '../types'
 
+// Teto das tabelas de ranking: 12 linhas visiveis, o resto rola por dentro.
+// Sem isso a lista da equipe (49 pessoas) empurrava o restante do relatorio
+// para fora da tela, e a de promoters cortava em 8 escondendo o resto de vez.
+const LINHAS_VISIVEIS = 12
+const ALTURA_LINHA = 35   // padding 8+8 + linha ~18 + borda
+
+
 interface Props { house: House }
 
 type PeriodKey = 'month' | '30d' | '90d' | 'year' | 'custom'
@@ -1101,6 +1108,9 @@ export function ReportsPage({ house }: Props) {
               <div style={{ textAlign: 'right' }} title="Nota média das avaliações">NOTA</div>
               <div style={{ textAlign: 'right' }} title="Custo no período (só dias em que compareceu)">CUSTO</div>
             </div>
+            {/* Teto de 12 linhas: a lista inteira empurrava o resto do relatório para
+                fora da tela. Rola por dentro em vez de esticar a página. */}
+            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
             {freelancerRank.map((f, i) => {
               const pPct = f.scaled > 0 ? Math.round(f.present / f.scaled * 100) : 0
               return (
@@ -1117,6 +1127,12 @@ export function ReportsPage({ house }: Props) {
                 </div>
               )
             })}
+            </div>
+            {freelancerRank.length > LINHAS_VISIVEIS && (
+              <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', padding: '6px 0 0' }}>
+                ↕ role para ver os {freelancerRank.length} da equipe
+              </div>
+            )}
           </div></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.brd}` }}>
             <span style={{ color: C.mut, fontSize: 13 }}>Total equipe</span>
@@ -1561,7 +1577,10 @@ export function ReportsPage({ house }: Props) {
                 <div style={{ textAlign: 'right' }} title="Conversão (entradas ÷ convidados)">%</div>
                 <div style={{ textAlign: 'right' }} title="Custo por cabeça">R$/CAB</div>
               </div>
-              {promoterRank.slice(0, 8).map((p, i) => {
+              {/* Antes cortava em 8 e o resto sumia. Agora todos ficam alcançáveis,
+                  com o mesmo teto de 12 linhas visíveis. */}
+              <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
+              {promoterRank.map((p, i) => {
                 const pct = p.guests ? Math.round(p.checked / p.guests * 100) : 0
                 const perHead = p.checked ? Math.round(p.cost / p.checked) : 0
                 return (
@@ -1579,6 +1598,12 @@ export function ReportsPage({ house }: Props) {
                   </div>
                 )
               })}
+              </div>
+              {promoterRank.length > LINHAS_VISIVEIS && (
+                <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', padding: '6px 0 0' }}>
+                  ↕ role para ver os {promoterRank.length} promoters
+                </div>
+              )}
               </div></div>
             </>
           }
