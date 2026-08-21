@@ -1082,7 +1082,7 @@ export function ReportsPage({ house }: Props) {
     { label: 'Cortesias', value: `${pctCortesias}%`, color: '#fbbf24', sub: `${ciCortesias} de ${ciPagantes + ciCortesias}` },
   ]
 
-  const sectionTitle = (t: string) => <div style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>{t}</div>
+  const sectionTitle = (t: string) => <div className="print-title" style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>{t}</div>
 
   // Relatório da equipe — usado no card do Geral e na aba dedicada 👷 Equipe
   const teamCard = (
@@ -1268,7 +1268,7 @@ export function ReportsPage({ house }: Props) {
               {monthly.map((m, i) => (
                 <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
                   <div style={{ fontSize: 10, color: C.sub, fontWeight: 700, marginBottom: 3 }}>{(m.rev / 100) >= 1000 ? `${Math.round(m.rev / 100000)}k` : Math.round(m.rev / 100)}</div>
-                  <div style={{ width: '100%', maxWidth: 46, background: 'linear-gradient(180deg,#3b82f6,#1e3a8a)', borderRadius: 6, height: `${Math.max(4, (m.rev / monthMax) * 100)}%`, transition: 'height .4s' }} />
+                  <div className="pbar pbar-azul" style={{ width: '100%', maxWidth: 46, background: 'linear-gradient(180deg,#3b82f6,#1e3a8a)', borderRadius: 6, height: `${Math.max(4, (m.rev / monthMax) * 100)}%`, transition: 'height .4s' }} />
                   <div style={{ fontSize: 10, color: C.mut, marginTop: 5, textTransform: 'capitalize' }}>{m.label}</div>
                 </div>
               ))}
@@ -1361,7 +1361,7 @@ export function ReportsPage({ house }: Props) {
               {dailyCI.map((d, i) => (
                 <div key={i} title={`${d.label}: ${d.n} check-ins · ${fmtCurrency(d.rev)}`} style={{ flex: 1, minWidth: 22, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
                   <div style={{ fontSize: 10, color: C.sub, fontWeight: 700, marginBottom: 3 }}>{d.n}</div>
-                  <div style={{ width: '100%', maxWidth: 30, background: d.n >= dayMax ? 'linear-gradient(180deg,#10b981,#059669)' : 'linear-gradient(180deg,#3b82f6,#1e3a8a)', borderRadius: 5, height: `${Math.max(4, (d.n / dayMax) * 100)}%`, transition: 'height .4s' }} />
+                  <div className={`pbar ${d.n >= dayMax ? 'pbar-verde' : 'pbar-azul'}`} style={{ width: '100%', maxWidth: 30, background: d.n >= dayMax ? 'linear-gradient(180deg,#10b981,#059669)' : 'linear-gradient(180deg,#3b82f6,#1e3a8a)', borderRadius: 5, height: `${Math.max(4, (d.n / dayMax) * 100)}%`, transition: 'height .4s' }} />
                   <div style={{ fontSize: 9, color: C.mut, marginTop: 5, whiteSpace: 'nowrap' }}>{d.label}</div>
                 </div>
               ))}
@@ -1703,8 +1703,8 @@ export function ReportsPage({ house }: Props) {
                     <span style={{ color: C.sub }}>Comparecimento</span>
                     <span style={{ color: pct >= 70 ? C.grn : pct >= 40 ? C.gold : C.red, fontWeight: 700 }}>{ops.resArrived}/{ops.resTotal} ({pct}%)</span>
                   </div>
-                  <div style={{ height: 8, background: C.brd, borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg,#059669,#10b981)', borderRadius: 6 }} />
+                  <div className="pbar-trilho" style={{ height: 8, background: C.brd, borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+                    <div className="pbar pbar-verde" style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg,#059669,#10b981)', borderRadius: 6 }} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                     <span style={{ color: C.grn }}>✅ Compareceram: {ops.resArrived}</span>

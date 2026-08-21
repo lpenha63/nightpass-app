@@ -12,7 +12,7 @@ export function Card({ style, children, className, onClick }: CardProps) {
   return (
     <div
       onClick={onClick}
-      className={className ?? ''}
+      className={['np-card', className].filter(Boolean).join(' ')}
       style={{
         background: C.card,
         border: `1px solid ${C.brd}`,

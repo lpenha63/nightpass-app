@@ -318,8 +318,18 @@ html { scroll-behavior: smooth; }
   * { color: #000 !important; box-shadow: none !important; text-shadow: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   [class*="bg-card"], [style*="background"] { background: #fff !important; }
 
-  /* Cards viram blocos com borda fina e não quebram no meio da página */
-  .rounded-2xl, [class*="card"] { border: 1px solid #999 !important; border-radius: 6px !important; break-inside: avoid; page-break-inside: avoid; margin-bottom: 10px !important; }
+  /* Cards viram blocos com borda fina e não quebram no meio da página.
+     .np-card e a classe do componente Card — antes a regra so olhava [class*="card"],
+     que NAO casava com nada: o componente nao punha classe alguma e todo card
+     quebrava no meio da folha. */
+  .np-card, .rounded-2xl, [class*="card"] {
+    border: 1px solid #999 !important; border-radius: 6px !important;
+    break-inside: avoid; page-break-inside: avoid; margin-bottom: 10px !important;
+  }
+  /* Titulo nao fica sozinho no pe da pagina, separado do conteudo dele */
+  .print-title { break-after: avoid; page-break-after: avoid; }
+  /* Linha de tabela nao parte ao meio */
+  .np-card > div > div { break-inside: avoid; page-break-inside: avoid; }
 
   /* Tabelas largas: mostra tudo em vez de cortar na rolagem */
   .r-scroll-x, .r-scroll-y { overflow: visible !important; max-height: none !important; }
@@ -327,6 +337,16 @@ html { scroll-behavior: smooth; }
 
   /* Gráficos/canvas cabem na folha */
   canvas, img { max-width: 100% !important; height: auto !important; }
+
+  /* As barras dos graficos sao DIVs com background inline. A regra que embranquece
+     fundos acima pintava todas de branco sobre branco — por isso os graficos
+     simplesmente nao apareciam no papel. Aqui elas voltam, em cor solida
+     (gradiente costuma nao sair em impressora). */
+  .pbar { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .pbar.pbar-azul { background: #1e3a8a !important; }
+  .pbar.pbar-verde { background: #047857 !important; }
+  /* O trilho atras da barra precisa de contraste para a barra ser legivel */
+  .pbar-trilho { background: #e5e7eb !important; border: 1px solid #cbd5e1 !important; }
 
   @page { margin: 12mm; }
 }
