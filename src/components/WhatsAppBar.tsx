@@ -28,7 +28,7 @@ function WhatsAppBarImpl({ status, reconnect, reconnecting, onOpenSettings }: Pr
   const ok = status === 'open'
 
   return (
-    <div style={{
+    <div className="wa-bar" style={{
       position: 'fixed', top: 10, right: 16, zIndex: 100,
       display: 'flex', alignItems: 'center', gap: 4,
       background: 'rgba(0,0,0,0.45)',

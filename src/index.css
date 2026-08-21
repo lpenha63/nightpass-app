@@ -328,8 +328,11 @@ html { scroll-behavior: smooth; }
   }
   /* Titulo nao fica sozinho no pe da pagina, separado do conteudo dele */
   .print-title { break-after: avoid; page-break-after: avoid; }
-  /* Linha de tabela nao parte ao meio */
-  .np-card > div > div { break-inside: avoid; page-break-inside: avoid; }
+  /* NAO usar break-inside:avoid em container interno: um bloco alto vira indivisivel
+     e pula inteiro para a folha seguinte, deixando o cabecalho sozinho na anterior.
+     Foi o que aconteceu com o DRE. Cards altos preferem quebrar a deixar folha vazia. */
+  .np-card { break-inside: auto !important; page-break-inside: auto !important; }
+  .np-card.print-junto { break-inside: avoid !important; page-break-inside: avoid !important; }
 
   /* Tabelas largas: mostra tudo em vez de cortar na rolagem */
   .r-scroll-x, .r-scroll-y { overflow: visible !important; max-height: none !important; }

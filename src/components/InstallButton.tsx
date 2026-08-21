@@ -58,7 +58,7 @@ export function InstallButton({ full = false }: { full?: boolean }) {
   }
 
   return (
-    <div style={{ width: full ? '100%' : undefined }}>
+    <div className="install-btn" style={{ width: full ? '100%' : undefined }}>
       <button onClick={() => (deferred ? install() : setShowIOS(v => !v))} style={btnStyle}>
         📲 Instalar app
       </button>
