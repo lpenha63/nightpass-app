@@ -220,6 +220,9 @@ export function ReportsPage({ house }: Props) {
   const [teamDay, setTeamDay] = useState<TeamDayRow[]>([])
   const [topClients, setTopClients] = useState<TopClient[]>([])
   const [clientStats, setClientStats] = useState<ClientStats>({ novos: 0, distinct: 0, recorrentes: 0, recorrenciaPct: 0 })
+  // Total de reservas do periodo (bruto, nao o somatorio atribuido evento a evento):
+  // reserva de um dia com dois eventos nao e atribuida, e sumiria da conta.
+  const [reservasPeriodo, setReservasPeriodo] = useState(0)
   const [ops, setOps] = useState<OpsStats>({ bestDayLabel: '—', bestDayN: 0, peakHour: 0, peakHourN: 0, resTotal: 0, resArrived: 0 })
   const [dailyCI, setDailyCI] = useState<DailyCI[]>([])
   const [weekdayCompare, setWeekdayCompare] = useState<DailyCI[]>([])
@@ -276,6 +279,7 @@ export function ReportsPage({ house }: Props) {
     const cins = cinsAll
     const tks = tkR.data ?? []
     const resv = resR.data ?? []
+    setReservasPeriodo(resv.filter(r => (r.status ?? '') !== 'cancelled').length)
 
     // Populate WA list (deduplicated by client — keep latest checkin per client)
     const byClient: Record<string, WACIItem> = {}
@@ -1073,7 +1077,7 @@ export function ReportsPage({ house }: Props) {
     { label: 'Faturamento', value: fmtCurrency(fin.faturamento), color: C.grn, d: pctDelta(fin.faturamento, prev.faturamento) },
     { label: 'Check-ins', value: fin.checkins.toLocaleString('pt-BR'), color: C.acc, d: pctDelta(fin.checkins, prev.checkins) },
     { label: 'Ticket Médio', value: fmtCurrency(fin.ticketMedio), color: C.gold },
-    { label: 'Eventos', value: evPnL.length.toLocaleString('pt-BR'), color: '#a78bfa' },
+    { label: 'Eventos', value: evPnL.length.toLocaleString('pt-BR'), color: '#a78bfa', sub: reservasPeriodo > 0 ? `🪑 ${reservasPeriodo.toLocaleString('pt-BR')} reservas` : undefined },
     { label: 'Novos Clientes', value: clientStats.novos.toLocaleString('pt-BR'), color: '#f59e0b', d: pctDelta(clientStats.novos, prev.novos) },
     { label: 'Cortesias', value: `${pctCortesias}%`, color: '#fbbf24', sub: `${ciCortesias} de ${ciPagantes + ciCortesias}` },
   ]
