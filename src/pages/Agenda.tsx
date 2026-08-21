@@ -457,7 +457,7 @@ function AdminAgenda({ house }: { house: House }) {
   const [assignOpen, setAssignOpen] = useState(false)
   const [assignFor, setAssignFor] = useState<TeamMember | null>(null)
   const [assignSearch, setAssignSearch] = useState('')
-  const [form, setForm] = useState({ title: '', description: '', deadline: '', event_id: '' })
+  const [form, setForm] = useState({ title: '', description: '', deadline: '', event_id: '', area: '' })
   // Subtarefas da nova tarefa. Uma por linha: digitar é mais rápido que somar campos.
   const [formSteps, setFormSteps] = useState('')
   const [saving, setSaving] = useState(false)
@@ -627,9 +627,9 @@ function AdminAgenda({ house }: { house: House }) {
   })()
 
   function openAssign(member: TeamMember | null, eventId = '') {
-    setAssignFor(member); setAssignSearch(''); setForm({ title: '', description: '', deadline: '', event_id: eventId }); setAssignOpen(true)
+    setAssignFor(member); setAssignSearch(''); setForm({ title: '', description: '', deadline: '', event_id: eventId, area: '' }); setFormSteps(''); setAssignOpen(true)
   }
-  function closeAssign() { setAssignOpen(false); setAssignFor(null); setAssignSearch(''); setFormSteps('') }
+  function closeAssign() { setAssignOpen(false); setAssignFor(null); setAssignSearch(''); setFormSteps(''); setForm(f => ({ ...f, area: '' })) }
 
   async function assign() {
     if (!assignFor) { sT(setToast, 'Escolha o colaborador', 'warn'); return }
@@ -637,7 +637,11 @@ function AdminAgenda({ house }: { house: House }) {
     setSaving(true)
     const { data, error } = await supabase.from('event_tasks').insert({
       house_id: house.id, event_id: form.event_id || null,
-      area: 'Geral', area_icon: '📋', title: form.title.trim(),
+      // Antes gravava 'Geral' fixo: o app do colaborador agrupa por area, e tudo
+      // caia no mesmo balde sem relacao com as areas cadastradas da casa.
+      area: form.area || 'Geral',
+      area_icon: form.area ? areaMeta(workAreas, form.area).icon : '📋',
+      title: form.title.trim(),
       description: form.description || null, deadline: form.deadline || null,
       freelancer_id: assignFor.id, assignee_name: assignFor.full_name, assignee_phone: assignFor.phone || null,
       status: 'pending', sort_order: 0,
@@ -1061,6 +1065,16 @@ function AdminAgenda({ house }: { house: House }) {
           )}
           <input value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="Título da tarefa *" style={inp} />
           <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição (opcional)" style={{ ...inp, height: 60, resize: 'vertical' }} />
+          <div>
+            <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Área</label>
+            <select value={form.area} onChange={e => setForm(p => ({ ...p, area: e.target.value }))} style={inp}>
+              <option value="">📋 Geral</option>
+              {workAreas.map(a => <option key={a.key} value={a.key}>{a.icon} {a.label}</option>)}
+            </select>
+            <div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>
+              É por aqui que a tarefa aparece agrupada na agenda de quem executa.
+            </div>
+          </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>
               Subtarefas (opcional) — <span style={{ fontWeight: 400 }}>uma por linha</span>
