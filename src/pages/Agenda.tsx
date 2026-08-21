@@ -428,6 +428,9 @@ function AdminAgenda({ house }: { house: House }) {
   const [listByEvent, setListByEvent] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'colaborador' | 'evento' | 'diaadia' | 'area'>('evento')
+  // Area aberta dentro de cada card de evento. Fechado por padrao: um evento com 50
+  // tarefas viraria uma listagem gigante e o card deixaria de ser um resumo.
+  const [areaAberta, setAreaAberta] = useState<Record<string, string | null>>({})
   const [expiredTasks, setExpiredTasks] = useState<AdminTask[]>([])
   const [showExpired, setShowExpired] = useState(false)
   const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'overdue' | 'done' | 'unassigned'>('all')
@@ -625,6 +628,40 @@ function AdminAgenda({ house }: { house: House }) {
     const ordem = new Map(workAreas.map((a, i) => [a.key, i]))
     return [...m.entries()].sort((a, b) =>
       (ordem.get(a[0]) ?? 999) - (ordem.get(b[0]) ?? 999) || a[0].localeCompare(b[0]))
+  }
+
+  // Cartao compacto de uma area — mostra o placar e abre a lista ao ser tocado.
+  function cartaoArea(area: string, todas: AdminTask[], aberto: boolean, onClick: () => void) {
+    const s = statOf(todas)
+    const completa = s.total > 0 && s.done === s.total
+    const pct = s.total ? Math.round(s.done / s.total * 100) : 0
+    const cor = completa ? C.grn : s.overdue > 0 ? C.red : C.acc
+    return (
+      <button key={area} onClick={onClick}
+        title={aberto ? 'Fechar' : `Ver as tarefas de ${wlabel(area)}`}
+        style={{
+          flex: '1 1 132px', maxWidth: 200, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+          background: aberto ? C.acc + '14' : C.bg,
+          border: `1px solid ${aberto ? C.acc : completa ? C.grn + '55' : C.brd}`,
+          borderRadius: 12, padding: '9px 11px',
+        }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 5 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {wlabel(area)}
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 900, color: cor, whiteSpace: 'nowrap' }}>{s.done}/{s.total}</span>
+        </div>
+        <div style={{ height: 4, background: C.card, borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: cor, borderRadius: 3, transition: 'width .3s' }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5, fontSize: 10 }}>
+          <span style={{ color: completa ? C.grn : C.mut, fontWeight: 600 }}>
+            {completa ? 'concluída' : `${s.pending} aberta(s)`}
+          </span>
+          {s.overdue > 0 && <span style={{ color: C.red, fontWeight: 800 }}>⏰ {s.overdue}</span>}
+        </div>
+      </button>
+    )
   }
 
   // Cabecalho de uma area: e daqui que se ve, de relance, quem ja terminou.
@@ -997,12 +1034,29 @@ function AdminAgenda({ house }: { house: House }) {
                   </div>
                   {evTasks.length > 0 && (
                     <div style={{ padding: '4px 16px 12px' }}>
-                      {agruparPorArea(evTasks).map(([area, list]) => (
-                        <div key={area}>
-                          {faixaArea(area, allEvTasks.filter(x => (x.area || 'Geral') === area))}
-                          {list.map(t => taskRow(t, false, true))}
-                        </div>
-                      ))}
+                      {(() => {
+                        const grupos = agruparPorArea(evTasks)
+                        // Com uma area so, exigir o clique seria burocracia inutil
+                        const unica = grupos.length === 1 ? grupos[0][0] : null
+                        const aberta = areaAberta[ev.id] !== undefined ? areaAberta[ev.id] : unica
+                        const daAberta = grupos.find(g => g[0] === aberta)?.[1] ?? []
+                        return (<>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {grupos.map(([area]) => cartaoArea(
+                              area,
+                              allEvTasks.filter(x => (x.area || 'Geral') === area),
+                              aberta === area,
+                              () => setAreaAberta(p => ({ ...p, [ev.id]: p[ev.id] === area ? null : area })),
+                            ))}
+                          </div>
+                          {aberta && daAberta.length > 0 && (
+                            <div style={{ marginTop: 4 }}>
+                              {faixaArea(aberta, allEvTasks.filter(x => (x.area || 'Geral') === aberta))}
+                              {daAberta.map(t => taskRow(t, false, true))}
+                            </div>
+                          )}
+                        </>)
+                      })()}
                     </div>
                   )}
                 </Card>
