@@ -13,6 +13,10 @@ interface ScrollBoxProps {
 
 // Lista com rolagem interna + barrinha lateral SEMPRE visível (não depende do navegador
 // mostrar a scrollbar nativa, que em mobile só aparece durante o gesto de arrastar).
+//
+// A nativa é escondida por CSS (.np-scrollbox): como este componente desenha a própria
+// barrinha, as duas juntas apareciam lado a lado — ficou evidente quando a scrollbar
+// global passou de 5px para a largura do sistema.
 export function ScrollBox({ maxHeight, children, className, style, bleedRight = 0 }: ScrollBoxProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [thumb, setThumb] = useState({ top: 0, height: 0, visible: false })
@@ -43,7 +47,7 @@ export function ScrollBox({ maxHeight, children, className, style, bleedRight = 
 
   return (
     <div style={{ position: 'relative', marginRight: bleedRight ? -bleedRight : undefined }}>
-      <div ref={ref} className={className} style={{ maxHeight, overflowY: 'auto', paddingRight: bleedRight || undefined, ...style }}>
+      <div ref={ref} className={['np-scrollbox', className].filter(Boolean).join(' ')} style={{ maxHeight, overflowY: 'auto', paddingRight: bleedRight || undefined, ...style }}>
         {children}
       </div>
       {thumb.visible && (

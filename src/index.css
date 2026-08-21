@@ -83,6 +83,12 @@ body {
 /* Firefox nao tem os pseudo-elementos: 'auto' e a largura padrao do sistema */
 html { scrollbar-width: auto; scrollbar-color: rgba(59,130,246,0.45) transparent; }
 
+/* O ScrollBox desenha a propria barrinha; a nativa aqui vira uma SEGUNDA barra ao
+   lado da primeira. So ficou evidente quando a scrollbar global passou de 5px
+   (praticamente invisivel) para a largura do sistema. */
+.np-scrollbox { scrollbar-width: none; -ms-overflow-style: none; }
+.np-scrollbox::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
 /* Listas longas (convidados, rankings): mesmo azul do resto do app, só que mais
    forte — a distinção vem do contraste, não de uma cor diferente. */
 .r-scroll-y { scrollbar-width: auto; scrollbar-color: rgba(59,130,246,0.65) transparent; }
