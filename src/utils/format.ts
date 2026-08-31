@@ -49,11 +49,14 @@ export function loyalTier(n: number): LoyalTier {
 export const PAY_COLORS: Record<string, string> = {
   pix: '#10b981', cartao: '#3b82f6', credito: '#3b82f6',
   debito: '#60a5fa', dinheiro: '#f59e0b', cortesia: '#9ca3af',
+  // entrada por ingresso comprado no site — o dinheiro entra por ticket_orders
+  online: '#a78bfa', lista: '#22d3ee',
 }
 
 export const PAY_LABELS: Record<string, string> = {
   pix: 'PIX', cartao: 'Cartão', credito: 'Crédito',
   debito: 'Débito', dinheiro: 'Dinheiro', cortesia: 'Cortesia',
+  online: 'Ingresso online', lista: 'Lista',
 }
 
 export function payColor(k: string): string { return PAY_COLORS[k] || '#6b7280' }
