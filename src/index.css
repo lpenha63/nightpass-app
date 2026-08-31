@@ -164,6 +164,15 @@ nav button { transition: background .15s, color .15s, border-color .15s !importa
 /* O componente usa display:flex inline; força esconder no desktop (>=769px) */
 @media (min-width: 769px) { .np-bottom-nav { display: none !important; } }
 
+/* ── KPIs de Relatórios: uma linha só ──
+   Os 7 cards cabem em uma linha a partir de ~1100px. Medido: com a fonte no mínimo
+   do clamp (15px) o valor "R$ 11.730,00" exige coluna de 117px, mas o rodapé
+   "▲ 80% vs anterior" exige 140px — é ele que manda. Abaixo disso a linha de apoio
+   sairia cortada, então entre o breakpoint do celular e 1100px quebra em 4 por linha. */
+@media (min-width: 769px) and (max-width: 1100px) {
+  .kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+}
+
 /* KPI grid responsive */
 @media (max-width: 768px) {
   .np-burger { display: flex; }

@@ -1423,17 +1423,22 @@ export function ReportsPage({ house }: Props) {
       </div>
 
       {/* KPIs */}
-      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 20 }}>
+      {/* Colunas saem da quantidade de KPIs, nao de um 6 cravado: ao entrar o card de
+          ingressos o setimo caiu para uma segunda linha sozinho. O minmax(0,...) impede
+          que um valor longo estique a coluna e empurre os vizinhos. */}
+      <div className="r-grid-2 kpi-row" style={{ display: 'grid', gridTemplateColumns: `repeat(${kpis.length},minmax(0,1fr))`, gap: 10, marginBottom: 20 }}>
         {kpis.map((k, i) => (
-          <div key={i} className="card-3d" style={{ background: 'var(--c-kpi-grad)', border: '1px solid rgba(59,130,246,0.12)', borderTop: `3px solid ${k.color}`, borderRadius: 16, padding: '16px 18px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 8px rgba(0,0,0,0.35), 0 16px 32px rgba(0,0,0,0.5)', transform: 'translateY(-3px)' }}>
-            <div style={{ color: C.mut, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{k.label}</div>
-            <div className="dre-kpi-val" style={{ color: k.color, fontSize: 24, fontWeight: 900, letterSpacing: '-0.02em' }}>{k.value}</div>
+          <div key={i} className="card-3d" style={{ minWidth: 0, background: 'var(--c-kpi-grad)', border: '1px solid rgba(59,130,246,0.12)', borderTop: `3px solid ${k.color}`, borderRadius: 16, padding: '14px 14px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 8px rgba(0,0,0,0.35), 0 16px 32px rgba(0,0,0,0.5)', transform: 'translateY(-3px)' }}>
+            <div style={{ color: C.mut, fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 7, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.label}</div>
+            {/* clamp em vez de 24px fixo: com 7 colunas "R$ 11.730,00" nao cabia em tela
+                de 1280px. O media query do celular continua vencendo (tem !important). */}
+            <div className="dre-kpi-val" style={{ color: k.color, fontSize: 'clamp(15px, 1.35vw, 24px)', fontWeight: 900, letterSpacing: '-0.02em', whiteSpace: 'nowrap' as const }}>{k.value}</div>
             {k.d !== null && k.d !== undefined && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 5, fontSize: 11, fontWeight: 700, color: k.d > 0 ? C.grn : k.d < 0 ? C.red : C.mut }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 5, fontSize: 10.5, fontWeight: 700, color: k.d > 0 ? C.grn : k.d < 0 ? C.red : C.mut, whiteSpace: 'nowrap' as const, overflow: 'hidden' }}>
                 {k.d > 0 ? '▲' : k.d < 0 ? '▼' : '■'} {Math.abs(k.d)}% <span style={{ color: C.mut, fontWeight: 500 }}>vs anterior</span>
               </div>
             )}
-            {k.sub && <div style={{ color: C.mut, fontSize: 10, marginTop: 5 }}>{k.sub}</div>}
+            {k.sub && <div style={{ color: C.mut, fontSize: 10, marginTop: 5, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.sub}</div>}
           </div>
         ))}
       </div>
