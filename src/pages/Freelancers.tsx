@@ -341,11 +341,14 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     contratadas: number | null            // jornada contratada (work_meta.shift_hours)
     desconto: number                      // centavos
     descontoTxt: string                   // o que está digitado no campo (em reais)
+    pago: number | null                   // valor fechado (paid_cents); null = usa o cálculo
+    pagoTxt: string                       // o que está digitado no campo de valor
     motivo: string
     confirmed: boolean
     fonteIn?: string; fonteOut?: string
   }
   const [pontoOpen, setPontoOpen] = useState(false)
+  const [addPonto, setAddPonto] = useState('')
   const [pontoEvs, setPontoEvs] = useState<{ id: string; name: string; event_date: string }[]>([])
   const [pontoEvId, setPontoEvId] = useState('')
   const [pontoDate, setPontoDate] = useState('')
@@ -379,13 +382,13 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     if (!evId) return
     setPontoLdg(true)
     const { data, error } = await supabase.from('event_freelancers')
-      .select('id,role,confirmed,checkin_at,checkout_at,custom_fee_cents,discount_cents,discount_reason,checkin_source,checkout_source,freelancer_id,freelancers(full_name,pix_key,phone,daily_rate_cents,hourly_rate_cents,work_meta)')
+      .select('id,role,confirmed,checkin_at,checkout_at,custom_fee_cents,discount_cents,discount_reason,paid_cents,checkin_source,checkout_source,freelancer_id,freelancers(full_name,pix_key,phone,daily_rate_cents,hourly_rate_cents,work_meta)')
       .eq('event_id', evId)
     setPontoLdg(false)
     if (error) { st2('Erro ao carregar o ponto: ' + error.message, 'error'); return }
     const rows: PontoRow[] = ((data ?? []) as unknown as Array<{
       id: string; role?: string; confirmed?: boolean; checkin_at?: string; checkout_at?: string
-      custom_fee_cents?: number; discount_cents?: number; discount_reason?: string
+      custom_fee_cents?: number; discount_cents?: number; discount_reason?: string; paid_cents?: number | null
       checkin_source?: string; checkout_source?: string; freelancer_id: string
       freelancers?: {
         full_name?: string; pix_key?: string; phone?: string
@@ -403,6 +406,8 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       contratadas: Number(r.freelancers?.work_meta?.shift_hours) || null,
       desconto: r.discount_cents ?? 0,
       descontoTxt: r.discount_cents ? (r.discount_cents / 100).toFixed(2).replace('.', ',') : '',
+      pago: r.paid_cents ?? null,
+      pagoTxt: r.paid_cents != null ? (r.paid_cents / 100).toFixed(2).replace('.', ',') : '',
       motivo: r.discount_reason ?? '',
       confirmed: !!r.confirmed,
       fonteIn: r.checkin_source, fonteOut: r.checkout_source,
@@ -465,8 +470,36 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
   }
 
   const valorDe = (r: PontoRow) => calcPonto(r).cents
-  /** Nunca deixa o líquido negativo: desconto maior que o bruto zera e o excedente é sinalizado */
-  const liquidoDe = (r: PontoRow) => Math.max(0, calcPonto(r).cents - r.desconto)
+
+  /** Fecha (ou reabre) o valor de uma linha. Vazio volta ao cálculo automático. */
+  async function salvarPago(id: string, txt: string) {
+    const limpo = txt.trim()
+    const cents = limpo === '' ? null : Math.round((parseFloat(limpo.replace(/\./g, '').replace(',', '.')) || 0) * 100)
+    setPontoRows(rs => rs.map(r => r.id === id ? { ...r, pago: cents, pagoTxt: limpo } : r))
+    const { error } = await supabase.from('event_freelancers').update({ paid_cents: cents }).eq('id', id)
+    if (error) st2('Não foi possível salvar o valor: ' + error.message, 'error')
+  }
+
+  /** Inclui alguém na escala pela própria folha — troca de última hora não deveria
+   *  obrigar a voltar em Eventos para depois refazer o fechamento. */
+  async function incluirNaEscala(freelancerId: string) {
+    if (!pontoEvId) { st2('Escolha o evento primeiro', 'warn'); return }
+    const f = freelancers.find(x => x.id === freelancerId)
+    const { error } = await supabase.from('event_freelancers').insert({
+      event_id: pontoEvId, freelancer_id: freelancerId, confirmed: true,
+      role: (f as { work_types?: string[] } | undefined)?.work_types?.[0] || 'outros',
+    })
+    if (error) { st2('Erro ao incluir: ' + error.message, 'error'); return }
+    st2(`✅ ${(f?.full_name ?? 'Pessoa').split(' ')[0]} incluído na escala`, 'success')
+    setAddPonto('')
+    loadPonto(pontoEvId)
+  }
+  /**
+   * Quanto sai de fato. Se houver valor fechado à mão (paid_cents), ele MANDA — é o
+   * número que o gestor decidiu, e é o mesmo que o Budget vai ler.
+   * Sem ele, cai no cálculo: bruto menos desconto, nunca negativo.
+   */
+  const liquidoDe = (r: PontoRow) => r.pago != null ? r.pago : Math.max(0, calcPonto(r).cents - r.desconto)
 
   async function salvarDesconto(r: PontoRow, campo: 'valor' | 'motivo', valor: string) {
     if (campo === 'motivo') {
@@ -1095,7 +1128,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       </Modal>
 
       {/* ── Relatório de ponto / folha de pagamento do evento ── */}
-      <Modal open={pontoOpen} title="📊 Ponto e folha da equipe" onClose={() => { setPontoOpen(false); setPontoRows([]) }} wide noDirtyCheck>
+      <Modal open={pontoOpen} title="📊 Ponto e folha da equipe" onClose={() => { setPontoOpen(false); setPontoRows([]); setAddPonto('') }} wide noDirtyCheck>
         <div>
           {/* Busca por data + evento + modo de cálculo */}
           {(() => {
@@ -1215,6 +1248,30 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                   ))}
                 </div>
 
+                {/* Troca de ultima hora: incluir alguem sem sair da folha */}
+                {pontoEvId && (() => {
+                  const jaNaEscala = new Set(pontoRows.map(r => r.freelancerId))
+                  const livres = freelancers
+                    .filter(f => f.status === 'ativo' && !jaNaEscala.has(f.id))
+                    .sort((a, b) => a.full_name.localeCompare(b.full_name, 'pt-BR'))
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                      <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>Faltou alguém na escala?</span>
+                      <select value={addPonto} onChange={e => setAddPonto(e.target.value)}
+                        style={{ flex: '1 1 220px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
+                        <option value="">— escolher pessoa —</option>
+                        {livres.map(f => <option key={f.id} value={f.id}>{f.full_name}</option>)}
+                      </select>
+                      <button onClick={() => addPonto && incluirNaEscala(addPonto)} disabled={!addPonto}
+                        title="Incluir na escala deste evento"
+                        style={{ background: addPonto ? C.acc + '22' : 'transparent', border: `1px solid ${addPonto ? C.acc + '55' : C.brd}`, borderRadius: 8, padding: '7px 14px', color: addPonto ? C.acc : C.mut, fontSize: 12.5, fontWeight: 700, cursor: addPonto ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
+                        + Incluir
+                      </button>
+                      {livres.length === 0 && <span style={{ color: C.mut, fontSize: 11 }}>Toda a equipe ativa já está escalada.</span>}
+                    </div>
+                  )
+                })()}
+
                 {semHora && (
                   <div style={{ background: C.gold + '15', border: `1px solid ${C.gold}44`, borderRadius: 9, padding: '9px 12px', marginBottom: 10, color: C.gold, fontSize: 11.5, lineHeight: 1.5 }}>
                     ⚠️ Alguém sem <b>valor por hora</b> cadastrado entra como R$ 0,00. Preencha no cadastro da pessoa ou use o cálculo por diária.
@@ -1252,14 +1309,30 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                           </div>
                           {c.nota && <div style={{ color: C.gold, fontSize: 9.5, fontWeight: 600 }}>{c.nota}</div>}
                         </div>
-                        <div style={{ minWidth: 82, textAlign: 'right' as const }}>
+                        <div style={{ minWidth: 96, textAlign: 'right' as const }}>
                           {semPonto
                             ? <span style={{ color: C.mut, fontSize: 11, fontWeight: 600 }}>não veio</span>
                             : <>
-                                <div style={{ color: C.gold, fontSize: 13, fontWeight: 800 }}>{fmtCurrency(liquidoDe(r))}</div>
-                                {r.desconto > 0 && (
-                                  <div style={{ color: C.mut, fontSize: 9.5, textDecoration: 'line-through' }}>{fmtCurrency(c.cents)}</div>
-                                )}
+                                {/* Editavel: o gestor fecha o valor e e ESTE numero que o
+                                    Budget passa a ler. Vazio volta ao calculo automatico. */}
+                                <input
+                                  value={r.pagoTxt}
+                                  placeholder={(liquidoDe(r) / 100).toFixed(2).replace('.', ',')}
+                                  inputMode="decimal"
+                                  title={r.pago != null ? 'Valor fechado à mão — apague para voltar ao cálculo' : 'Calculado. Digite para fechar outro valor.'}
+                                  onChange={e => setPontoRows(prev => prev.map(x => x.id === r.id
+                                    ? { ...x, pagoTxt: e.target.value.replace(/[^\d.,]/g, '') } : x))}
+                                  onBlur={e => salvarPago(r.id, e.target.value)}
+                                  style={{
+                                    width: 88, textAlign: 'right', background: r.pago != null ? C.gold + '18' : 'transparent',
+                                    border: `1px solid ${r.pago != null ? C.gold + '66' : C.brd}`, borderRadius: 7,
+                                    padding: '3px 7px', color: C.gold, fontSize: 13, fontWeight: 800, fontFamily: 'inherit',
+                                  }} />
+                                {r.pago != null
+                                  ? <div style={{ color: C.mut, fontSize: 9.5 }}>fechado à mão</div>
+                                  : r.desconto > 0 && (
+                                    <div style={{ color: C.mut, fontSize: 9.5, textDecoration: 'line-through' }}>{fmtCurrency(c.cents)}</div>
+                                  )}
                               </>}
                         </div>
                         {pontoSaving === r.id && <span style={{ color: C.mut, fontSize: 10 }}>…</span>}

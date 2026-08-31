@@ -251,6 +251,19 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   // Budget modal
   const [budgetEv, setBudgetEv] = useState<EventWithCounts | null>(null)
   const [budgetFreelancers, setBudgetFreelancers] = useState<EventFreelancer[]>([])
+
+  /**
+   * Quanto custa uma pessoa neste evento. Ordem: valor FECHADO na folha (paid_cents) >
+   * diária customizada > diária do cadastro — sempre menos o desconto lançado.
+   * Antes o Budget usava só a diária: mostrava um número e a folha outro, para a mesma
+   * noite, porque o cálculo da folha depende de chaves que vivem só naquela tela.
+   */
+  const custoFr = (ef: EventFreelancer) => {
+    const pago = (ef as { paid_cents?: number | null }).paid_cents
+    if (pago != null) return pago
+    const bruto = (ef as { custom_fee_cents?: number | null }).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0
+    return Math.max(0, bruto - ((ef as { discount_cents?: number | null }).discount_cents ?? 0))
+  }
   interface BudgetPromoterList { id: string; name: string; fixed_fee_cents: number; min_entries: number; entry_fee_cents: number; consumacao_cents: number; guest_count: number; promoters?: { full_name: string } }
   interface BudgetResItem { name: string; quantity: number; unit_cost_cents: number; reservations?: { name: string } }
   const [budgetPromoters, setBudgetPromoters] = useState<BudgetPromoterList[]>([])
@@ -1043,7 +1056,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     const anyFrIn = budgetFreelancers.some(ef => !!(ef as any).checkin_at)
     const freelancerTotal = budgetFreelancers
       .filter(ef => !anyFrIn || !!(ef as any).checkin_at)
-      .reduce((s, ef) => s + effVal('fr:' + ef.id, (ef as any).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0), 0)
+      .reduce((s, ef) => s + effVal('fr:' + ef.id, custoFr(ef)), 0)
     const promoterTotal = budgetPromoters.reduce((s, l) => {
       const ent = Math.max(l.guest_count, l.min_entries)
       return s + effVal('promoter:' + l.id, l.fixed_fee_cents + ent * l.entry_fee_cents + ent * l.consumacao_cents)
@@ -4886,7 +4899,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                       <div style={{ color: C.acc, fontWeight: 700, fontSize: 15 }}>{fmtCurrency(freelancerTotal)}</div>
                     </div>
                     {[...byArea.entries()].map(([area, frs]) => {
-                      const areaTotal = frs.filter(counts).reduce((s, ef) => s + effVal('fr:' + ef.id, (ef as any).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0), 0)
+                      const areaTotal = frs.filter(counts).reduce((s, ef) => s + effVal('fr:' + ef.id, custoFr(ef)), 0)
                       return (
                         <div key={area} style={{ paddingLeft: 34, marginBottom: 4 }}>
                           <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0' }}>
@@ -4900,7 +4913,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                                 <div style={{ flex: 1, color: C.mut, fontSize: 12, textDecoration: absent ? 'line-through' : 'none' }}>{ef.freelancers?.full_name}{absent && <span style={{ color: C.red, fontSize: 10, fontWeight: 700, marginLeft: 6, textDecoration: 'none' }}>faltou</span>}</div>
                                 {absent
                                   ? <span style={{ color: C.mut, fontSize: 12 }}>—</span>
-                                  : editableAmount('fr:' + ef.id, (ef as any).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0, C.mut, ef.freelancers?.full_name ?? 'Freelancer', 12)}
+                                  : editableAmount('fr:' + ef.id, custoFr(ef), C.mut, ef.freelancers?.full_name ?? 'Freelancer', 12)}
                               </div>
                             )
                           })}
