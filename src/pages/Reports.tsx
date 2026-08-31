@@ -11,6 +11,25 @@ import type { House } from '../types'
 // Teto das tabelas de ranking: 12 linhas visiveis, o resto rola por dentro.
 // Sem isso a lista da equipe (49 pessoas) empurrava o restante do relatorio
 // para fora da tela, e a de promoters cortava em 8 escondendo o resto de vez.
+/**
+ * Quanto uma pessoa custou num evento. MESMA regra do Budget:
+ * valor fechado na folha (paid_cents) > diária customizada > diária do cadastro,
+ * sempre menos o desconto lançado.
+ *
+ * Antes os Relatórios usavam só a diária e ignoravam o fechamento e o desconto —
+ * por isso o custo aqui divergia da folha (R$ 1.020 contra R$ 1.360 no mesmo dia)
+ * e quem não tinha diária cadastrada aparecia como R$ 0,00.
+ */
+function custoFreelancer(f: unknown): number {
+  const r = f as {
+    paid_cents?: number | null; custom_fee_cents?: number | null; discount_cents?: number | null
+    freelancers?: { daily_rate_cents?: number } | null
+  }
+  if (r.paid_cents != null) return r.paid_cents
+  const bruto = r.custom_fee_cents ?? r.freelancers?.daily_rate_cents ?? 0
+  return Math.max(0, bruto - (r.discount_cents ?? 0))
+}
+
 const LINHAS_VISIVEIS = 12
 const ALTURA_LINHA = 35   // padding 8+8 + linha ~18 + borda
 const ALTURA_LINHA_DRE = 64  // a linha do DRE traz a faixa de custos embaixo
@@ -462,7 +481,7 @@ export function ReportsPage({ house }: Props) {
     }
 
     const [frR, plR, riR, promosR, expR, tkTaskR] = await Promise.all([
-      supabase.from('event_freelancers').select('event_id,custom_fee_cents,freelancer_id,role,checkin_at,checkout_at,entry_time,freelancers(full_name,daily_rate_cents,pix_key,phone)').in('event_id', eventIds),
+      supabase.from('event_freelancers').select('event_id,custom_fee_cents,discount_cents,paid_cents,freelancer_id,role,checkin_at,checkout_at,entry_time,freelancers(full_name,daily_rate_cents,pix_key,phone)').in('event_id', eventIds),
       supabase.from('promoter_lists').select('id,name,promoter_id,event_id,fixed_fee_cents,min_entries,entry_fee_cents,consumacao_cents').in('event_id', eventIds),
       supabase.from('reservation_items').select('quantity,unit_cost_cents,reservations!inner(event_id)').in('reservations.event_id', eventIds),
       supabase.from('promoters').select('id,full_name').eq('house_id', house.id),
@@ -514,7 +533,7 @@ export function ReportsPage({ house }: Props) {
     const frRankMap: Record<string, FreelancerRank> = {}
     const blank = (id: string, name: string): FreelancerRank => ({ id, name, cost: 0, events: 0, scaled: 0, present: 0, hours: 0, late: 0, rating: null })
     frs.forEach(f => {
-      const ff = f as { checkin_at?: string; checkout_at?: string; entry_time?: string; custom_fee_cents?: number }
+      const ff = f as { checkin_at?: string; checkout_at?: string; entry_time?: string; custom_fee_cents?: number; paid_cents?: number | null; discount_cents?: number | null }
       const fid = (f.freelancer_id as string) ?? 'x'
       const nome = (f.freelancers as { full_name?: string } | null)?.full_name ?? '—'
       if (!frRankMap[fid]) frRankMap[fid] = blank(fid, nome)
@@ -533,8 +552,7 @@ export function ReportsPage({ house }: Props) {
       }
       // Custo: "só quem compareceu" (se o evento teve check-in de equipe)
       if (evHasFrCheckin[f.event_id as string] && !ff.checkin_at) return
-      const daily = (f.freelancers as { daily_rate_cents?: number } | null)?.daily_rate_cents ?? 0
-      const fee = ff.custom_fee_cents ?? daily
+      const fee = custoFreelancer(f)
       frCostByEvent[f.event_id] = (frCostByEvent[f.event_id] ?? 0) + fee
       row.cost += fee; row.events++
     })
@@ -542,7 +560,7 @@ export function ReportsPage({ house }: Props) {
     const evName: Record<string, string> = {}
     events.forEach(e => { evName[e.id] = (e as { name?: string }).name ?? '—' })
     setTeamDay(frs.map(f => {
-      const ff = f as { checkin_at?: string; checkout_at?: string; custom_fee_cents?: number; role?: string }
+      const ff = f as { checkin_at?: string; checkout_at?: string; custom_fee_cents?: number; role?: string; paid_cents?: number | null; discount_cents?: number | null }
       const fr = f.freelancers as { full_name?: string; daily_rate_cents?: number; pix_key?: string; phone?: string } | null
       const naoVeio = evHasFrCheckin[f.event_id as string] && !ff.checkin_at
       return {
@@ -553,7 +571,7 @@ export function ReportsPage({ house }: Props) {
         checkin: ff.checkin_at, checkout: ff.checkout_at,
         hours: (ff.checkin_at && ff.checkout_at)
           ? (new Date(ff.checkout_at).getTime() - new Date(ff.checkin_at).getTime()) / 3600000 : null,
-        fee: naoVeio ? 0 : (ff.custom_fee_cents ?? fr?.daily_rate_cents ?? 0),
+        fee: naoVeio ? 0 : custoFreelancer(f),
         pix: fr?.pix_key ?? undefined,
         phone: fr?.phone ?? undefined,
       }
