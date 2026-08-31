@@ -30,6 +30,10 @@ function custoFreelancer(f: unknown): number {
   return Math.max(0, bruto - (r.discount_cents ?? 0))
 }
 
+// Colunas do "Público por Evento" — em uma const so para cabecalho e linha nunca
+// saírem de sincronia (ja aconteceu de a coluna nova desalinhar a tabela inteira).
+const GRID_PUB = '1fr 62px 74px 62px 70px 82px 76px'
+const GRID_TK = '1.4fr 1fr 56px 96px 72px 60px'
 const LINHAS_VISIVEIS = 12
 const ALTURA_LINHA = 35   // padding 8+8 + linha ~18 + borda
 const ALTURA_LINHA_DRE = 64  // a linha do DRE traz a faixa de custos embaixo
@@ -94,7 +98,12 @@ interface FinSummary { faturamento: number; revCheckins: number; revTickets: num
 interface ClientStats { novos: number; distinct: number; recorrentes: number; recorrenciaPct: number }
 interface OpsStats { bestDayLabel: string; bestDayN: number; peakHour: number; peakHourN: number; resTotal: number; resArrived: number }
 interface DailyCI { day: string; label: string; n: number; rev: number }
-interface EventCI { id: string; name: string; date: string; genre?: string; total: number; pagantes: number; cortesias: number; male: number; female: number; capacity: number; rev: number; reservas: number }
+interface EventCI { id: string; name: string; date: string; genre?: string; total: number; pagantes: number; cortesias: number; male: number; female: number; capacity: number; rev: number; reservas: number; ingressos: number }
+/** Uma linha do card de ticketeria: evento × lote */
+interface TicketRow {
+  evId: string; evName: string; evDate: string; lote: string
+  qtd: number; receita: number; usados: number; pendentes: number; cancelados: number
+}
 interface AcessoItem { name: string; phone: string; gender: string; time: string; pay: string; amount: number; event: string }
 interface ListaGuestItem { name: string; phone: string; listName: string; isVip: boolean; confirmed: boolean; checkedIn: boolean; eventName: string }
 interface ListaReservaItem { id: string; name: string; phone: string; peopleCount: number; status: string; location: string; expectedArrival: string; eventName: string }
@@ -152,7 +161,13 @@ function rangeFor(key: PeriodKey, cs: string, ce: string): { start: string; end:
   if (key === '30d') { const d = new Date(); d.setDate(d.getDate() - 29); return { start: isoDay(d), end, label: 'Últimos 30 dias' } }
   if (key === '90d') { const d = new Date(); d.setDate(d.getDate() - 89); return { start: isoDay(d), end, label: 'Últimos 90 dias' } }
   if (key === 'year') { const start = isoDay(new Date(now.getFullYear(), 0, 1)); return { start, end, label: String(now.getFullYear()) } }
-  return { start: cs || end, end: ce || end, label: 'Personalizado' }
+  // Intervalo livre. O fim vazio cai no inicio (um dia so) e o inicio vazio cai em
+  // hoje, entao nunca sai um range invertido que zeraria a tela inteira.
+  const s = cs || ce || end
+  const e = ce || cs || end
+  const [ini, fim] = s <= e ? [s, e] : [e, s]
+  const br = (d: string) => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  return { start: ini, end: fim, label: ini === fim ? br(ini) : `${br(ini)} a ${br(fim)}` }
 }
 
 // Período imediatamente anterior, de mesma duração, para comparação
@@ -268,10 +283,11 @@ export function ReportsPage({ house }: Props) {
   const [weekdayCompare, setWeekdayCompare] = useState<DailyCI[]>([])
   const [compareDow, setCompareDow] = useState<number>(new Date().getDay())
   const [eventCI, setEventCI] = useState<EventCI[]>([])
+  const [ticketRows, setTicketRows] = useState<TicketRow[]>([])
   const [prev, setPrev] = useState({ faturamento: 0, checkins: 0, novos: 0 })
   const [referralStats, setReferralStats] = useState<{ k: string; v: number }[]>([])
   const [eventReferral, setEventReferral] = useState<Record<string, { k: string; v: number }[]>>({})
-  const [birthdays, setBirthdays] = useState<{ name: string; phone: string; date: string; mmdd: string }[]>([])
+  const [birthdays, setBirthdays] = useState<{ name: string; phone: string; date: string; mmdd: string; festa: string | null }[]>([])
 
   const { start, end, label } = rangeFor(period, customStart, customEnd)
   // Limites no fuso de São Paulo (UTC-3, fixo). Sem o offset, strings naive são lidas
@@ -404,8 +420,8 @@ export function ReportsPage({ house }: Props) {
 
     // ── Check-ins por evento (público, pagantes × cortesias, gênero, ocupação) ──
     const evMap: Record<string, EventCI> = {}
-    events.forEach(ev => { evMap[ev.id] = { id: ev.id, name: ev.name, date: ev.event_date, genre: (ev as { genre?: string }).genre ?? '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: (ev as { capacity?: number }).capacity ?? 0, rev: 0, reservas: 0 } })
-    const livre: EventCI = { id: '__livre__', name: 'Entrada Livre / Bar', date: '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: 0, rev: 0, reservas: 0 }
+    events.forEach(ev => { evMap[ev.id] = { id: ev.id, name: ev.name, date: ev.event_date, genre: (ev as { genre?: string }).genre ?? '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: (ev as { capacity?: number }).capacity ?? 0, rev: 0, reservas: 0, ingressos: 0 } })
+    const livre: EventCI = { id: '__livre__', name: 'Entrada Livre / Bar', date: '', total: 0, pagantes: 0, cortesias: 0, male: 0, female: 0, capacity: 0, rev: 0, reservas: 0, ingressos: 0 }
     // Check-ins feitos sem selecionar o evento (event_id nulo) são atribuídos ao evento do
     // dia operacional, quando houver exatamente UM evento naquela data (senão ficam em "Entrada Livre")
     const evByDate: Record<string, string[]> = {}
@@ -469,22 +485,101 @@ export function ReportsPage({ house }: Props) {
     setReferralStats(Object.entries(refCounts).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v))
 
     // ── Aniversariantes do período (ignora o ano) ──
+    // Aniversário é a maior fonte de público da casa, então não basta listar quem faz
+    // aniversário: interessa saber quem JÁ FECHOU festa aqui. Quem tem ✅ é cliente
+    // recorrente de aniversário (motivo forte pra ligar); quem não tem é a lista de
+    // prospecção do mês.
     const bdSet = mmddSet(start, end)
-    const bdR = await supabase.from('clients').select('full_name,phone,birth_date').eq('house_id', house.id).not('birth_date', 'is', null)
+    const [bdR, tipoR] = await Promise.all([
+      supabase.from('clients').select('full_name,phone,birth_date').eq('house_id', house.id).not('birth_date', 'is', null),
+      // Busca o tipo pelo NOME e por casa: o id do tipo é diferente em cada unidade,
+      // então cravar o UUID quebraria assim que outra casa usasse a tela.
+      supabase.from('reservation_types').select('id').eq('house_id', house.id).ilike('name', 'anivers%'),
+    ])
+    const tiposAniv = ((tipoR.data ?? []) as Array<{ id: string }>).map(x => x.id)
+
+    // Casamento cliente × reserva: não existe client_id em reservations. Telefone
+    // (8 últimos dígitos, imune a DDI/DDD/formatação) OU nome normalizado. Medido
+    // contra os dados reais: telefone sozinho pega 19 de 32, nome sozinho 20,
+    // os dois juntos 24 — as 8 restantes não têm cadastro de cliente.
+    const fone8 = (s: string) => s.replace(/\D/g, '').slice(-8)
+    const nomeNorm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')
+    const festaPorFone: Record<string, string> = {}
+    const festaPorNome: Record<string, string> = {}
+    if (tiposAniv.length > 0) {
+      const { data: fest } = await supabase.from('reservations')
+        .select('name,phone,reservation_date,status')
+        .eq('house_id', house.id).in('reservation_type', tiposAniv)
+      ;((fest ?? []) as Array<{ name: string | null; phone: string | null; reservation_date: string; status: string | null }>)
+        .filter(r => (r.status ?? '') !== 'cancelled')
+        .forEach(r => {
+          // Guarda sempre a festa MAIS RECENTE
+          const f = fone8(r.phone ?? '')
+          const n = nomeNorm(r.name ?? '')
+          if (f.length === 8 && r.reservation_date > (festaPorFone[f] ?? '')) festaPorFone[f] = r.reservation_date
+          if (n && r.reservation_date > (festaPorNome[n] ?? '')) festaPorNome[n] = r.reservation_date
+        })
+    }
+
     const bdays = (bdR.data ?? [])
       .map(c => {
         const bd = (c.birth_date ?? '').slice(0, 10)
         const mmdd = bd.slice(5, 10)
-        return { name: c.full_name ?? '—', phone: c.phone ?? '', date: bd, mmdd }
+        const tel = c.phone ?? ''
+        const f = fone8(tel)
+        const festa = (f.length === 8 ? festaPorFone[f] : undefined) ?? festaPorNome[nomeNorm(c.full_name ?? '')] ?? null
+        return { name: c.full_name ?? '—', phone: tel, date: bd, mmdd, festa }
       })
       .filter(b => b.mmdd && bdSet.has(b.mmdd))
-      .sort((a, b) => a.mmdd.localeCompare(b.mmdd))
+      // Quem ja fez festa aqui vem primeiro — e a lista que da retorno mais rapido
+      .sort((a, b) => (a.festa ? 0 : 1) - (b.festa ? 0 : 1) || a.mmdd.localeCompare(b.mmdd))
     setBirthdays(bdays)
 
     // ── Event-scoped: DRE, promoters, freelancers ──
     if (eventIds.length === 0) {
-      setEvPnL([]); setPromoterRank([]); setFreelancerRank([]); setTeamDay([]); setLoading(false); return
+      setEvPnL([]); setPromoterRank([]); setFreelancerRank([]); setTeamDay([]); setTicketRows([]); setLoading(false); return
     }
+
+    // Ingressos DOS EVENTOS do periodo. Antes so existia a consulta por data da COMPRA,
+    // e ingresso vendido com antecedencia caia no mes errado — some do DRE do evento e
+    // aparece no faturamento de um mes onde nao houve festa. Com ticketeria de verdade
+    // (venda antecipada) isso e a regra, nao a excecao.
+    const [tkEvR, tkUnitR] = await Promise.all([
+      supabase.from('ticket_orders').select('id,event_id,quantity,amount_cents,payment_status,batch_id,ticket_batches(name)').in('event_id', eventIds),
+      supabase.from('tickets').select('id,event_id,order_id,checked_in').in('event_id', eventIds),
+    ])
+    const ordens = (tkEvR.data ?? []) as Array<{ id: string; event_id: string; quantity: number | null; amount_cents: number | null; payment_status: string | null; batch_id: string | null; ticket_batches?: { name?: string } | null }>
+    const unidades = (tkUnitR.data ?? []) as Array<{ id: string; event_id: string; order_id: string | null; checked_in: boolean }>
+
+    const usadosPorOrdem: Record<string, number> = {}
+    unidades.forEach(u => { if (u.checked_in && u.order_id) usadosPorOrdem[u.order_id] = (usadosPorOrdem[u.order_id] ?? 0) + 1 })
+
+    const tkAgrupado: Record<string, TicketRow> = {}
+    const tkQtdPorEvento: Record<string, number> = {}
+    const tkRevPorEvento: Record<string, number> = {}
+    ordens.forEach(o => {
+      const ev = events.find(e => e.id === o.event_id)
+      const lote = o.ticket_batches?.name ?? 'Sem lote'
+      const k = `${o.event_id}|${lote}`
+      const linha = (tkAgrupado[k] ??= {
+        evId: o.event_id, evName: ev?.name ?? '—', evDate: ev?.event_date ?? '', lote,
+        qtd: 0, receita: 0, usados: 0, pendentes: 0, cancelados: 0,
+      })
+      const q = o.quantity ?? 1
+      const st = o.payment_status ?? ''
+      if (st === 'paid') {
+        linha.qtd += q
+        linha.receita += o.amount_cents ?? 0
+        linha.usados += usadosPorOrdem[o.id] ?? 0
+        tkQtdPorEvento[o.event_id] = (tkQtdPorEvento[o.event_id] ?? 0) + q
+        tkRevPorEvento[o.event_id] = (tkRevPorEvento[o.event_id] ?? 0) + (o.amount_cents ?? 0)
+      } else if (st === 'cancelled' || st === 'refunded') linha.cancelados += q
+      else linha.pendentes += q
+    })
+    setTicketRows(Object.values(tkAgrupado)
+      .filter(r => r.qtd + r.pendentes + r.cancelados > 0)
+      .sort((a, b) => b.evDate.localeCompare(a.evDate) || a.lote.localeCompare(b.lote, 'pt-BR')))
+    setEventCI(prev => prev.map(e => ({ ...e, ingressos: tkQtdPorEvento[e.id] ?? 0 })))
 
     const [frR, plR, riR, promosR, expR, tkTaskR] = await Promise.all([
       supabase.from('event_freelancers').select('event_id,custom_fee_cents,discount_cents,paid_cents,freelancer_id,role,checkin_at,checkout_at,entry_time,freelancers(full_name,daily_rate_cents,pix_key,phone)').in('event_id', eventIds),
@@ -622,8 +717,9 @@ export function ReportsPage({ house }: Props) {
     // Checkin/ticket revenue per event
     const ciRevByEvent: Record<string, number> = {}
     cins.forEach(c => { if (c.event_id) ciRevByEvent[c.event_id] = (ciRevByEvent[c.event_id] ?? 0) + effAmt(c) })
-    const tkRevByEvent: Record<string, number> = {}
-    tks.forEach(t => { if (t.event_id) tkRevByEvent[t.event_id] = (tkRevByEvent[t.event_id] ?? 0) + (t.amount_cents ?? 0) })
+    // Receita de ingresso por evento: vem de tkRevPorEvento, montado a partir das ordens
+    // DO EVENTO (nao da data da compra) — ver comentario na carga acima.
+    const tkRevByEvent = tkRevPorEvento
 
     // Receita de reservas por evento: vínculo primeiro; sem ele, casa pela data quando
     // houver UM evento no dia (mesma regra do resto da tela).
@@ -1061,8 +1157,8 @@ export function ReportsPage({ house }: Props) {
   }
 
   function exportBirthdaysCSV() {
-    const hdr = 'Nome,Telefone,Nascimento,Dia'
-    const lines = birthdays.map(b => [b.name, b.phone, b.date, b.mmdd.replace('-', '/')].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    const hdr = 'Nome,Telefone,Nascimento,Dia,Ja fechou aniversario,Ultima festa'
+    const lines = birthdays.map(b => [b.name, b.phone, b.date, b.mmdd.replace('-', '/'), b.festa ? 'SIM' : 'NAO', b.festa ?? ''].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
     download(`aniversariantes-${start}-${end}.csv`, hdr + '\n' + lines.join('\n'), ',')
   }
 
@@ -1135,6 +1231,8 @@ export function ReportsPage({ house }: Props) {
     { label: 'Novos Clientes', value: clientStats.novos.toLocaleString('pt-BR'), color: '#f59e0b', d: pctDelta(clientStats.novos, prev.novos) },
     { label: 'Cortesias', value: `${pctCortesias}%`, color: '#fbbf24', sub: `${ciCortesias} de ${ciPagantes + ciCortesias}` },
   ]
+
+  const dtInput = { background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }
 
   const sectionTitle = (t: string) => <div className="print-title" style={{ fontWeight: 700, fontSize: 15, color: C.txt, marginBottom: 14 }}>{t}</div>
 
@@ -1227,9 +1325,28 @@ export function ReportsPage({ house }: Props) {
           </button>
         ))}
         {period === 'custom' && (
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>📅 Dia do evento:</span>
-            <input type="date" value={customStart} onChange={e => { setCustomStart(e.target.value); setCustomEnd(e.target.value) }} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }} />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const }}>
+            <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>📅 De</span>
+            {/* Antes um input so preenchia inicio E fim: dava para ver um dia, nunca
+                uma semana. Fechamento semanal/quinzenal precisa dos dois extremos. */}
+            <input type="date" value={customStart} max={customEnd || undefined}
+              onChange={e => { const v = e.target.value; setCustomStart(v); if (!customEnd || customEnd < v) setCustomEnd(v) }}
+              style={dtInput} />
+            <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>até</span>
+            <input type="date" value={customEnd} min={customStart || undefined}
+              onChange={e => { const v = e.target.value; setCustomEnd(v); if (!customStart || customStart > v) setCustomStart(v) }}
+              style={dtInput} />
+            {/* Atalhos: o caso real e "semana passada", nao datas soltas */}
+            {([['Esta semana', 0], ['Semana passada', 1]] as const).map(([rot, atras]) => (
+              <button key={rot} onClick={() => {
+                const h = new Date(); h.setHours(12, 0, 0, 0)
+                const seg = new Date(h); seg.setDate(h.getDate() - ((h.getDay() + 6) % 7) - 7 * atras)
+                const dom = new Date(seg); dom.setDate(seg.getDate() + 6)
+                setCustomStart(isoDay(seg)); setCustomEnd(isoDay(dom))
+              }} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 10px', color: C.sub, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {rot}
+              </button>
+            ))}
           </div>
         )}
         {/* Imprime a aba atual já com o período selecionado (CSS @media print limpa a tela) */}
@@ -1506,6 +1623,73 @@ export function ReportsPage({ house }: Props) {
         )
       })()}
 
+      {/* Ticketeria — venda antecipada. Fica antes do público por evento porque é a
+          receita que já entrou ANTES da porta abrir. */}
+      {(() => {
+        const tot = ticketRows.reduce((a, r) => ({
+          qtd: a.qtd + r.qtd, receita: a.receita + r.receita, usados: a.usados + r.usados,
+          pendentes: a.pendentes + r.pendentes, cancelados: a.cancelados + r.cancelados,
+        }), { qtd: 0, receita: 0, usados: 0, pendentes: 0, cancelados: 0 })
+        return (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: C.txt }}>🎫 Ingressos Vendidos</div>
+                <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>Venda antecipada por evento e lote — {label}</div>
+              </div>
+              {tot.qtd > 0 && (
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' as const }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: C.acc, fontSize: 18, fontWeight: 900 }}>{tot.qtd.toLocaleString('pt-BR')}</div>
+                    <div style={{ color: C.mut, fontSize: 10 }}>vendidos</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: C.grn, fontSize: 18, fontWeight: 900 }}>{fmtCurrency(tot.receita)}</div>
+                    <div style={{ color: C.mut, fontSize: 10 }}>receita</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }} title="Ingressos vendidos que passaram pela portaria">
+                    <div style={{ color: C.gold, fontSize: 18, fontWeight: 900 }}>{tot.qtd > 0 ? Math.round(tot.usados / tot.qtd * 100) : 0}%</div>
+                    <div style={{ color: C.mut, fontSize: 10 }}>compareceram</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            {ticketRows.length === 0
+              ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Nenhum ingresso emitido para os eventos do período.</div>
+              : <div className="r-scroll-x"><div style={{ minWidth: 620 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: GRID_TK, gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
+                  <div>EVENTO</div><div>LOTE</div>
+                  <div style={{ textAlign: 'right' }}>QTD</div>
+                  <div style={{ textAlign: 'right' }}>RECEITA</div>
+                  <div style={{ textAlign: 'right' }} title="Usados na portaria / vendidos">USADOS</div>
+                  <div style={{ textAlign: 'right' }} title="Aguardando pagamento">PEND.</div>
+                </div>
+                <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
+                  {ticketRows.map((r, i) => (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: GRID_TK, gap: 4, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: C.txt, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.evName}</div>
+                        {r.evDate && <div style={{ color: C.mut, fontSize: 11 }}>{fd(r.evDate)}</div>}
+                      </div>
+                      <div style={{ color: C.sub, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.lote}</div>
+                      <div style={{ textAlign: 'right', color: C.acc, fontWeight: 800 }}>{r.qtd || '—'}</div>
+                      <div style={{ textAlign: 'right', color: C.grn, fontWeight: 700, fontSize: 12 }}>{r.receita ? fmtCurrency(r.receita) : '—'}</div>
+                      <div style={{ textAlign: 'right', fontSize: 12, color: C.sub }}>{r.qtd ? `${r.usados}/${r.qtd}` : '—'}</div>
+                      <div style={{ textAlign: 'right', fontSize: 12, color: r.pendentes > 0 ? C.gold : C.mut }}>{r.pendentes || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+              </div></div>
+            }
+            {tot.cancelados > 0 && (
+              <div style={{ color: C.mut, fontSize: 11, marginTop: 10 }}>
+                {tot.cancelados} ingresso{tot.cancelados > 1 ? 's' : ''} cancelado{tot.cancelados > 1 ? 's' : ''} — fora da receita e da contagem.
+              </div>
+            )}
+          </Card>
+        )
+      })()}
+
       {/* Check-ins por evento (público) */}
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -1528,22 +1712,24 @@ export function ReportsPage({ house }: Props) {
         </div>
         {eventCI.length === 0
           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem check-ins no período.</div>
-          : <div className="r-scroll-x"><div style={{ minWidth: 665 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 62px 70px 70px 90px 80px', gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
+          : <div className="r-scroll-x"><div style={{ minWidth: 745 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: GRID_PUB, gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
               <div>EVENTO</div>
               <div style={{ textAlign: 'right' }} title="Reservas do evento (não canceladas)">RESERVAS</div>
+              <div style={{ textAlign: 'right' }} title="Ingressos pagos emitidos para o evento">INGRESSOS</div>
               <div style={{ textAlign: 'right' }}>TOTAL</div><div style={{ textAlign: 'right' }}>PAG./CORT.</div><div style={{ textAlign: 'right' }}>♂ / ♀</div><div style={{ textAlign: 'right' }}>OCUPAÇÃO</div>
             </div>
             <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
             {eventCI.map(e => {
               const occ = e.capacity > 0 ? Math.round(e.total / e.capacity * 100) : 0
               return (
-                <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '1fr 62px 70px 70px 90px 80px', gap: 4, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
+                <div key={e.id} style={{ display: 'grid', gridTemplateColumns: GRID_PUB, gap: 4, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ color: C.txt, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</div>
                     {e.date && <div style={{ color: C.mut, fontSize: 11 }}>{fd(e.date)}</div>}
                   </div>
                   <div style={{ textAlign: 'right', color: e.reservas > 0 ? C.gold : C.mut, fontWeight: 700 }}>{e.reservas || '—'}</div>
+                  <div style={{ textAlign: 'right', color: e.ingressos > 0 ? C.grn : C.mut, fontWeight: 700 }}>{e.ingressos || '—'}</div>
                   <div style={{ textAlign: 'right', color: C.acc, fontWeight: 800 }}>{e.total}</div>
                   <div style={{ textAlign: 'right', fontSize: 12 }}>
                     <span style={{ color: C.grn, fontWeight: 700 }}>{e.pagantes}</span>
@@ -1783,12 +1969,19 @@ export function ReportsPage({ house }: Props) {
           <div>
             <div style={{ fontWeight: 800, fontSize: 16, color: C.txt }}>🎂 Aniversariantes</div>
             <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>Clientes que fazem aniversário no período — {label}</div>
+            <div style={{ color: C.mut, fontSize: 11, marginTop: 3 }}>✅ = já fechou reserva de aniversário com a casa</div>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <div style={{ textAlign: 'right' }}>
               <div style={{ color: '#f472b6', fontSize: 20, fontWeight: 900 }}>{birthdays.length}</div>
               <div style={{ color: C.mut, fontSize: 10 }}>no período</div>
             </div>
+            {birthdays.some(b => b.festa) && (
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: C.grn, fontSize: 20, fontWeight: 900 }}>{birthdays.filter(b => b.festa).length}</div>
+                <div style={{ color: C.mut, fontSize: 10 }}>já fecharam</div>
+              </div>
+            )}
             {birthdays.length > 0 && <Btn onClick={exportBirthdaysCSV} variant="secondary" small>📥 CSV</Btn>}
           </div>
         </div>
@@ -1796,14 +1989,19 @@ export function ReportsPage({ house }: Props) {
           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Nenhum aniversariante no período.</div>
           : <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
               {birthdays.slice(0, 30).map((b, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '8px 12px' }}>
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.bg, border: `1px solid ${b.festa ? C.grn + '55' : C.brd}`, borderRadius: 10, padding: '8px 12px' }}>
                   <div style={{ width: 40, flexShrink: 0, textAlign: 'center', background: '#f472b618', border: '1px solid #f472b633', borderRadius: 8, padding: '4px 0' }}>
                     <div style={{ color: '#f472b6', fontSize: 14, fontWeight: 900, lineHeight: 1 }}>{b.mmdd.slice(3)}</div>
                     <div style={{ color: C.mut, fontSize: 9 }}>{['', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][Number(b.mmdd.slice(0, 2))]}</div>
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ color: C.txt, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</div>
-                    {b.phone && <div style={{ color: C.mut, fontSize: 11 }}>{b.phone}</div>}
+                    <div style={{ color: C.txt, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {b.festa && <span title={`Já fechou aniversário aqui — última em ${fd(b.festa)}`} style={{ marginRight: 4 }}>✅</span>}
+                      {b.name}
+                    </div>
+                    {b.festa
+                      ? <div style={{ color: C.grn, fontSize: 11 }}>festa aqui em {fd(b.festa)}</div>
+                      : b.phone ? <div style={{ color: C.mut, fontSize: 11 }}>{b.phone}</div> : null}
                   </div>
                 </div>
               ))}
