@@ -480,6 +480,36 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     if (error) st2('Não foi possível salvar o valor: ' + error.message, 'error')
   }
 
+  /**
+   * Controle de inclusão. Precisa existir TAMBÉM quando a escala está vazia — que é
+   * justamente quando mais se precisa dele; antes só aparecia se já houvesse alguém.
+   */
+  function blocoIncluir() {
+    if (!pontoEvId) return null
+    const jaNaEscala = new Set(pontoRows.map(r => r.freelancerId))
+    const livres = freelancers
+      .filter(f => f.status === 'ativo' && !jaNaEscala.has(f.id))
+      .sort((a, b) => a.full_name.localeCompare(b.full_name, 'pt-BR'))
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+        <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>
+          {pontoRows.length === 0 ? 'Escalar agora:' : 'Faltou alguém na escala?'}
+        </span>
+        <select value={addPonto} onChange={e => setAddPonto(e.target.value)}
+          style={{ flex: '1 1 220px', maxWidth: 340, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
+          <option value="">— escolher pessoa —</option>
+          {livres.map(f => <option key={f.id} value={f.id}>{f.full_name}</option>)}
+        </select>
+        <button onClick={() => addPonto && incluirNaEscala(addPonto)} disabled={!addPonto}
+          title="Incluir na escala deste evento"
+          style={{ background: addPonto ? C.acc + '22' : 'transparent', border: `1px solid ${addPonto ? C.acc + '55' : C.brd}`, borderRadius: 8, padding: '7px 14px', color: addPonto ? C.acc : C.mut, fontSize: 12.5, fontWeight: 700, cursor: addPonto ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
+          + Incluir
+        </button>
+        {livres.length === 0 && <span style={{ color: C.mut, fontSize: 11 }}>Toda a equipe ativa já está escalada.</span>}
+      </div>
+    )
+  }
+
   /** Inclui alguém na escala pela própria folha — troca de última hora não deveria
    *  obrigar a voltar em Eventos para depois refazer o fechamento. */
   async function incluirNaEscala(freelancerId: string) {
@@ -1212,9 +1242,12 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
           {pontoLdg ? (
             <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: 30 }}>Carregando…</div>
           ) : pontoRows.length === 0 ? (
-            <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '30px 20px', lineHeight: 1.6 }}>
-              Nenhum colaborador escalado neste evento.<br />
-              Escale a equipe pelo botão <b style={{ color: C.txt }}>👷 Equipe</b> do card do evento.
+            <div style={{ padding: '24px 20px' }}>
+              <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', lineHeight: 1.6, marginBottom: 16 }}>
+                Nenhum colaborador escalado neste evento.<br />
+                Escale pelo botão <b style={{ color: C.txt }}>👷 Equipe</b> do card do evento — ou inclua aqui mesmo.
+              </div>
+              {blocoIncluir()}
             </div>
           ) : (() => {
             const presentes = pontoRows.filter(r => r.checkin)
@@ -1248,29 +1281,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
                   ))}
                 </div>
 
-                {/* Troca de ultima hora: incluir alguem sem sair da folha */}
-                {pontoEvId && (() => {
-                  const jaNaEscala = new Set(pontoRows.map(r => r.freelancerId))
-                  const livres = freelancers
-                    .filter(f => f.status === 'ativo' && !jaNaEscala.has(f.id))
-                    .sort((a, b) => a.full_name.localeCompare(b.full_name, 'pt-BR'))
-                  return (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-                      <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>Faltou alguém na escala?</span>
-                      <select value={addPonto} onChange={e => setAddPonto(e.target.value)}
-                        style={{ flex: '1 1 220px', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 13, fontFamily: 'inherit' }}>
-                        <option value="">— escolher pessoa —</option>
-                        {livres.map(f => <option key={f.id} value={f.id}>{f.full_name}</option>)}
-                      </select>
-                      <button onClick={() => addPonto && incluirNaEscala(addPonto)} disabled={!addPonto}
-                        title="Incluir na escala deste evento"
-                        style={{ background: addPonto ? C.acc + '22' : 'transparent', border: `1px solid ${addPonto ? C.acc + '55' : C.brd}`, borderRadius: 8, padding: '7px 14px', color: addPonto ? C.acc : C.mut, fontSize: 12.5, fontWeight: 700, cursor: addPonto ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
-                        + Incluir
-                      </button>
-                      {livres.length === 0 && <span style={{ color: C.mut, fontSize: 11 }}>Toda a equipe ativa já está escalada.</span>}
-                    </div>
-                  )
-                })()}
+                {blocoIncluir()}
 
                 {semHora && (
                   <div style={{ background: C.gold + '15', border: `1px solid ${C.gold}44`, borderRadius: 9, padding: '9px 12px', marginBottom: 10, color: C.gold, fontSize: 11.5, lineHeight: 1.5 }}>
