@@ -39,9 +39,14 @@ export function useSession() {
 
     const vincs = (vincRes.data ?? []).filter(v => (v as { houses?: House }).houses)
     const preferida = casaGuardada()
+    // Sem preferência salva, entra na casa do vínculo MAIS ANTIGO — a casa principal.
+// Ordenar por nome parecia inofensivo e não era: com "arena vila beats" e "Vila Beats"
+// na mesma conta, o alfabeto jogava o dono na casa vazia, e telas que filtram por
+// house_id (scanner de ingresso, por exemplo) passavam a não achar nada.
+    const porAntiguidade = (a: { created_at?: string }, b: { created_at?: string }) =>
+      String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
     const escolhido = vincs.find(v => v.house_id === preferida)
-      // sem preferência: ordem alfabética da casa — determinística entre recargas
-      ?? [...vincs].sort((a, b) => ((a as { houses?: House }).houses?.name ?? '').localeCompare((b as { houses?: House }).houses?.name ?? ''))[0]
+      ?? [...vincs].sort(porAntiguidade)[0]
     const houseRes = { data: escolhido ?? null }
     const todasCasas = [...vincs]
       .map(v => (v as unknown as { houses: House }).houses)

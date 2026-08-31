@@ -1080,11 +1080,29 @@ export function CheckinPage({ house, user }: Props) {
 
   async function handleScan(token: string) {
     setScanning(false); setScanMsg(null)
-    const { data: tk } = await supabase
+    const { data: tk, error: tkErr } = await supabase
       .from('tickets')
       .select('*,ticket_orders(buyer_name,quantity,amount_cents,buyer_phone,buyer_cpf,payment_status,ticket_batches(name)),events(name,event_date)')
-      .eq('token', token).eq('house_id', house.id).single()
-    if (!tk) { setScanMsg({ text: '❌ Ingresso inválido ou não encontrado', ok: false }); return }
+      .eq('token', token).eq('house_id', house.id).maybeSingle()
+
+    // O erro era descartado: qualquer falha (rede, permissão, consulta) virava
+    // "ingresso inválido" e não havia como descobrir a causa na porta.
+    if (tkErr) { setScanMsg({ text: `❌ Erro ao consultar o ingresso: ${tkErr.message}`, ok: false }); return }
+
+    if (!tk) {
+      // Antes de acusar o ingresso, conferir se ele não é de OUTRA casa: com mais de uma
+      // unidade na conta, dá para estar com a casa errada selecionada e o QR ser válido.
+      const { data: outra } = await supabase.from('tickets')
+        .select('house_id,houses(name)').eq('token', token).maybeSingle()
+      const nomeOutra = (outra as { houses?: { name?: string } } | null)?.houses?.name
+      setScanMsg({
+        text: outra && nomeOutra
+          ? `❌ Este ingresso é da unidade "${nomeOutra}". Você está em "${house.name}" — troque a unidade no menu.`
+          : '❌ Ingresso inválido ou não encontrado',
+        ok: false,
+      })
+      return
+    }
     // Pedido estornado/cancelado mantinha o QR funcionando — a pessoa entrava com ingresso devolvido
     const st = (tk as ScannedTicket).ticket_orders?.payment_status
     if (st && st !== 'paid') {
