@@ -1206,6 +1206,11 @@ export function ReportsPage({ house }: Props) {
   }
 
   // ── Derived ──
+  // Total da ticketeria: uma conta so para o KPI do topo e para o card la embaixo.
+  const tkTot = ticketRows.reduce((a, r) => ({
+    qtd: a.qtd + r.qtd, receita: a.receita + r.receita, usados: a.usados + r.usados,
+    pendentes: a.pendentes + r.pendentes, cancelados: a.cancelados + r.cancelados,
+  }), { qtd: 0, receita: 0, usados: 0, pendentes: 0, cancelados: 0 })
   const totRev = evPnL.reduce((s, e) => s + pnlRev(e), 0)
   const totCost = evPnL.reduce((s, e) => s + pnlCost(e), 0)
   const totProfit = totRev - totCost
@@ -1227,6 +1232,10 @@ export function ReportsPage({ house }: Props) {
     { label: 'Faturamento', value: fmtCurrency(fin.faturamento), color: C.grn, d: pctDelta(fin.faturamento, prev.faturamento) },
     { label: 'Check-ins', value: fin.checkins.toLocaleString('pt-BR'), color: C.acc, d: pctDelta(fin.checkins, prev.checkins) },
     { label: 'Ticket Médio', value: fmtCurrency(fin.ticketMedio), color: C.gold },
+    // Ingressos vem dos eventos do periodo (nao da data da compra) — mesma fonte do
+    // card da ticketeria e do DRE, senao os tres numeros divergem entre si.
+    { label: 'Ingressos', value: tkTot.qtd.toLocaleString('pt-BR'), color: '#22d3ee',
+      sub: tkTot.qtd > 0 ? `🎫 ${fmtCurrency(tkTot.receita)}` : undefined },
     { label: 'Eventos', value: evPnL.length.toLocaleString('pt-BR'), color: '#a78bfa', sub: reservasPeriodo > 0 ? `🪑 ${reservasPeriodo.toLocaleString('pt-BR')} reservas` : undefined },
     { label: 'Novos Clientes', value: clientStats.novos.toLocaleString('pt-BR'), color: '#f59e0b', d: pctDelta(clientStats.novos, prev.novos) },
     { label: 'Cortesias', value: `${pctCortesias}%`, color: '#fbbf24', sub: `${ciCortesias} de ${ciPagantes + ciCortesias}` },
@@ -1267,7 +1276,10 @@ export function ReportsPage({ house }: Props) {
             )
           })()}
           <div className="r-scroll-x"><div style={{ minWidth: 480 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 58px 46px 48px 42px 84px', gap: 4, padding: '4px 6px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.04em' }}>
+            {/* Teto de 12 linhas: a lista inteira empurrava o resto do relatório para
+                fora da tela. Rola por dentro em vez de esticar a página. */}
+            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA + 26, overflowY: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 58px 46px 48px 42px 84px', gap: 4, padding: '4px 6px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.04em', position: 'sticky' as const, top: 0, zIndex: 1, background: C.card,  }}>
               <div>COLABORADOR</div>
               <div style={{ textAlign: 'right' }} title="Presenças / vezes escalado">PRES.</div>
               <div style={{ textAlign: 'right' }} title="Horas trabalhadas (entrada → saída)">HORAS</div>
@@ -1275,9 +1287,6 @@ export function ReportsPage({ house }: Props) {
               <div style={{ textAlign: 'right' }} title="Nota média das avaliações">NOTA</div>
               <div style={{ textAlign: 'right' }} title="Custo no período (só dias em que compareceu)">CUSTO</div>
             </div>
-            {/* Teto de 12 linhas: a lista inteira empurrava o resto do relatório para
-                fora da tela. Rola por dentro em vez de esticar a página. */}
-            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
             {freelancerRank.map((f, i) => {
               const pPct = f.scaled > 0 ? Math.round(f.present / f.scaled * 100) : 0
               return (
@@ -1626,10 +1635,7 @@ export function ReportsPage({ house }: Props) {
       {/* Ticketeria — venda antecipada. Fica antes do público por evento porque é a
           receita que já entrou ANTES da porta abrir. */}
       {(() => {
-        const tot = ticketRows.reduce((a, r) => ({
-          qtd: a.qtd + r.qtd, receita: a.receita + r.receita, usados: a.usados + r.usados,
-          pendentes: a.pendentes + r.pendentes, cancelados: a.cancelados + r.cancelados,
-        }), { qtd: 0, receita: 0, usados: 0, pendentes: 0, cancelados: 0 })
+        const tot = tkTot
         return (
           <Card style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -1657,14 +1663,14 @@ export function ReportsPage({ house }: Props) {
             {ticketRows.length === 0
               ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Nenhum ingresso emitido para os eventos do período.</div>
               : <div className="r-scroll-x"><div style={{ minWidth: 620 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: GRID_TK, gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
+                <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA + 26, overflowY: 'auto' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: GRID_TK, gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', position: 'sticky' as const, top: 0, zIndex: 1, background: C.card,  }}>
                   <div>EVENTO</div><div>LOTE</div>
                   <div style={{ textAlign: 'right' }}>QTD</div>
                   <div style={{ textAlign: 'right' }}>RECEITA</div>
                   <div style={{ textAlign: 'right' }} title="Usados na portaria / vendidos">USADOS</div>
                   <div style={{ textAlign: 'right' }} title="Aguardando pagamento">PEND.</div>
                 </div>
-                <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
                   {ticketRows.map((r, i) => (
                     <div key={i} style={{ display: 'grid', gridTemplateColumns: GRID_TK, gap: 4, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
                       <div style={{ minWidth: 0 }}>
@@ -1713,13 +1719,13 @@ export function ReportsPage({ house }: Props) {
         {eventCI.length === 0
           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem check-ins no período.</div>
           : <div className="r-scroll-x"><div style={{ minWidth: 745 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: GRID_PUB, gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em' }}>
+            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA + 26, overflowY: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: GRID_PUB, gap: 4, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.05em', position: 'sticky' as const, top: 0, zIndex: 1, background: C.card,  }}>
               <div>EVENTO</div>
               <div style={{ textAlign: 'right' }} title="Reservas do evento (não canceladas)">RESERVAS</div>
               <div style={{ textAlign: 'right' }} title="Ingressos pagos emitidos para o evento">INGRESSOS</div>
               <div style={{ textAlign: 'right' }}>TOTAL</div><div style={{ textAlign: 'right' }}>PAG./CORT.</div><div style={{ textAlign: 'right' }}>♂ / ♀</div><div style={{ textAlign: 'right' }}>OCUPAÇÃO</div>
             </div>
-            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
             {eventCI.map(e => {
               const occ = e.capacity > 0 ? Math.round(e.total / e.capacity * 100) : 0
               return (
@@ -1784,13 +1790,13 @@ export function ReportsPage({ house }: Props) {
             </div>
 
             <div className="r-scroll-x"><div style={{ minWidth: 540 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 90px 70px', gap: 4, padding: '6px 8px', background: C.bg, borderRadius: 8, marginBottom: 6 }}>
+            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA_DRE + 26, overflowY: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 90px 70px', gap: 4, padding: '6px 8px', background: C.bg, borderRadius: 8, marginBottom: 6, position: 'sticky' as const, top: 0, zIndex: 1 }}>
               {['Evento', 'Receita', 'Custos', 'Resultado', 'Margem'].map((h, i) => (
                 <div key={i} style={{ color: C.mut, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textAlign: i > 0 ? 'right' : 'left' }}>{h}</div>
               ))}
             </div>
 
-            <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA_DRE, overflowY: 'auto' }}>
             {evPnL.map(e => {
               const rev = pnlRev(e)
               const cost = pnlCost(e)
@@ -1846,7 +1852,10 @@ export function ReportsPage({ house }: Props) {
             ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Sem listas de promoter no período.</div>
             : <>
               <div className="r-scroll-x"><div style={{ minWidth: 560 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 50px 50px 42px 80px 44px 74px', gap: 4, padding: '4px 6px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.04em' }}>
+              {/* Antes cortava em 8 e o resto sumia. Agora todos ficam alcançáveis,
+                  com o mesmo teto de 12 linhas visíveis. */}
+              <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA + 26, overflowY: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 50px 50px 42px 80px 44px 74px', gap: 4, padding: '4px 6px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '0.04em', position: 'sticky' as const, top: 0, zIndex: 1, background: C.card,  }}>
                 <div>PROMOTER</div>
                 <div style={{ textAlign: 'right' }} title="Convidados na lista">CONV.</div>
                 <div style={{ textAlign: 'right' }} title="Entradas (check-ins) da lista">ENTR.</div>
@@ -1855,9 +1864,6 @@ export function ReportsPage({ house }: Props) {
                 <div style={{ textAlign: 'right' }} title="Conversão (entradas ÷ convidados)">%</div>
                 <div style={{ textAlign: 'right' }} title="Custo por cabeça">R$/CAB</div>
               </div>
-              {/* Antes cortava em 8 e o resto sumia. Agora todos ficam alcançáveis,
-                  com o mesmo teto de 12 linhas visíveis. */}
-              <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA, overflowY: 'auto' }}>
               {promoterRank.map((p, i) => {
                 const pct = p.guests ? Math.round(p.checked / p.guests * 100) : 0
                 const perHead = p.checked ? Math.round(p.cost / p.checked) : 0
