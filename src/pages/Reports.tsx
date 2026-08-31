@@ -61,6 +61,8 @@ interface TopClient { id: string; name: string; count: number }
 interface EvPnL {
   id: string; name: string; date: string
   rev_checkins: number; rev_tickets: number; rev_other: number
+  /** Receita de reservas — faltava por inteiro no DRE, que só somava portaria + ingressos + extras */
+  rev_reservas: number
   cost_artist: number; cost_freelancers: number; cost_promoters: number
   cost_res_items: number; cost_production: number; cost_consumacao: number
   cost_expenses: number; cost_tasks: number
@@ -70,9 +72,9 @@ function pnlCost(e: EvPnL): number {
   return e.cost_artist + e.cost_freelancers + e.cost_promoters + e.cost_res_items
     + e.cost_production + e.cost_consumacao + e.cost_expenses + e.cost_tasks
 }
-// Receita total do evento (portaria + ingressos + receitas adicionadas manualmente)
+// Receita total do evento (portaria + reservas + ingressos + receitas adicionadas)
 function pnlRev(e: EvPnL): number {
-  return e.rev_checkins + e.rev_tickets + e.rev_other
+  return e.rev_checkins + e.rev_reservas + e.rev_tickets + e.rev_other
 }
 interface PromoterRank { id: string; name: string; guests: number; checked: number; cost: number; revenue: number; vip: number }
 // Folha do dia: detalhe por pessoa quando o período é um único dia (fechamento do evento)
@@ -299,7 +301,7 @@ export function ReportsPage({ house }: Props) {
     setLoading(true)
 
     // Base datasets for the period
-    const [totalCliR, newCliR, evR, cinsAll, tkR, resR] = await Promise.all([
+    const [totalCliR, newCliR, evR, cinsAll, tkR, resR, ovR] = await Promise.all([
       supabase.from('clients').select('id', { count: 'exact', head: true }).eq('house_id', house.id),
       supabase.from('clients').select('id', { count: 'exact', head: true }).eq('house_id', house.id).gte('created_at', startTs).lte('created_at', endTs),
       supabase.from('events').select('id,name,event_date,genre,artists,artist_fee_cents,consumption_cents,production_cost_cents,capacity')
@@ -307,8 +309,12 @@ export function ReportsPage({ house }: Props) {
       fetchAllCheckins(house.id, startTs, endTs),
       supabase.from('ticket_orders').select('amount_cents,quantity,event_id,created_at')
         .eq('house_id', house.id).eq('payment_status', 'paid').gte('created_at', startTs).lte('created_at', endTs),
-      supabase.from('reservations').select('status,event_id,reservation_date')
+      supabase.from('reservations').select('status,event_id,reservation_date,amount_cents')
         .eq('house_id', house.id).gte('reservation_date', start).lte('reservation_date', end),
+      // Ajustes manuais feitos no Budget (o "AJUST." da tela de Eventos). Sem isto o DRE
+      // mostrava o valor cru e divergia do fechamento que o gestor tinha feito à mão.
+      supabase.from('event_budget_overrides').select('event_id,row_key,amount_cents')
+        .eq('house_id', house.id),
     ])
 
     setTotalClients(totalCliR.count ?? 0)
@@ -619,6 +625,25 @@ export function ReportsPage({ house }: Props) {
     const tkRevByEvent: Record<string, number> = {}
     tks.forEach(t => { if (t.event_id) tkRevByEvent[t.event_id] = (tkRevByEvent[t.event_id] ?? 0) + (t.amount_cents ?? 0) })
 
+    // Receita de reservas por evento: vínculo primeiro; sem ele, casa pela data quando
+    // houver UM evento no dia (mesma regra do resto da tela).
+    const resRevByEvent: Record<string, number> = {}
+    const evsPorData: Record<string, string[]> = {}
+    events.forEach(e => { (evsPorData[e.event_date] ??= []).push(e.id) })
+    ;(resv as Array<{ status?: string; event_id?: string | null; reservation_date: string; amount_cents?: number }>).forEach(r => {
+      if ((r.status ?? '') === 'cancelled') return
+      const doDia = evsPorData[r.reservation_date]
+      const eid = (r.event_id && events.some(e => e.id === r.event_id)) ? r.event_id
+        : (doDia && doDia.length === 1 ? doDia[0] : null)
+      if (eid) resRevByEvent[eid] = (resRevByEvent[eid] ?? 0) + (r.amount_cents ?? 0)
+    })
+
+    // Ajustes manuais: chave por evento+linha, iguais às do Budget
+    const ovr: Record<string, number> = {}
+    ;((ovR.data ?? []) as Array<{ event_id: string; row_key: string; amount_cents: number }>)
+      .forEach(o => { ovr[`${o.event_id}|${o.row_key}`] = o.amount_cents })
+    const comAjuste = (evId: string, chave: string, valor: number) => ovr[`${evId}|${chave}`] ?? valor
+
     const pnl: EvPnL[] = events.map(ev => {
       // Cachê/consumação: usa o array artists[] (soma) quando existir; senão os campos legados
       const artists = ((ev as { artists?: Array<{ fee_cents?: number; consumption_cents?: number }> }).artists) ?? []
@@ -626,15 +651,16 @@ export function ReportsPage({ house }: Props) {
       const artistCons = artists.length ? artists.reduce((s, a) => s + (a.consumption_cents ?? 0), 0) : (ev.consumption_cents ?? 0)
       return {
         id: ev.id, name: ev.name, date: ev.event_date,
-        rev_checkins: ciRevByEvent[ev.id] ?? 0,
+        rev_checkins: comAjuste(ev.id, 'checkin', ciRevByEvent[ev.id] ?? 0),
+        rev_reservas: comAjuste(ev.id, 'reservas', resRevByEvent[ev.id] ?? 0),
         rev_tickets: tkRevByEvent[ev.id] ?? 0,
         rev_other: revOtherByEvent[ev.id] ?? 0,
-        cost_artist: artistFee,
+        cost_artist: comAjuste(ev.id, 'cache', artistFee),
         cost_freelancers: frCostByEvent[ev.id] ?? 0,
         cost_promoters: promoCostByEvent[ev.id] ?? 0,
         cost_res_items: riCostByEvent[ev.id] ?? 0,
-        cost_production: ev.production_cost_cents ?? 0,
-        cost_consumacao: artistCons,
+        cost_production: comAjuste(ev.id, 'producao', ev.production_cost_cents ?? 0),
+        cost_consumacao: comAjuste(ev.id, 'consumacao', artistCons),
         cost_expenses: expByEvent[ev.id] ?? 0,
         cost_tasks: taskByEvent[ev.id] ?? 0,
       }
@@ -1608,6 +1634,7 @@ export function ReportsPage({ house }: Props) {
                     {e.cost_consumacao > 0 && <span style={{ color: '#f59e0b' }}>🍺 {fmtCurrency(e.cost_consumacao)}</span>}
                     {e.cost_expenses > 0 && <span style={{ color: '#ef4444' }}>🧾 {fmtCurrency(e.cost_expenses)}</span>}
                     {e.cost_tasks > 0 && <span style={{ color: '#22d3ee' }}>✅ {fmtCurrency(e.cost_tasks)}</span>}
+                    {e.rev_reservas > 0 && <span style={{ color: C.grn }}>🪑 {fmtCurrency(e.rev_reservas)}</span>}
                     {e.rev_tickets > 0 && <span style={{ color: C.grn }}>🎫 {fmtCurrency(e.rev_tickets)}</span>}
                     {e.rev_other > 0 && <span style={{ color: C.grn }}>➕ {fmtCurrency(e.rev_other)}</span>}
                   </div>
@@ -1923,7 +1950,8 @@ export function ReportsPage({ house }: Props) {
                             {e.cost_res_items > 0 && <span style={{ color: C.gold }}>🪑 {fmtCurrency(e.cost_res_items)}</span>}
                             {e.cost_production > 0 && <span style={{ color: '#8b5cf6' }}>🔧 {fmtCurrency(e.cost_production)}</span>}
                             {e.cost_consumacao > 0 && <span style={{ color: '#f59e0b' }}>🍺 {fmtCurrency(e.cost_consumacao)}</span>}
-                            {e.rev_tickets > 0 && <span style={{ color: C.grn }}>🎫 {fmtCurrency(e.rev_tickets)}</span>}
+                            {e.rev_reservas > 0 && <span style={{ color: C.grn }}>🪑 {fmtCurrency(e.rev_reservas)}</span>}
+                    {e.rev_tickets > 0 && <span style={{ color: C.grn }}>🎫 {fmtCurrency(e.rev_tickets)}</span>}
                     {e.rev_other > 0 && <span style={{ color: C.grn }}>➕ {fmtCurrency(e.rev_other)}</span>}
                           </div>
                         : <div style={{ padding: '4px 8px 14px 22px' }}>
