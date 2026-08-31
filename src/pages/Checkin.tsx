@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
-import { inicioDoDia, viradaDa } from '../utils/diaOperacional'
+import { inicioDoDia, viradaDa, diaOperacionalStr } from '../utils/diaOperacional'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn } from '../components/ui'
 import { cn, fcpf, ftel, fmtCurrency, loyalTier } from '../utils/format'
@@ -1107,6 +1107,21 @@ export function CheckinPage({ house, user }: Props) {
     const st = (tk as ScannedTicket).ticket_orders?.payment_status
     if (st && st !== 'paid') {
       setScanMsg({ text: st === 'cancelled' ? '❌ Pedido cancelado — ingresso sem validade' : '⚠️ Pagamento não confirmado para este ingresso', ok: false })
+      return
+    }
+    // Validade: o ingresso vale no DIA DO EVENTO dele. Antes qualquer QR pago entrava
+    // em qualquer noite — um ingresso de um evento que já passou abria a porta hoje.
+    // Usa o dia operacional da casa, então evento que vira a madrugada continua valendo.
+    const dataEv = (tk as ScannedTicket).events?.event_date
+    const hoje = diaOperacionalStr(viradaDa(house))
+    if (dataEv && dataEv !== hoje) {
+      const fmt = (d: string) => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+      setScanMsg({
+        text: dataEv < hoje
+          ? `❌ Ingresso do evento de ${fmt(dataEv)} — já passou. Hoje é ${fmt(hoje)}.`
+          : `❌ Ingresso só vale em ${fmt(dataEv)}. Hoje é ${fmt(hoje)}.`,
+        ok: false,
+      })
       return
     }
     setScanned(tk as ScannedTicket)

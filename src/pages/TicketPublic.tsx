@@ -75,6 +75,9 @@ export function TicketPublicPage({ token }: { token: string }) {
   const atual = irmaos.length > 1 ? irmaos[idx] : { token: tk.token, checked_in: tk.checked_in }
   const usado = atual.checked_in
   const dataFmt = new Date(tk.event_date + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+  // Comparacao por string ISO (YYYY-MM-DD) — nao sofre com fuso nem com hora local.
+  const hojeIso = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+  const venceu = tk.event_date < hojeIso
   const total = irmaos.length > 1 ? irmaos.length : (tk.quantity ?? 1)
   const numero = irmaos.length > 1 ? idx + 1 : tk.ordem
 
@@ -118,8 +121,11 @@ export function TicketPublicPage({ token }: { token: string }) {
             🎫 Ingresso {total > 1 ? `${numero} de ${total}` : 'único'}
           </div>
 
-          <div style={{ background: '#fff', borderRadius: 12, padding: 12, display: 'inline-block', position: 'relative' as const }}>
-            <QRCode value={atual.token} size={190} />
+          {/* A margem branca (zona silenciosa) do QR precisa ter ao menos 4 modulos.
+              Com 190px / 29 modulos, cada modulo tem ~6,5px — os 12px de antes davam
+              menos de 2, e leitor de celular falha justamente por isso. 28px = ~4,3. */}
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, display: 'inline-block', position: 'relative' as const }}>
+            <QRCode value={atual.token} size={200} />
             {usado && (
               <div style={{ position: 'absolute' as const, inset: 0, background: 'rgba(10,14,26,0.82)', borderRadius: 12, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                 <div style={{ fontSize: 30 }}>✅</div>
@@ -128,7 +134,13 @@ export function TicketPublicPage({ token }: { token: string }) {
             )}
           </div>
 
-          <div style={{ color: C.mut, fontSize: 12, fontFamily: 'monospace', letterSpacing: '0.1em', marginTop: 12 }}>
+          {/* Validade explicita: o ingresso so entra na data do evento. Sem isto o
+              portador nao tinha como saber, e na porta virava discussao. */}
+          <div style={{ color: venceu ? '#f87171' : C.mut, fontSize: 12.5, fontWeight: 700, marginTop: 12 }}>
+            {venceu ? '⚠️ Data vencida — ' : ''}Válido somente em {new Date(tk.event_date + 'T12:00:00').toLocaleDateString('pt-BR')}
+          </div>
+
+          <div style={{ color: C.mut, fontSize: 12, fontFamily: 'monospace', letterSpacing: '0.1em', marginTop: 8 }}>
             {atual.token.slice(0, 8).toUpperCase()}
           </div>
         </div>

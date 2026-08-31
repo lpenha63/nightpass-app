@@ -42,6 +42,27 @@ export function QRScanner({ onScan, onClose }: Props) {
       return
     }
 
+    // Alguns aparelhos rejeitam { facingMode: 'environment' } (câmera única, webcam,
+    // navegador antigo). Nesse caso tentamos de novo pedindo a câmera pelo id — foi a
+    // causa mais comum de "abre e não lê nada".
+    const aoFalhar = (e: unknown): Promise<void> => {
+      const msg = String((e as { message?: string })?.message ?? e)
+      if (/permission|denied|NotAllowed/i.test(msg)) throw e   // permissão: não adianta insistir
+      return Html5Qrcode.getCameras().then(cams => {
+        if (!cams?.length) throw e
+        const tras = cams.find(c => /back|traseira|rear|environment/i.test(c.label)) ?? cams[cams.length - 1]
+        return scanner!.start(tras.id, { fps: 10, qrbox: { width: 250, height: 250 } }, aoLerQr, () => {}).then(() => undefined)
+      })
+    }
+
+    const aoLerQr = (decoded: string) => {
+      const uuid = decoded.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i)
+      if (!uuid || jaLeu.current) return
+      jaLeu.current = true
+      scanner?.stop().catch(() => {})
+      aoLer.current(uuid[0])
+    }
+
     scanner.start(
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 250, height: 250 } },
@@ -55,6 +76,8 @@ export function QRScanner({ onScan, onClose }: Props) {
       },
       () => { /* quadro sem QR — normal, ignora */ },
     ).then(() => setStarted(true))
+      .catch(aoFalhar)
+      .then(() => setStarted(true))
       .catch((e: unknown) => {
         const msg = String((e as { message?: string })?.message ?? e)
         setError(
