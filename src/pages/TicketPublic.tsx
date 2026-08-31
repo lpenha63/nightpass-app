@@ -29,6 +29,10 @@ interface TicketInfo {
   quantity: number | null
   ordem: number
   payment_status: string | null
+  house_address: string | null
+  house_city: string | null
+  house_state: string | null
+  house_phone: string | null
 }
 
 const GENERO: Record<string, string> = { both: 'Misto', male: 'Masculino', female: 'Feminino' }
@@ -80,6 +84,15 @@ export function TicketPublicPage({ token }: { token: string }) {
   const venceu = tk.event_date < hojeIso
   const total = irmaos.length > 1 ? irmaos.length : (tk.quantity ?? 1)
   const numero = irmaos.length > 1 ? idx + 1 : tk.ordem
+
+  // Endereço da casa. Nem toda unidade tem cadastrado, então tudo aqui é condicional —
+  // ingresso com "Endereço: —" é pior do que ingresso sem a linha.
+  const endereco = [tk.house_address, [tk.house_city, tk.house_state].filter(Boolean).join(' - ')]
+    .filter(Boolean).join(', ')
+  const mapa = endereco
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${tk.house_name}, ${endereco}`)}`
+    : null
+  const foneDigitos = (tk.house_phone ?? '').replace(/\D/g, '')
 
   const linha = (rot: string, val: string) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '7px 0', borderBottom: `1px solid ${C.brd}55` }}>
@@ -155,6 +168,30 @@ export function TicketPublicPage({ token }: { token: string }) {
           </div>
         )}
 
+        {/* Onde é. O ingresso é repassado no WhatsApp e aberto por quem talvez nunca
+            tenha ido na casa — e, com mais de uma unidade na conta, o nome não basta. */}
+        {endereco && (
+          <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: '14px 18px', marginTop: 16 }}>
+            <div style={{ color: C.mut, fontSize: 10, fontWeight: 800, letterSpacing: .6, marginBottom: 8 }}>ONDE É</div>
+            <div style={{ color: C.txt, fontSize: 14, fontWeight: 700, marginBottom: 2 }}>{tk.house_name}</div>
+            <div style={{ color: C.sub, fontSize: 13, lineHeight: 1.5 }}>{endereco}</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' as const }}>
+              {mapa && (
+                <a href={mapa} target="_blank" rel="noopener noreferrer"
+                  style={{ flex: '1 1 140px', textAlign: 'center' as const, background: C.acc + '1f', border: `1px solid ${C.acc}55`, color: C.acc, borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+                  📍 Como chegar
+                </a>
+              )}
+              {foneDigitos.length >= 10 && (
+                <a href={`https://wa.me/55${foneDigitos}`} target="_blank" rel="noopener noreferrer"
+                  style={{ flex: '1 1 140px', textAlign: 'center' as const, background: 'transparent', border: `1px solid ${C.brd}`, color: C.sub, borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+                  💬 Falar com a casa
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Identificação do titular — é o que a portaria confere contra o documento */}
         <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 16, padding: '14px 18px', marginTop: 16 }}>
           <div style={{ color: C.mut, fontSize: 10, fontWeight: 800, letterSpacing: .6, marginBottom: 6 }}>TITULAR DO INGRESSO</div>
@@ -162,7 +199,7 @@ export function TicketPublicPage({ token }: { token: string }) {
           {tk.buyer_cpf_mask && linha('CPF', tk.buyer_cpf_mask)}
           {linha('Tipo', tk.batch_name ?? '—')}
           {linha('Evento', tk.event_name)}
-          {linha('Local', tk.house_name)}
+          {!endereco && linha('Local', tk.house_name)}
           {tk.order_code && linha('Pedido', `#${tk.order_code}`)}
         </div>
 
