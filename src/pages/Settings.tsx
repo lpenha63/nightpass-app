@@ -80,6 +80,30 @@ function fmtCNPJ(v: string) {
          .replace(/^(\d{2})$/, '$1')
 }
 
+
+/**
+ * Meios de recebimento oferecidos ao cliente.
+ *
+ * `disponivel: false` aparece apagado e nao abre: e uma plataforma que o cofre ja
+ * sabe guardar, mas que ainda nao tem integracao (criar cobranca, QR, webhook).
+ * Mostrar como se funcionasse faria o cliente colar credencial e nao acontecer nada.
+ */
+const MEIOS: Array<{ id: string; nome: string; icone: string; resumo: string; disponivel: boolean }> = [
+  { id: 'pix_manual',  nome: 'PIX manual',    icone: '💳', disponivel: true,
+    resumo: 'Sem taxa de gateway. A entrada é confirmada à mão.' },
+  { id: 'mercadopago', nome: 'Mercado Pago',  icone: '🤖', disponivel: true,
+    resumo: 'PIX e cartão. Ingresso liberado sozinho.' },
+  { id: 'asaas',       nome: 'Asaas',         icone: '🏦', disponivel: true,
+    resumo: 'PIX com taxa menor. Ingresso liberado sozinho.' },
+  { id: 'pagseguro',   nome: 'PagSeguro',     icone: '🟡', disponivel: false, resumo: 'Integração ainda não disponível.' },
+  { id: 'stripe',      nome: 'Stripe',        icone: '🌐', disponivel: false, resumo: 'Integração ainda não disponível.' },
+]
+
+const selo = {
+  fontSize: 10, fontWeight: 700, borderRadius: 999,
+  padding: '1px 7px', border: '1px solid', letterSpacing: '.02em',
+} as const
+
 export function SettingsPage({ house, session, sub, refreshSub }: Props) {
   const INP: React.CSSProperties = {
     width: '100%', background: C.bg, border: `1px solid ${C.brd}`,
@@ -116,6 +140,14 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
   const [asaasBusy, setAsaasBusy] = useState(false)
   const [asaasConta, setAsaasConta] = useState<string | null>(null)
   const [verAsaas, setVerAsaas] = useState(false)
+  const [meiosAtivos, setMeiosAtivos] = useState<string[]>([])
+  const [meioPrincipal, setMeioPrincipal] = useState<string | null>(null)
+  const [meioAberto, setMeioAberto] = useState<string | null>(null)
+
+  const painel = {
+    background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 12,
+    padding: '16px 18px',
+  } as const
   const [painelOn, setPainelOn] = useState(painelUnidadesLigado())
   // Dias em que a casa abre SEM evento (rotina de bar). Sem isto, a criação
   // automática do Dia de operação abriria a casa no dia em que ela está fechada.
@@ -300,9 +332,15 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
           mp_access_token: '',
         })
       }
-      const pag = (pagR.data as Array<{ provedores?: string[] }> | null)?.[0]
-      setMpConfigurado((pag?.provedores ?? []).includes('mercadopago'))
-      setAsaasConfigurado((pag?.provedores ?? []).includes('asaas'))
+      const meios = (pagR.data ?? []) as Array<{ provider: string; prioridade: number }>
+      const ids = meios.map(m => m.provider)
+      setMeiosAtivos(ids)
+      setMpConfigurado(ids.includes('mercadopago'))
+      setAsaasConfigurado(ids.includes('asaas'))
+      // O principal e o de menor prioridade entre os gateways (o PIX manual e o
+      // ultimo recurso, nao concorre).
+      const gws = meios.filter(m => m.provider !== 'pix_manual').sort((a, b) => a.prioridade - b.prioridade)
+      setMeioPrincipal(gws[0]?.provider ?? null)
       if (wr.data?.length) setWaConfig(wr.data[0])
       else setWaConfig({ ...WDEF, house_id: house.id })
       setLoading(false)
@@ -506,6 +544,13 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
    * API e so entao guarda no cofre. O webhook da Asaas e por conta, nao por
    * cobranca — se ninguem registrasse, o ingresso nunca liberaria sozinho.
    */
+  async function definirPrincipal(id: string) {
+    const { error } = await supabase.rpc('set_payment_primary', { p_house: house.id, p_provider: id })
+    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    setMeioPrincipal(id)
+    sT(setToast, `${MEIOS.find(m => m.id === id)?.nome ?? id} passou a receber o PIX das compras.`, 'success')
+  }
+
   async function conectarAsaas() {
     const k = asaasKey.trim()
     if (!k) return
@@ -850,64 +895,6 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
         </div>
       </Section>
 
-      {/* ── PIX ── */}
-      <Section title="Pagamento PIX Manual" icon="💳">
-        <div style={{ background: C.acc + '10', border: `1px solid ${C.acc}22`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: C.sub }}>
-          Usado quando o Mercado Pago não está configurado. O comprador vê esta chave na página de compra.
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <Field label="CHAVE PIX" hint="CPF, CNPJ, e-mail, telefone ou chave aleatória">
-            <input style={INP} value={config.pix_key} onChange={set('pix_key')} placeholder="Ex: 11999999999" />
-          </Field>
-          <Field label="FAVORECIDO" hint="Nome que aparece para o comprador">
-            <input style={INP} value={config.pix_holder} onChange={set('pix_holder')} placeholder="Nome ou razão social" />
-          </Field>
-        </div>
-      </Section>
-
-      {/* ── MERCADO PAGO ── */}
-      <Section title="Mercado Pago" icon="🤖">
-        <div style={{ background: C.grn + '10', border: `1px solid ${C.grn}22`, borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
-          <div style={{ color: C.grn, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>✅ Ingresso liberado automaticamente após pagamento</div>
-          <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.6 }}>
-            1. Acesse <span style={{ color: C.acc }}>developers.mercadopago.com.br</span><br />
-            2. Crie um app em "Suas integrações"<br />
-            3. Copie o <strong style={{ color: C.sub }}>Access Token de produção</strong> (APP_USR-...)
-          </div>
-        </div>
-        {/* Estado, nao valor. O token e gravado num cofre que o navegador nao le —
-            nem o seu dono. Reexibir um segredo so serve para ele vazar de novo. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13, fontWeight: 700,
-          color: mpConfigurado ? C.grn : C.mut }}>
-          <span>{mpConfigurado ? '🔒 Token configurado' : '○ Nenhum token configurado'}</span>
-          {mpConfigurado && <span style={{ color: C.mut, fontWeight: 400, fontSize: 12 }}>
-            — para trocar, cole o novo abaixo
-          </span>}
-        </div>
-        <Field label={mpConfigurado ? 'SUBSTITUIR O TOKEN' : 'ACCESS TOKEN'}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input style={{ ...INP, flex: 1, fontFamily: showMpToken ? 'monospace' : 'inherit' }}
-              type={showMpToken ? 'text' : 'password'} value={config.mp_access_token} onChange={set('mp_access_token')}
-              placeholder="APP_USR-..." autoComplete="off" />
-            <button onClick={() => setShowMpToken(p => !p)}
-              style={{ background: C.bg, border: `1px solid ${C.brd}`, color: C.mut, borderRadius: 10, padding: '0 12px', cursor: 'pointer', fontSize: 15, flexShrink: 0 }}>
-              {showMpToken ? '🙈' : '👁️'}
-            </button>
-          </div>
-        </Field>
-        <Btn onClick={salvarMpToken} disabled={salvandoMp || !config.mp_access_token.trim()}
-          style={{ width: '100%', marginBottom: 8 }}>
-          {salvandoMp ? 'Guardando...' : '🔒 Guardar token'}
-        </Btn>
-        <div style={{ color: C.mut, fontSize: 11, marginBottom: 12, lineHeight: 1.5 }}>
-          O token é gravado por este botão, não pelo 💾 Salvar Configurações.
-        </div>
-        {/* Sem nada digitado, testa o token ja guardado — o servidor busca no cofre. */}
-        <button onClick={testMp} disabled={testingMp || (!config.mp_access_token.trim() && !mpConfigurado)} {...statusBtn(mpStatus, '🔍 Testar token', testingMp)}>
-          {statusBtn(mpStatus, '🔍 Testar token', testingMp).children}
-        </button>
-      </Section>
-
       {/* ── WHATSAPP ── */}
       <Section title="Integração WhatsApp" icon="💬">
         <div style={{ background: C.acc + '10', border: `1px solid ${C.acc}22`, borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
@@ -1028,8 +1015,125 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
         {saving ? 'Salvando...' : '💾 Salvar Configurações'}
       </Btn>
 
-      {/* ── ASAAS ── */}
-      <Section title="Asaas" icon="🏦">
+      {/* ── COMO A CASA RECEBE ──
+          Um seletor no lugar de tres formularios empilhados: a cada gateway novo a
+          tela ganha um cartao, nao mais uma secao inteira, e o cliente configura
+          apenas o meio que usa. */}
+      <Section title="Como a casa recebe" icon="💰">
+        <div style={{ color: C.sub, fontSize: 13, marginBottom: 14, lineHeight: 1.6 }}>
+          Escolha por onde o dinheiro dos ingressos entra. Dá para configurar mais de um —
+          o marcado como <strong style={{ color: C.txt }}>principal</strong> é quem atende
+          o PIX da compra.
+        </div>
+
+        <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10, marginBottom: 18 }}>
+          {MEIOS.map(m => {
+            const configurado = meiosAtivos.includes(m.id)
+            const principal = meioPrincipal === m.id
+            const aberto = meioAberto === m.id
+            return (
+              <button key={m.id} type="button"
+                onClick={() => m.disponivel && setMeioAberto(aberto ? null : m.id)}
+                disabled={!m.disponivel}
+                style={{
+                  textAlign: 'left', cursor: m.disponivel ? 'pointer' : 'not-allowed',
+                  background: aberto ? C.acc + '18' : C.bg,
+                  border: `1px solid ${aberto ? C.acc + '66' : configurado ? C.grn + '44' : C.brd}`,
+                  borderRadius: 12, padding: '12px 14px', color: C.txt,
+                  fontFamily: 'inherit', opacity: m.disponivel ? 1 : 0.45,
+                  display: 'grid', gap: 4,
+                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span style={{ fontSize: 16 }}>{m.icone}</span>
+                  <span style={{ fontWeight: 700, fontSize: 13.5 }}>{m.nome}</span>
+                </div>
+                <div style={{ color: C.mut, fontSize: 11, lineHeight: 1.45 }}>{m.resumo}</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                  {!m.disponivel && <span style={{ ...selo, color: C.mut, borderColor: C.brd }}>em breve</span>}
+                  {configurado && <span style={{ ...selo, color: C.grn, borderColor: C.grn + '55' }}>configurado</span>}
+                  {principal && <span style={{ ...selo, color: C.acc, borderColor: C.acc + '66' }}>principal</span>}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Definir o principal só faz sentido com mais de um meio de verdade configurado */}
+        {meiosAtivos.filter(x => x !== 'pix_manual').length > 1 && (
+          <div style={{ background: C.gold + '10', border: `1px solid ${C.gold}33`, borderRadius: 10, padding: '12px 14px', marginBottom: 18 }}>
+            <div style={{ color: C.gold, fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+              Mais de um meio configurado — qual recebe o PIX da compra?
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {meiosAtivos.filter(x => x !== 'pix_manual').map(id => (
+                <button key={id} type="button" onClick={() => definirPrincipal(id)}
+                  style={{
+                    background: meioPrincipal === id ? C.acc + '22' : 'transparent',
+                    border: `1px solid ${meioPrincipal === id ? C.acc + '66' : C.brd}`,
+                    color: meioPrincipal === id ? C.acc : C.sub,
+                    borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 700,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                  {MEIOS.find(m => m.id === id)?.nome ?? id}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {meioAberto === 'pix_manual' && (<div style={painel}>
+        <div style={{ background: C.acc + '10', border: `1px solid ${C.acc}22`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: C.sub }}>
+          Usado quando o Mercado Pago não está configurado. O comprador vê esta chave na página de compra.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Field label="CHAVE PIX" hint="CPF, CNPJ, e-mail, telefone ou chave aleatória">
+            <input style={INP} value={config.pix_key} onChange={set('pix_key')} placeholder="Ex: 11999999999" />
+          </Field>
+          <Field label="FAVORECIDO" hint="Nome que aparece para o comprador">
+            <input style={INP} value={config.pix_holder} onChange={set('pix_holder')} placeholder="Nome ou razão social" />
+          </Field>
+        </div></div>)}
+        {meioAberto === 'mercadopago' && (<div style={painel}>
+        <div style={{ background: C.grn + '10', border: `1px solid ${C.grn}22`, borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+          <div style={{ color: C.grn, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>✅ Ingresso liberado automaticamente após pagamento</div>
+          <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.6 }}>
+            1. Acesse <span style={{ color: C.acc }}>developers.mercadopago.com.br</span><br />
+            2. Crie um app em "Suas integrações"<br />
+            3. Copie o <strong style={{ color: C.sub }}>Access Token de produção</strong> (APP_USR-...)
+          </div>
+        </div>
+        {/* Estado, nao valor. O token e gravado num cofre que o navegador nao le —
+            nem o seu dono. Reexibir um segredo so serve para ele vazar de novo. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13, fontWeight: 700,
+          color: mpConfigurado ? C.grn : C.mut }}>
+          <span>{mpConfigurado ? '🔒 Token configurado' : '○ Nenhum token configurado'}</span>
+          {mpConfigurado && <span style={{ color: C.mut, fontWeight: 400, fontSize: 12 }}>
+            — para trocar, cole o novo abaixo
+          </span>}
+        </div>
+        <Field label={mpConfigurado ? 'SUBSTITUIR O TOKEN' : 'ACCESS TOKEN'}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input style={{ ...INP, flex: 1, fontFamily: showMpToken ? 'monospace' : 'inherit' }}
+              type={showMpToken ? 'text' : 'password'} value={config.mp_access_token} onChange={set('mp_access_token')}
+              placeholder="APP_USR-..." autoComplete="off" />
+            <button onClick={() => setShowMpToken(p => !p)}
+              style={{ background: C.bg, border: `1px solid ${C.brd}`, color: C.mut, borderRadius: 10, padding: '0 12px', cursor: 'pointer', fontSize: 15, flexShrink: 0 }}>
+              {showMpToken ? '🙈' : '👁️'}
+            </button>
+          </div>
+        </Field>
+        <Btn onClick={salvarMpToken} disabled={salvandoMp || !config.mp_access_token.trim()}
+          style={{ width: '100%', marginBottom: 8 }}>
+          {salvandoMp ? 'Guardando...' : '🔒 Guardar token'}
+        </Btn>
+        <div style={{ color: C.mut, fontSize: 11, marginBottom: 12, lineHeight: 1.5 }}>
+          O token é gravado por este botão, não pelo 💾 Salvar Configurações.
+        </div>
+        {/* Sem nada digitado, testa o token ja guardado — o servidor busca no cofre. */}
+        <button onClick={testMp} disabled={testingMp || (!config.mp_access_token.trim() && !mpConfigurado)} {...statusBtn(mpStatus, '🔍 Testar token', testingMp)}>
+          {statusBtn(mpStatus, '🔍 Testar token', testingMp).children}
+        </button></div>)}
+        {meioAberto === 'asaas' && (<div style={painel}>
         <div style={{ background: C.acc + '10', border: `1px solid ${C.acc}22`, borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
           <div style={{ color: C.acc, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Alternativa ao Mercado Pago</div>
           <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.6 }}>
@@ -1069,6 +1173,12 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
           <div style={{ background: C.gold + '12', border: `1px solid ${C.gold}33`, borderRadius: 10, padding: '10px 12px', marginTop: 12, color: C.gold, fontSize: 12, lineHeight: 1.5 }}>
             As duas contas estão conectadas. O PIX dos ingressos sai pela <strong>Asaas</strong>;
             o Mercado Pago segue atendendo cartão e as demais formas.
+          </div>
+        )}</div>)}
+
+        {!meioAberto && (
+          <div style={{ color: C.mut, fontSize: 12.5, textAlign: 'center', padding: '8px 0' }}>
+            Toque em um meio acima para configurar.
           </div>
         )}
       </Section>

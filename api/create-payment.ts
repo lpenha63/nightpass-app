@@ -57,13 +57,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // publicamente (as paginas de ingresso mostram nome e endereco da casa) e RLS e por
   // LINHA, nao por coluna — enquanto o token morou la, qualquer um o lia pela API.
   // Aqui isso funciona porque `sb` e service_role, que ignora RLS.
-  const [{ data: batch }, { data: house }, segredo, { data: ev }, credAsaas] = await Promise.all([
+  const [{ data: batch }, { data: house }, segredo, { data: ev }, credAsaas, prefs] = await Promise.all([
     sb.from('ticket_batches').select('price_cents,name,quantity,sold,active,service_fee_pct,nominal').eq('id', batch_id).single(),
     sb.from('houses').select('pix_key,pix_holder,name').eq('id', house_id).single(),
     tokenMercadoPago(sb, house_id),
     sb.from('events').select('name').eq('id', event_id).single(),
     chaveAsaas(sb, house_id),
+    sb.from('house_payment_providers').select('provider,priority')
+      .eq('house_id', house_id).eq('active', true).order('priority'),
   ])
+  // Empate mantem a Asaas na frente, que era o comportamento anterior.
+  const ordem = (prefs.data ?? []) as Array<{ provider: string; priority: number }>
+  const pri = (n: string) => ordem.find(o => o.provider === n)?.priority ?? 100
+  const asaasPrimeiro = pri('asaas') <= pri('mercadopago')
   const mpToken: string | null = segredo
 
   if (!batch) return res.status(404).json({ error: 'Lote não encontrado' })
@@ -119,7 +125,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ela quer receber. Fluxo da Asaas exige cliente cadastrado antes da cobranca, e o
   // aviso de pagamento e por conta (registrado uma vez em /api/asaas-connect), nao por
   // cobranca como no MP — por isso aqui nao vai notification_url.
-  if (metodo === 'pix' && credAsaas) {
+  // Qual gateway atende: o de menor `priority`, escolhido pelo dono da casa na tela de
+  // Configuracoes. Antes a Asaas vinha na frente por estar escrita primeiro aqui — uma
+  // decisao de negocio escondida na ordem do codigo, que ninguem tinha como mudar.
+  if (metodo === 'pix' && credAsaas && asaasPrimeiro) {
     try {
       const cli = await asaas<{ id?: string }>(credAsaas.api_key, '/customers', {
         method: 'POST',
