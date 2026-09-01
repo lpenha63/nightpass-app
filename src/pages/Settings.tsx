@@ -432,6 +432,13 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
     }).eq('id', house.id)
     setSaving(false)
     if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    // Campos de senha preenchidos + este botao = a pessoa achou que estava trocando a
+    // senha. Dizer so "Configuracoes salvas!" aqui mandava embora quem acabou de NAO
+    // trocar a senha — foi assim que uma senha vazada continuou valendo.
+    if (currentPass || newPass || confirmPass) {
+      sT(setToast, '✅ Configurações salvas — mas a SENHA não. Use o botão 🔒 Alterar Senha.', 'warn')
+      return
+    }
     sT(setToast, '✅ Configurações salvas!', 'success')
     setMpStatus('idle')
   }
@@ -927,6 +934,10 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
         </div>
       </Section>
 
+      <Btn onClick={saveHouse} disabled={saving} style={{ width: '100%', padding: 14, fontSize: 15 }}>
+        {saving ? 'Salvando...' : '💾 Salvar Configurações'}
+      </Btn>
+
       {/* ── TROCA DE SENHA ── */}
       <Section title="Troca de Senha" icon="🔒">
         <div style={{ color: C.sub, fontSize: 13, marginBottom: 14 }}>
@@ -954,14 +965,17 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
             onChange={e => setConfirmPass(e.target.value)} placeholder="Repita a senha"
             onKeyDown={e => e.key === 'Enter' && changePassword()} autoComplete="new-password" />
         </Field>
-        <Btn onClick={changePassword} disabled={changingPass || !currentPass || !newPass || !confirmPass} variant="ghost" style={{ fontSize: 13 }}>
+        {/* Era `ghost` — quase invisivel ao lado do "Salvar Configuracoes" logo abaixo.
+            Trocar senha nao pode depender de a pessoa achar o botao discreto. */}
+        <Btn onClick={changePassword} disabled={changingPass || !currentPass || !newPass || !confirmPass}
+          style={{ width: '100%', padding: 12 }}>
           {changingPass ? 'Alterando...' : '🔒 Alterar Senha'}
         </Btn>
+        <div style={{ color: C.mut, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          A senha só muda por este botão. O <b>💾 Salvar Configurações</b> grava os dados
+          do estabelecimento e não mexe na senha.
+        </div>
       </Section>
-
-      <Btn onClick={saveHouse} disabled={saving} style={{ width: '100%', padding: 14, fontSize: 15 }}>
-        {saving ? 'Salvando...' : '💾 Salvar Configurações'}
-      </Btn>
 
       {/* ── SAIR DA CONTA ── */}
       <Section title="Conta" icon="👤">
