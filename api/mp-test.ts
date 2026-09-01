@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { admin, tokenMercadoPago } from './_gateways'
+import { admin, tokenMercadoPago } from './_gateways.js'
 
 // Valida o Access Token do Mercado Pago.
 // Precisa rodar no servidor: a API do MP não envia cabeçalho CORS, então o mesmo fetch

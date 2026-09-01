@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { tokenMercadoPago } from './_gateways'
+import { tokenMercadoPago, chaveAsaas, asaas } from './_gateways.js'
 import { sendTicketWhatsApp } from './_ticket-wa.js'
 import { sendTicketEmail } from './_ticket-email.js'
 
@@ -57,11 +57,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // publicamente (as paginas de ingresso mostram nome e endereco da casa) e RLS e por
   // LINHA, nao por coluna — enquanto o token morou la, qualquer um o lia pela API.
   // Aqui isso funciona porque `sb` e service_role, que ignora RLS.
-  const [{ data: batch }, { data: house }, segredo, { data: ev }] = await Promise.all([
+  const [{ data: batch }, { data: house }, segredo, { data: ev }, credAsaas] = await Promise.all([
     sb.from('ticket_batches').select('price_cents,name,quantity,sold,active,service_fee_pct,nominal').eq('id', batch_id).single(),
     sb.from('houses').select('pix_key,pix_holder,name').eq('id', house_id).single(),
     tokenMercadoPago(sb, house_id),
     sb.from('events').select('name').eq('id', event_id).single(),
+    chaveAsaas(sb, house_id),
   ])
   const mpToken: string | null = segredo
 
@@ -112,6 +113,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Cartão não pode passar pelo nosso servidor, então o comprador paga no ambiente do MP.
   const appUrl = process.env.APP_URL ?? 'https://nightpass-app.vercel.app'
   let mpErro: string | null = null
+
+  // ── Asaas: PIX com QR na nossa propria pagina ──
+  // Vem antes do Mercado Pago de proposito: se a casa conectou a Asaas, e por ela que
+  // ela quer receber. Fluxo da Asaas exige cliente cadastrado antes da cobranca, e o
+  // aviso de pagamento e por conta (registrado uma vez em /api/asaas-connect), nao por
+  // cobranca como no MP — por isso aqui nao vai notification_url.
+  if (metodo === 'pix' && credAsaas) {
+    try {
+      const cli = await asaas<{ id?: string }>(credAsaas.api_key, '/customers', {
+        method: 'POST',
+        body: {
+          name: buyer_name,
+          cpfCnpj: (buyer_cpf ?? '').replace(/\D/g, '') || undefined,
+          email: buyer_email || undefined,
+          mobilePhone: buyer_phone.replace(/\D/g, ''),
+          externalReference: order.id,
+        },
+      })
+      if (!cli.ok || !cli.data?.id) throw new Error(cli.erro ?? 'Asaas nao criou o cliente')
+
+      // Vencimento hoje: ingresso de festa nao tem por que vencer depois. O QR do PIX
+      // continua pagavel ate o vencimento.
+      const hoje = new Date().toISOString().slice(0, 10)
+      const cob = await asaas<{ id?: string }>(credAsaas.api_key, '/payments', {
+        method: 'POST',
+        body: {
+          customer: cli.data.id,
+          billingType: 'PIX',
+          value: amount_cents / 100,
+          dueDate: hoje,
+          description: `${quantity}x ${batch.name} - ${ev?.name ?? house.name}`,
+          externalReference: order.id,
+        },
+      })
+      if (!cob.ok || !cob.data?.id) throw new Error(cob.erro ?? 'Asaas nao criou a cobranca')
+
+      const qr = await asaas<{ encodedImage?: string; payload?: string }>(
+        credAsaas.api_key, `/payments/${cob.data.id}/pixQrCode`)
+      if (!qr.ok || !qr.data?.payload) throw new Error(qr.erro ?? 'Asaas nao devolveu o QR do PIX')
+
+      await sb.from('ticket_orders')
+        .update({ payment_id: String(cob.data.id), payment_method: 'pix' }).eq('id', order.id)
+
+      // Mesmo formato de resposta do MP: a pagina de compra nao precisa saber qual
+      // gateway atendeu.
+      return res.json({
+        mode: 'mp',
+        order_id: order.id,
+        amount_cents,
+        service_fee_cents,
+        qr_code: qr.data.payload,
+        qr_code_base64: qr.data.encodedImage,
+      })
+    } catch (e) {
+      console.error('Asaas PIX error:', e)
+      mpErro = (e as Error)?.message ?? 'Falha ao gerar o PIX na Asaas'
+      // Cai para o fluxo abaixo: tenta o Mercado Pago e, sem ele, a chave PIX manual.
+    }
+  }
 
   // ── PIX direto: QR gerado aqui e exibido na nossa página ──
   // Sem tela do Mercado Pago, sem login e sem captcha. Também não esbarra no bloqueio

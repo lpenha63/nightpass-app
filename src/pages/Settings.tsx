@@ -111,6 +111,11 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
   // So o SIM/NAO. O valor do token nunca chega aqui.
   const [mpConfigurado, setMpConfigurado] = useState(false)
   const [salvandoMp, setSalvandoMp] = useState(false)
+  const [asaasConfigurado, setAsaasConfigurado] = useState(false)
+  const [asaasKey, setAsaasKey] = useState('')
+  const [asaasBusy, setAsaasBusy] = useState(false)
+  const [asaasConta, setAsaasConta] = useState<string | null>(null)
+  const [verAsaas, setVerAsaas] = useState(false)
   const [painelOn, setPainelOn] = useState(painelUnidadesLigado())
   // Dias em que a casa abre SEM evento (rotina de bar). Sem isto, a criação
   // automática do Dia de operação abriria a casa no dia em que ela está fechada.
@@ -297,6 +302,7 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
       }
       const pag = (pagR.data as Array<{ provedores?: string[] }> | null)?.[0]
       setMpConfigurado((pag?.provedores ?? []).includes('mercadopago'))
+      setAsaasConfigurado((pag?.provedores ?? []).includes('asaas'))
       if (wr.data?.length) setWaConfig(wr.data[0])
       else setWaConfig({ ...WDEF, house_id: house.id })
       setLoading(false)
@@ -492,6 +498,39 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
     setMpConfigurado(true)
     setConfig(c => ({ ...c, mp_access_token: '' }))   // some da tela junto
     sT(setToast, '🔒 Token guardado. Ele não volta a aparecer aqui.', 'success')
+  }
+
+  /**
+   * Conecta a conta Asaas. Diferente do Mercado Pago, aqui a chave vai para um
+   * endpoint nosso: ele valida contra a Asaas, REGISTRA O AVISO DE PAGAMENTO pela
+   * API e so entao guarda no cofre. O webhook da Asaas e por conta, nao por
+   * cobranca — se ninguem registrasse, o ingresso nunca liberaria sozinho.
+   */
+  async function conectarAsaas() {
+    const k = asaasKey.trim()
+    if (!k) return
+    setAsaasBusy(true); setAsaasConta(null)
+    try {
+      const { data: sess } = await supabase.auth.getSession()
+      const r = await fetch('/api/asaas-connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sess?.session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ house_id: house.id, api_key: k }),
+      })
+      const j = await r.json()
+      if (!j.ok) { sT(setToast, j.error ?? 'Não foi possível conectar', 'error'); return }
+      setAsaasConfigurado(true)
+      setAsaasConta(j.conta ?? null)
+      setAsaasKey('')
+      sT(setToast, j.sandbox
+        ? '⚠️ Conectado em HOMOLOGAÇÃO — nenhuma venda cai de verdade.'
+        : `🔒 Asaas conectada${j.conta ? ' — ' + j.conta : ''}.`, j.sandbox ? 'warn' : 'success')
+    } catch (e) {
+      sT(setToast, 'Erro: ' + ((e as Error)?.message ?? 'falha ao conectar'), 'error')
+    } finally { setAsaasBusy(false) }
   }
 
   async function testMp() {
@@ -988,6 +1027,51 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
       <Btn onClick={saveHouse} disabled={saving} style={{ width: '100%', padding: 14, fontSize: 15 }}>
         {saving ? 'Salvando...' : '💾 Salvar Configurações'}
       </Btn>
+
+      {/* ── ASAAS ── */}
+      <Section title="Asaas" icon="🏦">
+        <div style={{ background: C.acc + '10', border: `1px solid ${C.acc}22`, borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+          <div style={{ color: C.acc, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Alternativa ao Mercado Pago</div>
+          <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.6 }}>
+            1. Entre na sua conta Asaas<br />
+            2. Vá em <strong style={{ color: C.sub }}>Integrações → Chave de API</strong><br />
+            3. Copie a chave (começa com <span style={{ fontFamily: 'monospace' }}>$aact_</span>)
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13, fontWeight: 700,
+          color: asaasConfigurado ? C.grn : C.mut }}>
+          <span>{asaasConfigurado ? '🔒 Conta conectada' : '○ Nenhuma conta conectada'}</span>
+          {asaasConta && <span style={{ color: C.mut, fontWeight: 400, fontSize: 12 }}>— {asaasConta}</span>}
+        </div>
+
+        <Field label={asaasConfigurado ? 'SUBSTITUIR A CHAVE' : 'CHAVE DE API'}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input style={{ ...INP, flex: 1, fontFamily: verAsaas ? 'monospace' : 'inherit' }}
+              type={verAsaas ? 'text' : 'password'} value={asaasKey}
+              onChange={e => setAsaasKey(e.target.value)}
+              placeholder="$aact_..." autoComplete="off" />
+            <button onClick={() => setVerAsaas(p => !p)}
+              style={{ background: C.bg, border: `1px solid ${C.brd}`, color: C.mut, borderRadius: 10, padding: '0 12px', cursor: 'pointer', fontSize: 15, flexShrink: 0 }}>
+              {verAsaas ? '🙈' : '👁️'}
+            </button>
+          </div>
+        </Field>
+        <Btn onClick={conectarAsaas} disabled={asaasBusy || !asaasKey.trim()} style={{ width: '100%' }}>
+          {asaasBusy ? 'Conectando...' : '🔗 Conectar conta Asaas'}
+        </Btn>
+        <div style={{ color: C.mut, fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          Ao conectar, o aviso de pagamento é configurado automaticamente na sua conta —
+          você não precisa mexer em webhook. Chave de homologação (<span style={{ fontFamily: 'monospace' }}>$aact_hmlg_</span>)
+          é aceita para testes e avisa na tela.
+        </div>
+        {asaasConfigurado && mpConfigurado && (
+          <div style={{ background: C.gold + '12', border: `1px solid ${C.gold}33`, borderRadius: 10, padding: '10px 12px', marginTop: 12, color: C.gold, fontSize: 12, lineHeight: 1.5 }}>
+            As duas contas estão conectadas. O PIX dos ingressos sai pela <strong>Asaas</strong>;
+            o Mercado Pago segue atendendo cartão e as demais formas.
+          </div>
+        )}
+      </Section>
 
       {/* ── TROCA DE SENHA ── */}
       <Section title="Troca de Senha" icon="🔒">

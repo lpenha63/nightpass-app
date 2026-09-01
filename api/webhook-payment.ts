@@ -1,8 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { tokenMercadoPago } from './_gateways'
-import { sendTicketWhatsApp } from './_ticket-wa.js'
-import { sendTicketEmail } from './_ticket-email.js'
+import { tokenMercadoPago } from './_gateways.js'
+import { confirmarPedido } from './_confirmar-pedido.js'
 
 function supabaseAdmin() {
   return createClient(
@@ -66,36 +65,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'MP verify failed' })
   }
 
-  // Confirm order and generate tickets
-  await sb.from('ticket_orders').update({ payment_status: 'paid' }).eq('id', order.id)
-
-  // Ingresso nominal: usa os nomes coletados na compra (guardados no pedido, porque
-  // os ingressos só nascem aqui, quando o pagamento confirma).
-  const nomes: string[] = Array.isArray(order.holder_names) ? order.holder_names : []
-  const tickets = Array.from({ length: order.quantity }, (_, i) => ({
-    order_id: order.id,
-    event_id: order.event_id,
-    house_id: order.house_id,
-    token: crypto.randomUUID(),
-    holder_name: String(nomes[i] ?? '').trim() || order.buyer_name,
-    checked_in: false,
-  }))
-
-  await sb.from('tickets').insert(tickets)
-  await sb.rpc('increment_batch_sold', { p_batch_id: order.batch_id, p_qty: order.quantity })
-
-  // Entrega o link do ingresso — sem isso o comprador só teria o QR na aba aberta na hora.
-  // Os dois canais são best-effort e independentes: falha num não impede o outro.
-  await Promise.allSettled([
-    sendTicketWhatsApp(sb, {
-      houseId: order.house_id, eventId: order.event_id, orderId: order.id,
-      buyerName: order.buyer_name, buyerPhone: order.buyer_phone, quantity: order.quantity,
-    }),
-    sendTicketEmail(sb, {
-      houseId: order.house_id, eventId: order.event_id, orderId: order.id,
-      buyerName: order.buyer_name, buyerEmail: order.buyer_email, quantity: order.quantity,
-    }),
-  ])
+  // Daqui para a frente e identico para qualquer gateway: o webhook so precisava
+  // provar que o pagamento e legitimo.
+  await confirmarPedido(sb, order)
 
   res.json({ ok: true })
 }
