@@ -7,6 +7,7 @@ import { sT, _err, type ToastState } from '../utils/toast'
 import { sendWADirect } from '../utils/whatsapp'
 import { QuickWA, type QuickWATarget } from '../components/QuickWA'
 import type { House, Client } from '../types'
+import { NASCIMENTO } from '../utils/limitesDeData'
 
 interface Props { house: House; user: { id: string; email: string }; role: string }
 
@@ -635,7 +636,7 @@ export function ClientsPage({ house, user }: Props) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Nascimento *</label>
-              <input type="date" {...inp()} value={form.birth_date} onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} /></div>
+              <input type="date" min={NASCIMENTO.min} max={NASCIMENTO.max} {...inp()} value={form.birth_date} onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} /></div>
             <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>E-mail (opcional)</label>
               <input {...inp()} type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@exemplo.com" /></div>
           </div>

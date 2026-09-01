@@ -10,6 +10,7 @@ import { esperadoDaReserva } from '../utils/reservas'
 import type { House, Event, ArtistEntry, PromotionEntry, PromoterPriceMode, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 import { canUseFeature } from '../constants/permissions'
+import { NASCIMENTO, AGENDA, AGENDA_EDICAO, dataPlausivel } from '../utils/limitesDeData'
 
 function fmtMoneyInput(v: number | string): string {
   const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')) || 0
@@ -34,6 +35,8 @@ interface Props { house: House; role?: string; allowedPages?: string[]; onGoToRe
  * PostgREST recusa o UPDATE INTEIRO se receber um campo que nao e coluna, com a
  * mensagem "Could not find the 'X' column of 'events' in the schema cache".
  */
+
+
 interface EventUiCounts {
   checkinCount?: number
   pagantesCount?: number
@@ -2198,7 +2201,36 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     await supabase.from('event_tasks').insert(rows)
   }
 
+  // Criar olha para a frente; editar precisa alcancar o que ja passou.
+  const faixaData = editing ? AGENDA_EDICAO : AGENDA
+
   function save() {
+    // Ate aqui save() nao validava nada: dava para gravar evento sem nome e com
+    // qualquer data. O banco ficou com registros em 0026, 2006 e 2016, e um evento
+    // sem nome nenhum.
+    const nome = String(form.name ?? '').trim()
+    if (!nome) { st2('Dê um nome ao evento.', 'warn'); return }
+
+    const data = String(form.event_date ?? '').trim()
+    if (!data) { st2('Informe a data do evento.', 'warn'); return }
+    if (!dataPlausivel(data, faixaData)) {
+      st2(!editing && data < AGENDA.min
+        ? 'Evento novo não pode ser marcado para uma data que já passou.'
+        : `Ano ${data.slice(0, 4)} não parece certo — confira a data.`, 'warn')
+      return
+    }
+
+    // Duplicata na mesma data. Nao bloqueia: existe casa com duas festas no mesmo dia.
+    // Mas pergunta, porque o caso comum e clique repetido no salvar — foi o que gerou
+    // tres "TERCA BANDIDA" iguais em 30/06.
+    if (!editing) {
+      const mesmoDia = events.filter(e => e.event_date === data && e.status !== 'cancelado')
+      if (mesmoDia.length > 0) {
+        const lista = mesmoDia.map(e => `“${e.name}”`).join(', ')
+        if (!confirm(`Já existe ${mesmoDia.length > 1 ? 'evento' : 'o evento'} ${lista} nesta data.\n\nCriar outro mesmo assim?`)) return
+      }
+    }
+
     // Campos que nao podem ir no payload: os contadores de tela (ver CAMPOS_SO_DA_TELA),
     // a chave e a data de criacao, e os campos de cache do artista que hoje vivem em
     // `artists`. Qualquer um deles faz o PostgREST recusar a gravacao inteira.
@@ -2977,7 +3009,11 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Data</label>
-                <input type="date" {...inp} value={String(form.event_date ?? '')} onChange={e => setF('event_date', e.target.value)} />
+                {/* min/max fazem o proprio campo recusar ano absurdo. No <input type="date">
+                    o segmento do ano aceita qualquer numero — digitar "26" grava o ano 26,
+                    e foi assim que nasceram eventos em 0026 e 2006. */}
+                <input type="date" {...inp} min={faixaData.min} max={faixaData.max}
+                  value={String(form.event_date ?? '')} onChange={e => setF('event_date', e.target.value)} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Gênero</label>
@@ -3992,7 +4028,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
           </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nascimento</label>
-            <input type="date" value={completeRGForm.birth_date} onChange={e => setCompleteRGForm(p => ({ ...p, birth_date: e.target.value }))}
+            <input type="date" min={NASCIMENTO.min} max={NASCIMENTO.max} value={completeRGForm.birth_date} onChange={e => setCompleteRGForm(p => ({ ...p, birth_date: e.target.value }))}
               style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </div>
           <div style={{ display: 'flex', gap: 10 }}>

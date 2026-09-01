@@ -7,6 +7,7 @@ import { sT, type ToastState } from '../utils/toast'
 import { sendWADirect } from '../utils/whatsapp'
 import { parseGuestsXlsx } from '../utils/importGuests'
 import type { House } from '../types'
+import { AGENDA, AGENDA_EDICAO, NASCIMENTO, dataPlausivel } from '../utils/limitesDeData'
 
 interface Props {
   house: House
@@ -418,6 +419,13 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   async function saveRes() {
     if (!form.name.trim()) { sT(setToast, 'Nome do responsável obrigatório', 'error'); return }
     if ((form.phone || '').replace(/\D/g, '').length < 10) { sT(setToast, 'Celular obrigatório', 'error'); return }
+    const dataRes = form.reservation_date || selDate
+    if (!dataPlausivel(dataRes, editing ? AGENDA_EDICAO : AGENDA)) {
+      sT(setToast, !editing && dataRes < AGENDA.min
+        ? 'Reserva nova não pode ser marcada para uma data que já passou.'
+        : `Ano ${dataRes.slice(0, 4)} não parece certo — confira a data.`, 'error')
+      return
+    }
     const isFree = form.payment_status === 'free'
     const baseCents = (form.amount_cents as number) || 0
     const optCents = itemsTotal(formItems)
@@ -833,7 +841,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           {/* ── Linha: Data | Nome | Celular ── */}
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Data do Evento *</label>
-            <input type="date" style={SL} value={form.reservation_date} onChange={e => onFormDateChange(e.target.value)} />
+            {/* Criar olha para a frente; editar precisa alcancar reserva que ja passou. */}
+            <input type="date" min={(editing ? AGENDA_EDICAO : AGENDA).min} max={AGENDA.max} style={SL} value={form.reservation_date} onChange={e => onFormDateChange(e.target.value)} />
           </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nome do Responsável *</label>
@@ -1809,7 +1818,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   />
                   <div style={{ position: 'relative' }}>
                     <input
-                      type="date"
+                      type="date" min={NASCIMENTO.min} max={NASCIMENTO.max}
                       style={{ ...SL, fontSize: 13, color: newGuest.birth_date ? C.txt : C.mut }}
                       value={newGuest.birth_date}
                       onChange={e => setNewGuest(p => ({ ...p, birth_date: e.target.value }))}
