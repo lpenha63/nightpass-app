@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>NightPass — Minha Agenda</title>
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="/agenda.webmanifest">
 <meta name="theme-color" content="#0a0a0f">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -165,7 +165,15 @@ body{background:#0a0a0f;color:#f5f0e1;font-family:Inter,sans-serif;min-height:10
 (function(){
 var SB=window.supabase.createClient('https://irghwfzcbazujddfftsx.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw');
 var app=document.getElementById('app');
+// O token vem do link na primeira vez e fica guardado no aparelho. Precisa disso
+// porque o start_url do app instalado nao leva mais a query string — era ela que
+// fazia cada link virar uma instalacao separada.
+var CHAVE_TOKEN='np_agenda_token';
 var token=new URLSearchParams(window.location.search).get('t');
+try{
+  if(token) localStorage.setItem(CHAVE_TOKEN,token);
+  else token=localStorage.getItem(CHAVE_TOKEN);
+}catch(e){}
 var data=null, busy={}, team=[], openEv={}, view='home', sent=[], pushOn=false, reports=[], resList=[], resEvName='';
 // Carimbado no build (copy-static.js). Em dev fica o literal.
 var APP_BUILD='__APP_BUILD__';
@@ -189,19 +197,15 @@ window.conferirVersao=function(){
   }).catch(function(){});
 }
 
-// ── Manifest dinâmico: instalado, o app abre DIRETO nesta agenda (com o token na URL) ──
-try{
-  var mf={name:'Minha Agenda — NightPass',short_name:'Minha Agenda',
-    start_url:location.pathname+location.search,scope:location.pathname,
-    display:'standalone',orientation:'portrait-primary',
-    background_color:'#0a0a0f',theme_color:'#7c3aed',lang:'pt-BR',
-    icons:[{src:'/icon-192.png',sizes:'192x192',type:'image/png',purpose:'any'},
-           {src:'/icon-512.png',sizes:'512x512',type:'image/png',purpose:'maskable'}]};
-  var mlink=document.querySelector('link[rel="manifest"]')||document.createElement('link');
-  mlink.rel='manifest';
-  mlink.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/manifest+json'}));
-  if(!mlink.parentNode)document.head.appendChild(mlink);
-}catch(e){}
+// ── Instalacao unica ──
+// Antes o manifest era montado aqui e servido como blob:, com
+// start_url = caminho + query. Duas coisas quebravam a identidade do app:
+//   1. o token ia no start_url, entao o link de cada pessoa (e ate o mesmo link
+//      reaberto com outro parametro) contava como um APP DIFERENTE;
+//   2. blob: e uma URL nova a cada carregamento, entao nao havia o que comparar.
+// Resultado: o celular deixava instalar quantas vezes quisesse.
+// Agora o manifest e um arquivo fixo (/agenda.webmanifest) com `id` estavel, e o
+// token e guardado no proprio aparelho — ver saveToken abaixo.
 
 // ── Instalar na tela inicial (para não precisar reenviar o link) ──
 var deferredPrompt=null, showSteps=false;
@@ -210,13 +214,31 @@ var isIOS=/iphone|ipad|ipod/i.test(ua);
 var isInApp=/FBAN|FBAV|FB_IAB|Instagram|Line\//i.test(ua)||/WhatsApp|WeChat|MicroMessenger|Twitter|Snapchat|TikTok/i.test(ua);
 var standalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();deferredPrompt=e;renderInstall();});
-window.addEventListener('appinstalled',function(){deferredPrompt=null;standalone=true;renderInstall();});
+var CHAVE_INSTALADO='np_agenda_instalado';
+var jaInstalou=false;
+try{ jaInstalou=localStorage.getItem(CHAVE_INSTALADO)==='1'; }catch(e){}
+function marcarInstalado(){ jaInstalou=true; try{ localStorage.setItem(CHAVE_INSTALADO,'1'); }catch(e){} }
+window.addEventListener('appinstalled',function(){deferredPrompt=null;standalone=true;marcarInstalado();renderInstall();});
+// Abriu em modo app = esta instalado, mesmo que a instalacao tenha sido no iPhone
+// (onde o evento appinstalled nunca dispara).
+if(standalone)marcarInstalado();
 
 function renderInstall(){
   var el=document.getElementById('installBar'); if(!el)return;
   // Só na tela inicial — nas telas internas o convite de instalar vira ruído
   if(standalone||!token||view!=='home'){el.innerHTML='';return;}
   var body='';
+  // Ja instalou antes e voltou pelo link do WhatsApp: convidar de novo faz a pessoa
+  // instalar em duplicata. No iPhone isso e o unico freio possivel — o Safari
+  // adiciona um icone novo a cada "Adicionar a Tela de Inicio", sem perguntar nada.
+  if(jaInstalou){
+    el.innerHTML='<div class="inst"><h3>📲 Você já tem o app instalado</h3>'
+      +'<p>Procure o ícone <b>Minha Agenda</b> na tela inicial do celular. Instalar de novo cria um ícone repetido.</p>'
+      +'<button id="instMais">Instalar mesmo assim</button></div>';
+    var m=document.getElementById('instMais');
+    if(m)m.onclick=function(){ jaInstalou=false; try{ localStorage.removeItem(CHAVE_INSTALADO); }catch(e){} renderInstall(); };
+    return;
+  }
   if(isInApp){
     body='<p>Para instalar, abra este link no navegador do celular.</p>'
       +'<div class="steps"><b>1.</b> Toque no menu <b>⋯</b> no canto da tela e escolha <b>“Abrir no navegador”</b> (Safari/Chrome).<br><b>2.</b> Lá vai aparecer o botão para instalar.</div>';

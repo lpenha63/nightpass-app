@@ -32,6 +32,7 @@ const files = [
   'agenda.html',
   'sw.js',
   'manifest.json',
+  'agenda.webmanifest',
   'icon-192.png',
   'icon-512.png',
   'icon.svg',
