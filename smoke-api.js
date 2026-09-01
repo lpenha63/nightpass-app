@@ -27,6 +27,7 @@ const ROTAS = [
   ['webhook-payment', 200],
   ['webhook-asaas',   200],
   ['asaas-connect',   405],
+  ['cron-operacao',   200],   // GET sem CRON_SECRET definido responde normal
 ]
 
 const resultados = await Promise.all(ROTAS.map(async ([rota, esperado]) => {
