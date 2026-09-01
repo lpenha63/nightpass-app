@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { admin, tokenMercadoPago } from './_gateways'
 
 // Valida o Access Token do Mercado Pago.
 // Precisa rodar no servidor: a API do MP não envia cabeçalho CORS, então o mesmo fetch
@@ -34,12 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // deixou de voltar para a tela, esta e a unica forma de conferir uma conta ja
   // configurada — antes o botao ficava inutil para quem ja tinha salvo.
   let alvo = String(token ?? '').trim()
-  if (!alvo) {
-    const adm = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-    const { data: seg } = await adm.from('house_secrets')
-      .select('mp_access_token').eq('house_id', house_id).maybeSingle()
-    alvo = String(seg?.mp_access_token ?? '').trim()
-  }
+  if (!alvo) alvo = (await tokenMercadoPago(admin(), house_id)) ?? ''
   if (!alvo) return res.status(200).json({ ok: false, error: 'Nenhum token configurado para esta casa.' })
 
   try {

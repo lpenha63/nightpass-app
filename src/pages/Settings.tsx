@@ -295,8 +295,8 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
           mp_access_token: '',
         })
       }
-      const pag = (pagR.data as Array<{ tem_mp?: boolean }> | null)?.[0]
-      setMpConfigurado(!!pag?.tem_mp)
+      const pag = (pagR.data as Array<{ provedores?: string[] }> | null)?.[0]
+      setMpConfigurado((pag?.provedores ?? []).includes('mercadopago'))
       if (wr.data?.length) setWaConfig(wr.data[0])
       else setWaConfig({ ...WDEF, house_id: house.id })
       setLoading(false)
@@ -482,7 +482,11 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
       sT(setToast, 'Token de produção começa com APP_USR- — confira se não copiou o de teste.', 'warn'); return
     }
     setSalvandoMp(true)
-    const { error } = await supabase.rpc('set_mp_token', { p_house: house.id, p_token: tk })
+    // O RPC recebe o provedor e um jsonb: cada gateway guarda o que precisa, sem
+    // exigir coluna nova (PagSeguro pede token + e-mail, Stripe pede duas chaves).
+    const { error } = await supabase.rpc('set_payment_credentials', {
+      p_house: house.id, p_provider: 'mercadopago', p_credenciais: { access_token: tk },
+    })
     setSalvandoMp(false)
     if (error) { sT(setToast, 'Erro ao guardar: ' + error.message, 'error'); return }
     setMpConfigurado(true)

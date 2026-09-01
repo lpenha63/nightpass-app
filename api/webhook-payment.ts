@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { tokenMercadoPago } from './_gateways'
 import { sendTicketWhatsApp } from './_ticket-wa.js'
 import { sendTicketEmail } from './_ticket-email.js'
 
@@ -32,14 +33,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!order || order.payment_status === 'paid') return res.json({ ok: true })
 
-  // Token do MP: vem do cofre (house_secrets), fora do alcance da API publica.
-  const { data: segredo } = await sb
-    .from('house_secrets')
-    .select('mp_access_token')
-    .eq('house_id', order.house_id)
-    .maybeSingle()
-
-  const mpToken = segredo?.mp_access_token
+  // Credencial do gateway: vem do cofre, fora do alcance da API publica.
+  const mpToken = await tokenMercadoPago(sb, order.house_id)
   if (!mpToken) return res.status(400).json({ error: 'No MP config' })
 
   try {

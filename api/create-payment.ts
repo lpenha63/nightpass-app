@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { tokenMercadoPago } from './_gateways'
 import { sendTicketWhatsApp } from './_ticket-wa.js'
 import { sendTicketEmail } from './_ticket-email.js'
 
@@ -56,13 +57,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // publicamente (as paginas de ingresso mostram nome e endereco da casa) e RLS e por
   // LINHA, nao por coluna — enquanto o token morou la, qualquer um o lia pela API.
   // Aqui isso funciona porque `sb` e service_role, que ignora RLS.
-  const [{ data: batch }, { data: house }, { data: segredo }, { data: ev }] = await Promise.all([
+  const [{ data: batch }, { data: house }, segredo, { data: ev }] = await Promise.all([
     sb.from('ticket_batches').select('price_cents,name,quantity,sold,active,service_fee_pct,nominal').eq('id', batch_id).single(),
     sb.from('houses').select('pix_key,pix_holder,name').eq('id', house_id).single(),
-    sb.from('house_secrets').select('mp_access_token').eq('house_id', house_id).maybeSingle(),
+    tokenMercadoPago(sb, house_id),
     sb.from('events').select('name').eq('id', event_id).single(),
   ])
-  const mpToken: string | null = segredo?.mp_access_token ?? null
+  const mpToken: string | null = segredo
 
   if (!batch) return res.status(404).json({ error: 'Lote não encontrado' })
   if (!batch.active) return res.status(400).json({ error: 'Lote inativo' })

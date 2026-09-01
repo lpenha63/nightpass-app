@@ -40,8 +40,8 @@ export function SetupGuide({ houseId }: { houseId: string }) {
     ])
     const h = casaR.data
     const wa = waR.data
-    const pag = (pagR.data as Array<{ tem_mp?: boolean; tem_pix?: boolean }> | null)?.[0]
-    const mpOk = !!pag?.tem_mp
+    const pag = (pagR.data as Array<{ tem_pix?: boolean; provedores?: string[] }> | null)?.[0]
+    const mpOk = (pag?.provedores ?? []).includes('mercadopago')
     const pixOk = !!pag?.tem_pix
 
     setPassos([

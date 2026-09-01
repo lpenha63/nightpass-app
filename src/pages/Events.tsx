@@ -1211,7 +1211,13 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     // Esta tela so precisa saber SE o pagamento esta configurado. Antes puxava o token
     // do Mercado Pago para dentro do navegador so para fazer um `!!` nele.
     supabase.rpc('house_payment_status', { p_house: house.id })
-      .then(r => { const s = r.data?.[0]; setPayCfg({ pix: !!s?.tem_pix, mp: !!s?.tem_mp }) })
+      .then(r => {
+        const s = r.data?.[0] as { tem_pix?: boolean; provedores?: string[] } | undefined
+        // `provedores` e a lista dos gateways configurados nesta casa. Hoje so o
+        // Mercado Pago tem integracao; a lista existe para o proximo nao exigir
+        // mexer no formato do retorno.
+        setPayCfg({ pix: !!s?.tem_pix, mp: (s?.provedores ?? []).includes('mercadopago') })
+      })
     supabase.from('ticket_orders').select('*,ticket_batches(name,gender,price_cents)')
       .eq('event_id', ev.id).order('created_at', { ascending: false })
       .then(r => setOrders((r.data ?? []) as TicketOrder[]))
