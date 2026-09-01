@@ -3104,156 +3104,164 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                 </div>
               </div>
             </div>
-            {/* Lista da Casa toggle */}
-            {(() => {
-              const hle = !!form.house_list_enabled
-              return (
-                <div
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '10px 12px', borderRadius: 8,
-                    background: hle ? '#10b98111' : 'var(--c-panel)',
-                    border: `1px solid ${hle ? '#10b98144' : C.brd}`,
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>🏠 Lista da Casa</div>
-                    <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Gera link para convidados confirmarem presença</div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const next = !hle
-                      setF('house_list_enabled', next)
-                      if (next && editing) {
-                        const ev = events.find(e => e.id === editing)
-                        if (ev) await ensureHouseListRecord({ ...ev, house_list_enabled: true })
-                      }
-                    }}
-                    style={{
-                      width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer',
-                      background: hle ? '#10b981' : C.brd,
-                      position: 'relative', transition: 'background 0.2s', flexShrink: 0,
-                    }}
-                  >
-                    <span style={{
-                      position: 'absolute', top: 3, left: hle ? 26 : 4,
-                      width: 22, height: 22, borderRadius: '50%', background: '#fff',
-                      transition: 'left 0.2s', display: 'block',
-                    }} />
-                  </button>
-                </div>
-              )
-            })()}
-            {/* O link público da Lista da Casa agora fica na aba 👥 Lista (visão Casa), não aqui */}
-            {/* Liberar evento para Promoter */}
-            {(() => {
-              const pe = !!form.promoter_enabled
-              const mode = String(form.promoter_price_mode ?? 'list') as PromoterPriceMode
-              const invites = Array.isArray(form.promoter_invites) ? (form.promoter_invites as string[]) : []
-              return (
-                <div style={{ padding: '10px 12px', borderRadius: 8, background: (pe || invites.length > 0) ? '#a78bfa11' : 'var(--c-panel)', border: `1px solid ${(pe || invites.length > 0) ? '#a78bfa44' : C.brd}` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>📣 Liberar para Promoter</div>
-                      <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Liga para TODOS os promoters; ou convide específicos abaixo</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setF('promoter_enabled', !pe)}
-                      style={{ width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer', background: pe ? '#a78bfa' : C.brd, position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
-                    >
-                      <span style={{ position: 'absolute', top: 3, left: pe ? 26 : 4, width: 22, height: 22, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', display: 'block' }} />
-                    </button>
-                  </div>
-                  {(pe || invites.length > 0) && (
-                    <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: mode === 'other' ? '1fr 130px' : '1fr', gap: 8 }}>
-                      <div>
-                        <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor da entrada do promoter</label>
-                        <select {...inp} value={mode} onChange={e => setF('promoter_price_mode', e.target.value)}>
-                          <option value="list">Mesmo da Lista</option>
-                          <option value="other">Outro valor</option>
-                          <option value="vip">VIP (cortesia)</option>
-                        </select>
-                      </div>
-                      {mode === 'other' && (
-                        <div>
-                          <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor (R$)</label>
-                          <input inputMode="decimal" {...inp} value={moneyVal(form.promoter_price_cents as number)} placeholder="Ex: R$ 25,00" onChange={e => setF('promoter_price_cents', parseMoneyInput(e.target.value))} />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {/* Promoters específicos (funciona mesmo com o toggle desligado) */}
-                  <div style={{ marginTop: 12, borderTop: `1px solid ${C.brd}`, paddingTop: 10 }}>
-                    <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 6, letterSpacing: '0.05em' }}>
-                      👤 PROMOTERS ESPECÍFICOS{invites.length > 0 ? ` (${invites.length})` : ''}
-                    </div>
-                    {housePromoters.length === 0
-                      ? <div style={{ fontSize: 11, color: C.mut }}>Nenhum promoter cadastrado na casa.</div>
-                      : (() => {
-                          const available = housePromoters.filter(pr => !invites.includes(pr.id))
-                          return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                              {/* Dropdown de seleção */}
-                              {available.length > 0 && (
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                  <select
-                                    id="promo-dropdown"
-                                    defaultValue=""
-                                    style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }}
-                                  >
-                                    <option value="" disabled>Selecionar promoter…</option>
-                                    {available.map(pr => (
-                                      <option key={pr.id} value={pr.id}>{pr.full_name}</option>
-                                    ))}
-                                  </select>
-                                  <button type="button"
-                                    onClick={() => {
-                                      const sel = (document.getElementById('promo-dropdown') as HTMLSelectElement)?.value
-                                      if (sel) togglePromoterInvite(sel)
-                                    }}
-                                    style={{ background: '#a78bfa22', border: '1px solid #a78bfa44', borderRadius: 8, padding: '7px 12px', color: '#a78bfa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                                    + Adicionar
-                                  </button>
-                                </div>
-                              )}
-                              {/* Chips dos promoters convidados */}
-                              {invites.length > 0 && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                  {invites.map(id => {
-                                    const pr = housePromoters.find(p => p.id === id)
-                                    if (!pr) return null
-                                    return (
-                                      <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#a78bfa14', border: '1px solid #a78bfa44', borderRadius: 20, padding: '4px 10px' }}>
-                                        <span style={{ fontSize: 12, fontWeight: 600, color: C.txt }}>{pr.full_name}</span>
-                                        {pr.phone && (
-                                          <button type="button" onClick={() => sendPromoterEventLink(pr)} disabled={invitingPromoter === pr.id || !editing}
-                                            style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 6, padding: '2px 7px', color: '#25d366', fontSize: 10, fontWeight: 700, cursor: editing ? 'pointer' : 'not-allowed', opacity: editing ? 1 : 0.5, fontFamily: 'inherit' }}>
-                                            {invitingPromoter === pr.id ? '...' : '📲'}
-                                          </button>
-                                        )}
-                                        <button type="button" onClick={() => togglePromoterInvite(id)}
-                                          style={{ background: 'none', border: 'none', color: C.mut, fontSize: 14, cursor: 'pointer', lineHeight: 1, padding: '0 2px', fontFamily: 'inherit' }}>
-                                          ×
-                                        </button>
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                              {invites.length === 0 && <div style={{ fontSize: 11, color: C.mut }}>Nenhum promoter adicionado ainda.</div>}
-                            </div>
-                          )
-                        })()
-                    }
-                    <div style={{ fontSize: 10, color: C.mut, marginTop: 6 }}>Convidados veem o evento no portal mesmo com "liberar para todos" desligado.{!editing && ' Salve para poder enviar o link.'}</div>
-                  </div>
-                </div>
-              )
-            })()}
           </div>
         </div>
 
+
+        {/* ── Acesso de convidados (largura cheia) ──
+            Estes dois blocos ficavam na coluna da direita. Sao os que mais crescem
+            — o de promoter abre modo de preco e lista de convidados —, entao a
+            coluna esticava e sobrava um vazio embaixo do Status. Em largura cheia
+            nao ha como abrir buraco lateral, com muitos promoters ou nenhum. */}
+        <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
+        {/* Lista da Casa toggle */}
+        {(() => {
+          const hle = !!form.house_list_enabled
+          return (
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 12px', borderRadius: 8,
+                background: hle ? '#10b98111' : 'var(--c-panel)',
+                border: `1px solid ${hle ? '#10b98144' : C.brd}`,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>🏠 Lista da Casa</div>
+                <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Gera link para convidados confirmarem presença</div>
+              </div>
+              <button
+                onClick={async () => {
+                  const next = !hle
+                  setF('house_list_enabled', next)
+                  if (next && editing) {
+                    const ev = events.find(e => e.id === editing)
+                    if (ev) await ensureHouseListRecord({ ...ev, house_list_enabled: true })
+                  }
+                }}
+                style={{
+                  width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer',
+                  background: hle ? '#10b981' : C.brd,
+                  position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+                }}
+              >
+                <span style={{
+                  position: 'absolute', top: 3, left: hle ? 26 : 4,
+                  width: 22, height: 22, borderRadius: '50%', background: '#fff',
+                  transition: 'left 0.2s', display: 'block',
+                }} />
+              </button>
+            </div>
+          )
+        })()}
+        {/* O link público da Lista da Casa agora fica na aba 👥 Lista (visão Casa), não aqui */}
+        {/* Liberar evento para Promoter */}
+        {(() => {
+          const pe = !!form.promoter_enabled
+          const mode = String(form.promoter_price_mode ?? 'list') as PromoterPriceMode
+          const invites = Array.isArray(form.promoter_invites) ? (form.promoter_invites as string[]) : []
+          return (
+            <div style={{ padding: '10px 12px', borderRadius: 8, background: (pe || invites.length > 0) ? '#a78bfa11' : 'var(--c-panel)', border: `1px solid ${(pe || invites.length > 0) ? '#a78bfa44' : C.brd}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>📣 Liberar para Promoter</div>
+                  <div style={{ fontSize: 11, color: C.mut, marginTop: 2 }}>Liga para TODOS os promoters; ou convide específicos abaixo</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setF('promoter_enabled', !pe)}
+                  style={{ width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer', background: pe ? '#a78bfa' : C.brd, position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                >
+                  <span style={{ position: 'absolute', top: 3, left: pe ? 26 : 4, width: 22, height: 22, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', display: 'block' }} />
+                </button>
+              </div>
+              {(pe || invites.length > 0) && (
+                <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: mode === 'other' ? '1fr 130px' : '1fr', gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor da entrada do promoter</label>
+                    <select {...inp} value={mode} onChange={e => setF('promoter_price_mode', e.target.value)}>
+                      <option value="list">Mesmo da Lista</option>
+                      <option value="other">Outro valor</option>
+                      <option value="vip">VIP (cortesia)</option>
+                    </select>
+                  </div>
+                  {mode === 'other' && (
+                    <div>
+                      <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor (R$)</label>
+                      <input inputMode="decimal" {...inp} value={moneyVal(form.promoter_price_cents as number)} placeholder="Ex: R$ 25,00" onChange={e => setF('promoter_price_cents', parseMoneyInput(e.target.value))} />
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Promoters específicos (funciona mesmo com o toggle desligado) */}
+              <div style={{ marginTop: 12, borderTop: `1px solid ${C.brd}`, paddingTop: 10 }}>
+                <div style={{ fontSize: 11, color: C.sub, fontWeight: 700, marginBottom: 6, letterSpacing: '0.05em' }}>
+                  👤 PROMOTERS ESPECÍFICOS{invites.length > 0 ? ` (${invites.length})` : ''}
+                </div>
+                {housePromoters.length === 0
+                  ? <div style={{ fontSize: 11, color: C.mut }}>Nenhum promoter cadastrado na casa.</div>
+                  : (() => {
+                      const available = housePromoters.filter(pr => !invites.includes(pr.id))
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {/* Dropdown de seleção */}
+                          {available.length > 0 && (
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <select
+                                id="promo-dropdown"
+                                defaultValue=""
+                                style={{ flex: 1, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '7px 10px', color: C.txt, fontSize: 12, fontFamily: 'inherit' }}
+                              >
+                                <option value="" disabled>Selecionar promoter…</option>
+                                {available.map(pr => (
+                                  <option key={pr.id} value={pr.id}>{pr.full_name}</option>
+                                ))}
+                              </select>
+                              <button type="button"
+                                onClick={() => {
+                                  const sel = (document.getElementById('promo-dropdown') as HTMLSelectElement)?.value
+                                  if (sel) togglePromoterInvite(sel)
+                                }}
+                                style={{ background: '#a78bfa22', border: '1px solid #a78bfa44', borderRadius: 8, padding: '7px 12px', color: '#a78bfa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                                + Adicionar
+                              </button>
+                            </div>
+                          )}
+                          {/* Chips dos promoters convidados */}
+                          {invites.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {invites.map(id => {
+                                const pr = housePromoters.find(p => p.id === id)
+                                if (!pr) return null
+                                return (
+                                  <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#a78bfa14', border: '1px solid #a78bfa44', borderRadius: 20, padding: '4px 10px' }}>
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: C.txt }}>{pr.full_name}</span>
+                                    {pr.phone && (
+                                      <button type="button" onClick={() => sendPromoterEventLink(pr)} disabled={invitingPromoter === pr.id || !editing}
+                                        style={{ background: '#25d36614', border: '1px solid #25d36633', borderRadius: 6, padding: '2px 7px', color: '#25d366', fontSize: 10, fontWeight: 700, cursor: editing ? 'pointer' : 'not-allowed', opacity: editing ? 1 : 0.5, fontFamily: 'inherit' }}>
+                                        {invitingPromoter === pr.id ? '...' : '📲'}
+                                      </button>
+                                    )}
+                                    <button type="button" onClick={() => togglePromoterInvite(id)}
+                                      style={{ background: 'none', border: 'none', color: C.mut, fontSize: 14, cursor: 'pointer', lineHeight: 1, padding: '0 2px', fontFamily: 'inherit' }}>
+                                      ×
+                                    </button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                          {invites.length === 0 && <div style={{ fontSize: 11, color: C.mut }}>Nenhum promoter adicionado ainda.</div>}
+                        </div>
+                      )
+                    })()
+                }
+                <div style={{ fontSize: 10, color: C.mut, marginTop: 6 }}>Convidados veem o evento no portal mesmo com "liberar para todos" desligado.{!editing && ' Salve para poder enviar o link.'}</div>
+              </div>
+            </div>
+          )
+        })()}
+        </div>
         {/* ── Evento Parceiro (full-width) ── */}
         <div style={{ marginTop: 14, background: 'var(--c-panel)', border: `1px solid ${(form as any).is_partner_event ? C.acc + '55' : C.brd}`, borderRadius: 12, padding: '12px 14px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
