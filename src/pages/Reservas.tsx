@@ -446,17 +446,35 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       token: editing?.token ?? crypto.randomUUID(),
       max_guests: 10,
     }
-    const q = editing ? supabase.from('reservations').update(d).eq('id', editing.id) : supabase.from('reservations').insert(d).select().single()
+    // O .select() no update nao e cosmetico: sem ele o PostgREST devolve 0 linhas SEM
+    // erro quando a RLS barra a gravacao, e a tela anunciava "Reserva atualizada!" sem
+    // ter gravado nada. Com ele da para distinguir "falhou" de "nao tinha permissao".
+    const q = editing
+      ? supabase.from('reservations').update(d).eq('id', editing.id).select('id')
+      : supabase.from('reservations').insert(d).select().single()
     const r = await q
-    if (r.error) { sT(setToast, 'Erro: ' + r.error.message, 'error'); return }
+    if (r.error) { sT(setToast, 'Erro ao salvar a reserva: ' + r.error.message, 'error'); return }
+    if (editing && (!r.data || (r.data as unknown[]).length === 0)) {
+      sT(setToast, 'A reserva nao foi gravada: sem permissao para alterar esta reserva.', 'error'); return
+    }
 
-    // Salva itens
+    // Salva itens.
+    // Estes retornos eram descartados: se a gravacao dos opcionais falhasse, a tela
+    // dizia "Reserva atualizada!" e os itens sumiam sem ninguem ficar sabendo.
+    const erroItem = (e: { message: string } | null, onde: string) => {
+      if (!e) return false
+      sT(setToast, `Erro ao salvar os opcionais (${onde}): ${e.message}`, 'error')
+      return true
+    }
     const resId = editing?.id ?? (r as any).data?.id
     if (resId && formItems.length > 0) {
-      if (editing) await supabase.from('reservation_items').delete().eq('reservation_id', resId)
+      if (editing) {
+        const del = await supabase.from('reservation_items').delete().eq('reservation_id', resId)
+        if (erroItem(del.error, 'remover anteriores')) return
+      }
       const validItems = formItems.filter(it => it.name.trim())
       if (validItems.length > 0) {
-        await supabase.from('reservation_items').insert(validItems.map(it => {
+        const ins = await supabase.from('reservation_items').insert(validItems.map(it => {
           const qty = parseFloat(it.quantity) || 1
           const saleCents = Math.round((parseFloat(it.sale_cents) || 0) * 100)
           const costCents = Math.round((parseFloat(it.cost_cents) || 0) * 100)
@@ -467,9 +485,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
             unit_cost_cents: it.mode === 'total' ? Math.round(costCents / qty) : costCents,
           }
         }))
+        if (erroItem(ins.error, 'inserir')) return
       }
     } else if (editing && formItems.length === 0) {
-      await supabase.from('reservation_items').delete().eq('reservation_id', editing.id)
+      const del = await supabase.from('reservation_items').delete().eq('reservation_id', editing.id)
+      if (erroItem(del.error, 'limpar')) return
     }
 
     sT(setToast, editing ? 'Reserva atualizada!' : 'Reserva criada!', 'success')

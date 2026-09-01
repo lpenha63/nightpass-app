@@ -26,7 +26,15 @@ function moneyVal(v: number | string): string {
 
 interface Props { house: House; role?: string; allowedPages?: string[]; onGoToReservas?: (date: string, eventId: string) => void }
 
-interface EventWithCounts extends Event {
+/**
+ * Contadores calculados na tela para os cards. NAO sao colunas de `events`.
+ *
+ * Ficam em uma interface propria porque o formulario de edicao carrega o evento
+ * inteiro (`setForm({ ...ev })`) e o payload de gravacao precisa remove-los: o
+ * PostgREST recusa o UPDATE INTEIRO se receber um campo que nao e coluna, com a
+ * mensagem "Could not find the 'X' column of 'events' in the schema cache".
+ */
+interface EventUiCounts {
   checkinCount?: number
   pagantesCount?: number
   cortesiasCount?: number
@@ -39,6 +47,27 @@ interface EventWithCounts extends Event {
   teamOk?: number
   teamByArea?: Record<string, number>
 }
+
+interface EventWithCounts extends Event, EventUiCounts {}
+
+/**
+ * Campos removidos do payload antes de gravar.
+ *
+ * Antes isso era uma lista solta dentro do save(), e apodreceu: ao entrar os
+ * contadores de equipe ninguem lembrou de atualiza-la, e `teamByArea` passou a
+ * derrubar toda edicao de evento em producao. A checagem de cobertura logo abaixo
+ * transforma esse esquecimento em erro de compilacao.
+ */
+const CAMPOS_SO_DA_TELA = [
+  'checkinCount', 'pagantesCount', 'cortesiasCount', 'resCount', 'resPeople',
+  'listGuests', 'tasksTotal', 'tasksDone', 'teamTotal', 'teamOk', 'teamByArea',
+] as const
+
+// Se um campo novo entrar em EventUiCounts e nao entrar na lista acima, esta linha
+// para de compilar. E o ponto: falhar no build, nao na porta da casa.
+type FaltandoNaLista = Exclude<keyof EventUiCounts, typeof CAMPOS_SO_DA_TELA[number]>
+const _todosCobertos: FaltandoNaLista extends never ? true : never = true
+void _todosCobertos
 
 interface Guest {
   id?: string
@@ -2151,8 +2180,17 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   }
 
   function save() {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { checkinCount, resCount, resPeople, listGuests, pagantesCount, cortesiasCount, tasksTotal, tasksDone, id, created_at, artist_fee_cents, artist_fee_type, artist_fee_percent, consumption_cents: _cc, ...formRest } = form as Record<string, unknown>
+    // Campos que nao podem ir no payload: os contadores de tela (ver CAMPOS_SO_DA_TELA),
+    // a chave e a data de criacao, e os campos de cache do artista que hoje vivem em
+    // `artists`. Qualquer um deles faz o PostgREST recusar a gravacao inteira.
+    const FORA_DO_PAYLOAD = new Set<string>([
+      ...CAMPOS_SO_DA_TELA,
+      'id', 'created_at',
+      'artist_fee_cents', 'artist_fee_type', 'artist_fee_percent', 'consumption_cents',
+    ])
+    const formRest = Object.fromEntries(
+      Object.entries(form as Record<string, unknown>).filter(([k]) => !FORA_DO_PAYLOAD.has(k)),
+    )
     const d = {
       ...formRest,
       house_id: house.id,
