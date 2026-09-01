@@ -62,11 +62,18 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    supabase.from('events').select('*,houses(name,pix_key,pix_holder)').eq('id', eventId).single()
+    // Colunas explicitas em vez de '*': a tabela guarda cache de artista, notas internas
+    // de producao, termos de parceria e custos. Com select('*') a pagina de compra
+    // baixava tudo isso para o navegador de qualquer visitante.
+    supabase.from('events').select('id,created_at,updated_at,house_id,name,event_date,start_time,end_time,genre,flyer_url,capacity,status,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,price_male_list_early_cents,price_female_list_early_cents,list_cutoff_time,promotions,promotions_list,attractions,artists_public,house_list_enabled,birthday_list_enabled,is_operation,houses(name,pix_key,pix_holder)').eq('id', eventId).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
-        setEvent(r.data as EventWithHouse)
-        document.title = `NightPass Tickets — ${(r.data as EventWithHouse).name}`
+        // Via `unknown`: com colunas explicitas o supabase-js tipa o embed `houses`
+        // como array, mas o PostgREST devolve objeto numa relacao para-um. O formato
+        // em execucao esta certo; e o tipo gerado que nao distingue os dois casos.
+        const ev = r.data as unknown as EventWithHouse
+        setEvent(ev)
+        document.title = `NightPass Tickets — ${ev.name}`
         return supabase.from('ticket_batches').select('*').eq('event_id', eventId).eq('active', true).order('price_cents')
       })
       .then(r => {

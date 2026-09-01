@@ -170,7 +170,7 @@ function render(){
     }
     if(entryStr)html+='<div class="info-row"><span>🎫 Entrada na lista: <b style="color:#a78bfa">'+escHtml(entryStr)+'</b></span></div>';
     var arts=[];
-    if(event.artists&&event.artists.length){event.artists.forEach(function(a){if(a&&a.name&&String(a.name).trim())arts.push(String(a.name).trim());});}
+    if(event.artists_public&&event.artists_public.length){event.artists_public.forEach(function(a){if(a&&a.name&&String(a.name).trim())arts.push(String(a.name).trim());});}
     if(event.attractions&&String(event.attractions).trim())arts.push(String(event.attractions).trim());
     if(arts.length)html+='<div class="info-row"><span>🎤 '+escHtml(arts.join(' · '))+'</span></div>';
   }
@@ -365,7 +365,7 @@ function init(){
     SB.from('reservations').select('*').eq('token',token).single().then(function(r){
       if(r.error||!r.data){app.innerHTML='<div class="closed"><h2>Reserva não encontrada</h2><p>Este link pode ter expirado ou ser inválido.</p></div>';return;}
       data=r.data;
-      var evSel='name,list_locks,flyer_url,attractions,artists,start_time,price_male_list_cents,price_female_list_cents';
+      var evSel='name,list_locks,flyer_url,attractions,artists_public,start_time,price_male_list_cents,price_female_list_cents';
       if(data.event_id){
         SB.from('events').select(evSel).eq('id',data.event_id).single().then(function(er){event=er.data||null;loadGuests();subscribeRealtime();});
       }else if(data.reservation_date){
