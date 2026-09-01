@@ -32,18 +32,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!order || order.payment_status === 'paid') return res.json({ ok: true })
 
-  // Get house MP token to verify payment
-  const { data: house } = await sb
-    .from('houses')
+  // Token do MP: vem do cofre (house_secrets), fora do alcance da API publica.
+  const { data: segredo } = await sb
+    .from('house_secrets')
     .select('mp_access_token')
-    .eq('id', order.house_id)
-    .single()
+    .eq('house_id', order.house_id)
+    .maybeSingle()
 
-  if (!house?.mp_access_token) return res.status(400).json({ error: 'No MP config' })
+  const mpToken = segredo?.mp_access_token
+  if (!mpToken) return res.status(400).json({ error: 'No MP config' })
 
   try {
     const { MercadoPagoConfig, Payment } = await import('mercadopago')
-    const client = new MercadoPagoConfig({ accessToken: house.mp_access_token })
+    const client = new MercadoPagoConfig({ accessToken: mpToken })
     const paymentApi = new Payment(client)
     const mpPay = await paymentApi.get({ id: Number(paymentId) })
 

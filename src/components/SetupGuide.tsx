@@ -28,17 +28,21 @@ export function SetupGuide({ houseId }: { houseId: string }) {
   useEffect(() => { carregar() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [houseId])
 
   async function carregar() {
-    const [casaR, waR, areasR, evR, srv] = await Promise.all([
-      supabase.from('houses').select('name,logo_url,pix_key,pix_holder,mp_access_token,lat,lng').eq('id', houseId).single(),
+    const [casaR, waR, areasR, evR, srv, pagR] = await Promise.all([
+      supabase.from('houses').select('name,logo_url,pix_key,pix_holder,lat,lng').eq('id', houseId).single(),
       supabase.from('whatsapp_config').select('active,api_url,instance_name,api_key').eq('house_id', houseId).limit(1).maybeSingle(),
       supabase.from('work_areas').select('id', { count: 'exact', head: true }).eq('house_id', houseId).eq('active', true),
       supabase.from('events').select('id', { count: 'exact', head: true }).eq('house_id', houseId),
       statusServidor(),
+      // SIM/NAO do pagamento. Antes o token do Mercado Pago era trazido para o
+      // navegador so para conferir o prefixo "APP_USR-".
+      supabase.rpc('house_payment_status', { p_house: houseId }),
     ])
     const h = casaR.data
     const wa = waR.data
-    const mpOk = !!h?.mp_access_token && String(h.mp_access_token).startsWith('APP_USR-')
-    const pixOk = !!h?.pix_key
+    const pag = (pagR.data as Array<{ tem_mp?: boolean; tem_pix?: boolean }> | null)?.[0]
+    const mpOk = !!pag?.tem_mp
+    const pixOk = !!pag?.tem_pix
 
     setPassos([
       {

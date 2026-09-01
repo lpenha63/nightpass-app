@@ -52,11 +52,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const sb = supabaseAdmin()
 
-  const [{ data: batch }, { data: house }, { data: ev }] = await Promise.all([
+  // O token do MP vem de house_secrets, nao de houses: a linha de `houses` e legivel
+  // publicamente (as paginas de ingresso mostram nome e endereco da casa) e RLS e por
+  // LINHA, nao por coluna — enquanto o token morou la, qualquer um o lia pela API.
+  // Aqui isso funciona porque `sb` e service_role, que ignora RLS.
+  const [{ data: batch }, { data: house }, { data: segredo }, { data: ev }] = await Promise.all([
     sb.from('ticket_batches').select('price_cents,name,quantity,sold,active,service_fee_pct,nominal').eq('id', batch_id).single(),
-    sb.from('houses').select('mp_access_token,pix_key,pix_holder,name').eq('id', house_id).single(),
+    sb.from('houses').select('pix_key,pix_holder,name').eq('id', house_id).single(),
+    sb.from('house_secrets').select('mp_access_token').eq('house_id', house_id).maybeSingle(),
     sb.from('events').select('name').eq('id', event_id).single(),
   ])
+  const mpToken: string | null = segredo?.mp_access_token ?? null
 
   if (!batch) return res.status(404).json({ error: 'Lote não encontrado' })
   if (!batch.active) return res.status(400).json({ error: 'Lote inativo' })
@@ -109,10 +115,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ── PIX direto: QR gerado aqui e exibido na nossa página ──
   // Sem tela do Mercado Pago, sem login e sem captcha. Também não esbarra no bloqueio
   // de "pagar para si mesmo": o QR é um PIX comum, pagável por qualquer banco.
-  if (metodo === 'pix' && house.mp_access_token) {
+  if (metodo === 'pix' && mpToken) {
     try {
       const { MercadoPagoConfig, Payment } = await import('mercadopago')
-      const client = new MercadoPagoConfig({ accessToken: house.mp_access_token })
+      const client = new MercadoPagoConfig({ accessToken: mpToken })
       const paymentApi = new Payment(client)
 
       const mpPay = await paymentApi.create({
@@ -151,10 +157,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  if (house.mp_access_token) {
+  if (mpToken) {
     try {
       const { MercadoPagoConfig, Preference } = await import('mercadopago')
-      const client = new MercadoPagoConfig({ accessToken: house.mp_access_token })
+      const client = new MercadoPagoConfig({ accessToken: mpToken })
       const prefApi = new Preference(client)
 
       const items = [{

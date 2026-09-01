@@ -108,6 +108,9 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
   const [changingPass, setChangingPass] = useState(false)
   const [showNewPass, setShowNewPass] = useState(false)
   const [myEmail, setMyEmail] = useState('')
+  // So o SIM/NAO. O valor do token nunca chega aqui.
+  const [mpConfigurado, setMpConfigurado] = useState(false)
+  const [salvandoMp, setSalvandoMp] = useState(false)
   const [painelOn, setPainelOn] = useState(painelUnidadesLigado())
   // Dias em que a casa abre SEM evento (rotina de bar). Sem isto, a criação
   // automática do Dia de operação abriria a casa no dia em que ela está fechada.
@@ -277,8 +280,10 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
   useEffect(() => {
     Promise.all([
       supabase.from('houses').select('*').eq('id', house.id).single(),
+      // SIM/NAO do pagamento — o token nunca mais desce para o navegador.
+      supabase.rpc('house_payment_status', { p_house: house.id }),
       supabase.from('whatsapp_config').select('*').eq('house_id', house.id).limit(1),
-    ]).then(([hr, wr]) => {
+    ]).then(([hr, pagR, wr]) => {
       if (hr.data) {
         const d = hr.data
         setConfig({
@@ -286,9 +291,12 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
           email: d.email ?? '', website: d.website ?? '', address: d.address ?? '',
           city: d.city ?? '', state: d.state ?? '', logo_url: d.logo_url ?? '',
           pix_key: d.pix_key ?? '', pix_holder: d.pix_holder ?? '',
-          mp_access_token: d.mp_access_token ?? '',
+          // Campo sempre vazio: e para DIGITAR um token novo, nao para reexibir o atual.
+          mp_access_token: '',
         })
       }
+      const pag = (pagR.data as Array<{ tem_mp?: boolean }> | null)?.[0]
+      setMpConfigurado(!!pag?.tem_mp)
       if (wr.data?.length) setWaConfig(wr.data[0])
       else setWaConfig({ ...WDEF, house_id: house.id })
       setLoading(false)
@@ -428,7 +436,9 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
       logo_url: config.logo_url || null,
       pix_key: config.pix_key.trim() || null,
       pix_holder: config.pix_holder.trim() || null,
-      mp_access_token: config.mp_access_token.trim() || null,
+      // mp_access_token saiu daqui: vive em house_secrets e so e gravado pelo RPC
+      // set_mp_token (ver salvarMpToken). Enquanto morou em `houses`, a politica de
+      // leitura publica da tabela entregava o token para qualquer um.
     }).eq('id', house.id)
     setSaving(false)
     if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
@@ -460,8 +470,28 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
     setSavingWa(false)
   }
 
+  /**
+   * Grava o token no cofre (house_secrets) pelo RPC set_mp_token, que confere se quem
+   * chama e admin DESTA casa. O valor nunca volta: depois de gravado, a tela mostra
+   * apenas "configurado".
+   */
+  async function salvarMpToken() {
+    const tk = config.mp_access_token.trim()
+    if (!tk) return
+    if (!tk.startsWith('APP_USR-')) {
+      sT(setToast, 'Token de produção começa com APP_USR- — confira se não copiou o de teste.', 'warn'); return
+    }
+    setSalvandoMp(true)
+    const { error } = await supabase.rpc('set_mp_token', { p_house: house.id, p_token: tk })
+    setSalvandoMp(false)
+    if (error) { sT(setToast, 'Erro ao guardar: ' + error.message, 'error'); return }
+    setMpConfigurado(true)
+    setConfig(c => ({ ...c, mp_access_token: '' }))   // some da tela junto
+    sT(setToast, '🔒 Token guardado. Ele não volta a aparecer aqui.', 'success')
+  }
+
   async function testMp() {
-    if (!config.mp_access_token.trim()) { sT(setToast, 'Insira o token antes de testar', 'warn'); return }
+    if (!config.mp_access_token.trim() && !mpConfigurado) { sT(setToast, 'Insira o token antes de testar', 'warn'); return }
     setTestingMp(true); setMpStatus('idle')
     try {
       // Pelo servidor: a API do Mercado Pago não manda cabeçalho CORS, então o mesmo
@@ -802,7 +832,16 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
             3. Copie o <strong style={{ color: C.sub }}>Access Token de produção</strong> (APP_USR-...)
           </div>
         </div>
-        <Field label="ACCESS TOKEN">
+        {/* Estado, nao valor. O token e gravado num cofre que o navegador nao le —
+            nem o seu dono. Reexibir um segredo so serve para ele vazar de novo. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13, fontWeight: 700,
+          color: mpConfigurado ? C.grn : C.mut }}>
+          <span>{mpConfigurado ? '🔒 Token configurado' : '○ Nenhum token configurado'}</span>
+          {mpConfigurado && <span style={{ color: C.mut, fontWeight: 400, fontSize: 12 }}>
+            — para trocar, cole o novo abaixo
+          </span>}
+        </div>
+        <Field label={mpConfigurado ? 'SUBSTITUIR O TOKEN' : 'ACCESS TOKEN'}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input style={{ ...INP, flex: 1, fontFamily: showMpToken ? 'monospace' : 'inherit' }}
               type={showMpToken ? 'text' : 'password'} value={config.mp_access_token} onChange={set('mp_access_token')}
@@ -813,7 +852,15 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
             </button>
           </div>
         </Field>
-        <button onClick={testMp} disabled={testingMp || !config.mp_access_token.trim()} {...statusBtn(mpStatus, '🔍 Testar token', testingMp)}>
+        <Btn onClick={salvarMpToken} disabled={salvandoMp || !config.mp_access_token.trim()}
+          style={{ width: '100%', marginBottom: 8 }}>
+          {salvandoMp ? 'Guardando...' : '🔒 Guardar token'}
+        </Btn>
+        <div style={{ color: C.mut, fontSize: 11, marginBottom: 12, lineHeight: 1.5 }}>
+          O token é gravado por este botão, não pelo 💾 Salvar Configurações.
+        </div>
+        {/* Sem nada digitado, testa o token ja guardado — o servidor busca no cofre. */}
+        <button onClick={testMp} disabled={testingMp || (!config.mp_access_token.trim() && !mpConfigurado)} {...statusBtn(mpStatus, '🔍 Testar token', testingMp)}>
           {statusBtn(mpStatus, '🔍 Testar token', testingMp).children}
         </button>
       </Section>

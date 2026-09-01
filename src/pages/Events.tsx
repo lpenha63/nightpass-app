@@ -1208,8 +1208,10 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
         if (r.error) { sT(setToast, `Erro ao carregar lotes: ${r.error.message}`, 'error'); return }
         setBatches((r.data ?? []) as TicketBatch[])
       })
-    supabase.from('houses').select('pix_key,mp_access_token').eq('id', house.id).single()
-      .then(r => setPayCfg({ pix: !!r.data?.pix_key, mp: !!r.data?.mp_access_token }))
+    // Esta tela so precisa saber SE o pagamento esta configurado. Antes puxava o token
+    // do Mercado Pago para dentro do navegador so para fazer um `!!` nele.
+    supabase.rpc('house_payment_status', { p_house: house.id })
+      .then(r => { const s = r.data?.[0]; setPayCfg({ pix: !!s?.tem_pix, mp: !!s?.tem_mp }) })
     supabase.from('ticket_orders').select('*,ticket_batches(name,gender,price_cents)')
       .eq('event_id', ev.id).order('created_at', { ascending: false })
       .then(r => setOrders((r.data ?? []) as TicketOrder[]))

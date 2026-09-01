@@ -12,7 +12,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const { house_id, token } = req.body ?? {}
-  if (!house_id || !token) return res.status(400).json({ error: 'Dados incompletos' })
+  if (!house_id) return res.status(400).json({ error: 'Dados incompletos' })
 
   const jwt = (req.headers.authorization ?? '').replace(/^Bearer /i, '')
   if (!jwt) return res.status(401).json({ error: 'Não autenticado' })
@@ -30,9 +30,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('id').eq('house_id', house_id).eq('user_id', userData.user.id).eq('is_active', true).maybeSingle()
   if (!membro) return res.status(403).json({ error: 'Sem acesso a esta casa' })
 
+  // Sem token no corpo, testa o que ja esta guardado no cofre. Depois que o token
+  // deixou de voltar para a tela, esta e a unica forma de conferir uma conta ja
+  // configurada — antes o botao ficava inutil para quem ja tinha salvo.
+  let alvo = String(token ?? '').trim()
+  if (!alvo) {
+    const adm = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    const { data: seg } = await adm.from('house_secrets')
+      .select('mp_access_token').eq('house_id', house_id).maybeSingle()
+    alvo = String(seg?.mp_access_token ?? '').trim()
+  }
+  if (!alvo) return res.status(200).json({ ok: false, error: 'Nenhum token configurado para esta casa.' })
+
   try {
     const r = await fetch('https://api.mercadopago.com/users/me', {
-      headers: { Authorization: `Bearer ${String(token).trim()}` },
+      headers: { Authorization: `Bearer ${alvo}` },
     })
     const body = await r.json().catch(() => null)
     if (!r.ok) {
