@@ -38,7 +38,7 @@ export async function sendTicketEmail(
     const ingressos = (tks ?? []) as Array<{ token: string; holder_name?: string }>
     if (!ingressos.length) return
 
-    const appUrl = process.env.APP_URL ?? 'https://nightpass-app.vercel.app'
+    const appUrl = (process.env.APP_URL || '').trim() || 'https://www.nightpassapp.com.br'
     const casa = (ev as { houses?: { name?: string } } | null)?.houses?.name ?? 'NightPass'
     const data = ev?.event_date
       ? new Date(ev.event_date + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })

@@ -63,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sandbox = baseAsaas(chave).includes('sandbox')
 
   // ── 2. Webhook: registrado por nos, nao pelo cliente ──
-  const appUrl = process.env.APP_URL ?? 'https://www.nightpassapp.com.br'
+  const appUrl = (process.env.APP_URL || '').trim() || 'https://www.nightpassapp.com.br'
   const webhookToken = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
 
   // A Asaas recusa webhook duplicado na mesma URL, entao removemos o anterior desta casa

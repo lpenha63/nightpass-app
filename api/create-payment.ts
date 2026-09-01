@@ -117,7 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Checkout Pro: uma preferência abre crédito, débito, PIX, boleto e saldo MP numa tela só.
   // Cartão não pode passar pelo nosso servidor, então o comprador paga no ambiente do MP.
-  const appUrl = process.env.APP_URL ?? 'https://nightpass-app.vercel.app'
+  const appUrl = (process.env.APP_URL || '').trim() || 'https://www.nightpassapp.com.br'
   let mpErro: string | null = null
 
   // ── Asaas: PIX com QR na nossa propria pagina ──

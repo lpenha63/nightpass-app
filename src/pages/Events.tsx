@@ -125,7 +125,7 @@ const STATUS_COLOR: Record<string, string> = { pending: '#f59e0b', confirmed: '#
 const STATUS_LABEL: Record<string, string> = { pending: 'Pendente', confirmed: 'Confirmado', arrived: 'Chegou', cancelled: 'Cancelado' }
 
 const DEF = {
-  name: '', event_date: '', genre: 'Sertanejo', start_time: '22:00', end_time: '04:00',
+  name: '', event_date: '', genre: 'Sertanejo', start_time: '', end_time: '',
   price_male_cents: 0, price_female_cents: 0, price_male_list_cents: 0, price_female_list_cents: 0,
   list_cutoff_time: '', price_male_list_early_cents: 0, price_female_list_early_cents: 0,
   promotions: '', repeat_rule: 'none', capacity: '', birthday_list_enabled: false, house_list_enabled: false,
@@ -1930,7 +1930,18 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     URL.revokeObjectURL(url)
   }
 
-  function openNew() { setEditing(null); setForm(DEF); setArtists([]); setPromos([]); setModal(true) }
+  function openNew() {
+    setEditing(null)
+    // Horario da casa, nao 22h-04h fixo. O padrao antigo so servia a casa noturna, e
+    // o sistema tambem atende bar e comercio com turno diurno — quem abre as 11h
+    // tinha de corrigir os dois campos em todo evento que criava.
+    setForm({
+      ...DEF,
+      start_time: (house.open_time ?? '22:00').slice(0, 5),
+      end_time: (house.close_time ?? '04:00').slice(0, 5),
+    })
+    setArtists([]); setPromos([]); setModal(true)
+  }
 
   // "Dia de operação": a casa abre sem evento, mas precisa de equipe escalada.
   // Cria um evento leve (is_operation) que reusa escala, check-in de equipe, tarefas, budget e agenda.

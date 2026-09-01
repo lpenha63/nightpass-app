@@ -37,7 +37,7 @@ export async function sendTicketWhatsApp(
     const token = tks?.[0]?.token
     if (!token) return
 
-    const appUrl = process.env.APP_URL ?? 'https://nightpass-app.vercel.app'
+    const appUrl = (process.env.APP_URL || '').trim() || 'https://www.nightpassapp.com.br'
     const link = `${appUrl}/ingresso/${token}`
     const casa = (ev as { houses?: { name?: string } } | null)?.houses?.name
     const data = ev?.event_date
