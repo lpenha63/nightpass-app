@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Btn } from '../components/ui'
@@ -300,7 +300,14 @@ export function ReportsPage({ house }: Props) {
   const [dailyCI, setDailyCI] = useState<DailyCI[]>([])
   const [horaCI, setHoraCI] = useState<HoraCI[]>([])
   const [weekdayCompare, setWeekdayCompare] = useState<DailyCI[]>([])
-  const [compareDow, setCompareDow] = useState<number>(new Date().getDay())
+  // Dia da semana do comparativo. Comeca no dia do PERIODO selecionado, nao no dia de
+  // hoje: quem filtrou o relatorio em 01/09 (terca) quer comparar com outras tercas, e
+  // nao com as quartas so porque hoje e quarta.
+  // O T12:00 e necessario — sem ele a data vira meia-noite UTC e, no Brasil, cai no
+  // dia anterior, devolvendo o dia da semana errado.
+  const dowDe = (d: string) => new Date(d + 'T12:00').getDay()
+  const [compareDow, setCompareDow] = useState<number>(() => dowDe(rangeFor('month', '', '').end))
+  const periodoRef = useRef('')
   const [eventCI, setEventCI] = useState<EventCI[]>([])
   const [ticketRows, setTicketRows] = useState<TicketRow[]>([])
   const [prev, setPrev] = useState({ faturamento: 0, checkins: 0, novos: 0 })
@@ -309,6 +316,16 @@ export function ReportsPage({ house }: Props) {
   const [birthdays, setBirthdays] = useState<{ name: string; phone: string; date: string; mmdd: string; festa: string | null }[]>([])
 
   const { start, end, label } = rangeFor(period, customStart, customEnd)
+
+  // Trocou o periodo, o comparativo acompanha. Quem escolher outro dia no seletor
+  // manda ate a proxima troca de periodo.
+  useEffect(() => {
+    const chave = `${start}|${end}`
+    if (periodoRef.current === chave) return
+    periodoRef.current = chave
+    setCompareDow(dowDe(end))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, end])
   // Limites no fuso de São Paulo (UTC-3, fixo). Sem o offset, strings naive são lidas
   // como UTC e cortam check-ins do fim da noite (ex.: dia custom vinha 100 em vez de 164).
   const startTs = start + 'T00:00:00-03'
@@ -1655,7 +1672,11 @@ export function ReportsPage({ house }: Props) {
               <div style={{ fontWeight: 800, fontSize: 16, color: C.txt }}>🔁 Comparativo — {WDPLUR[compareDow]}</div>
               <select value={compareDow} onChange={e => setCompareDow(Number(e.target.value))}
                 style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '5px 10px', color: C.txt, fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
-                {WDSING.map((w, i) => <option key={i} value={i}>{w}{i === todayDow ? ' (hoje)' : ''}</option>)}
+                {WDSING.map((w, i) => (
+                  <option key={i} value={i}>
+                    {w}{i === todayDow ? ' (hoje)' : i === dowDe(end) ? ' (do período)' : ''}
+                  </option>
+                ))}
               </select>
             </div>
             {sameDow.length < 2 ? (
