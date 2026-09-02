@@ -98,6 +98,9 @@ interface FreelancerRank {
 }
 interface FinSummary { faturamento: number; revCheckins: number; revTickets: number; checkins: number; ticketMedio: number }
 interface ClientStats { novos: number; distinct: number; recorrentes: number; recorrenciaPct: number }
+/** Uma barra do gráfico por hora, numa noite só */
+interface HoraCI { hora: number; label: string; n: number; rev: number }
+
 interface OpsStats { bestDayLabel: string; bestDayN: number; peakHour: number; peakHourN: number; resTotal: number; resArrived: number }
 interface DailyCI { day: string; label: string; n: number; rev: number }
 interface EventCI { id: string; name: string; date: string; genre?: string; total: number; pagantes: number; cortesias: number; male: number; female: number; capacity: number; rev: number; reservas: number; ingressos: number }
@@ -295,6 +298,7 @@ export function ReportsPage({ house }: Props) {
   const [reservasPeriodo, setReservasPeriodo] = useState(0)
   const [ops, setOps] = useState<OpsStats>({ bestDayLabel: '—', bestDayN: 0, peakHour: 0, peakHourN: 0, resTotal: 0, resArrived: 0 })
   const [dailyCI, setDailyCI] = useState<DailyCI[]>([])
+  const [horaCI, setHoraCI] = useState<HoraCI[]>([])
   const [weekdayCompare, setWeekdayCompare] = useState<DailyCI[]>([])
   const [compareDow, setCompareDow] = useState<number>(new Date().getDay())
   const [eventCI, setEventCI] = useState<EventCI[]>([])
@@ -432,6 +436,35 @@ export function ReportsPage({ house }: Props) {
       day: d, label: new Date(d + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), n: v.n, rev: v.rev,
     }))
     setDailyCI(daily)
+
+    // ── Check-ins por hora ──
+    // Só faz sentido quando o período cobre UMA noite: com várias, a soma por hora
+    // mistura eventos diferentes e não descreve nenhum.
+    //
+    // A ordem das horas segue a NOITE, não o relógio: começa às 8h e termina às 7h do
+    // dia seguinte. Num eixo 0–23 comum, a madrugada — que costuma ser o pico —
+    // apareceria destacada na ponta esquerda, antes da abertura da casa.
+    if (daily.length === 1) {
+      const porHora: Record<number, { n: number; rev: number }> = {}
+      cins.forEach(c => {
+        const h = new Date(c.created_at).getHours()
+        if (!porHora[h]) porHora[h] = { n: 0, rev: 0 }
+        porHora[h].n++; porHora[h].rev += effAmt(c)
+      })
+      const sequencia = [...Array(16).keys()].map(i => i + 8).concat([...Array(8).keys()])  // 8..23, 0..7
+      const comDado = sequencia.map((h, i) => ({ h, i })).filter(x => porHora[x.h])
+      if (comDado.length > 0) {
+        // Corta nas pontas, mas preserva as horas vazias DO MEIO: uma hora sem ninguém
+        // no meio da noite é informação, não ruído.
+        const recorte = sequencia.slice(comDado[0].i, comDado[comDado.length - 1].i + 1)
+        setHoraCI(recorte.map(h => ({
+          hora: h,
+          label: `${String(h).padStart(2, '0')}h`,
+          n: porHora[h]?.n ?? 0,
+          rev: porHora[h]?.rev ?? 0,
+        })))
+      } else setHoraCI([])
+    } else setHoraCI([])
 
     // ── Check-ins por evento (público, pagantes × cortesias, gênero, ocupação) ──
     const evMap: Record<string, EventCI> = {}
@@ -1232,6 +1265,11 @@ export function ReportsPage({ house }: Props) {
   const avgMargin = totRev > 0 ? Math.round(totProfit / totRev * 100) : 0
   const monthMax = Math.max(...evolucao.map(m => m.rev), 1)
   const dayMax = Math.max(...dailyCI.map(d => d.n), 1)
+  // Uma noite so: o grafico por dia viraria uma barra unica, que nao diz nada. Nesse
+  // caso ele abre em horas e mostra o fluxo de chegada.
+  const umaNoite = dailyCI.length === 1 && horaCI.length > 0
+  const horaMax = Math.max(...horaCI.map(h => h.n), 1)
+  const horaPico = horaCI.reduce<HoraCI | null>((a, h) => (!a || h.n > a.n ? h : a), null)
   const ciPagantes = eventCI.reduce((s, e) => s + e.pagantes, 0)
   const ciCortesias = eventCI.reduce((s, e) => s + e.cortesias, 0)
   const pctCortesias = (ciPagantes + ciCortesias) > 0 ? Math.round(ciCortesias / (ciPagantes + ciCortesias) * 100) : 0
@@ -1550,18 +1588,46 @@ export function ReportsPage({ house }: Props) {
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 16, color: C.txt }}>🚪 Check-ins por dia</div>
-            <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>Movimento da portaria — {label}</div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: C.txt }}>
+              🚪 Check-ins por {umaNoite ? 'hora' : 'dia'}
+            </div>
+            <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
+              {umaNoite ? 'Fluxo de chegada da noite' : 'Movimento da portaria'} — {label}
+            </div>
           </div>
           {dailyCI.length > 0 && (
             <div style={{ textAlign: 'right' }}>
-              <div style={{ color: C.acc, fontSize: 20, fontWeight: 900 }}>{Math.round(fin.checkins / dailyCI.length)}</div>
-              <div style={{ color: C.mut, fontSize: 10 }}>média/dia</div>
+              {umaNoite && horaPico
+                ? <>
+                    <div style={{ color: C.acc, fontSize: 20, fontWeight: 900 }}>{horaPico.label}</div>
+                    <div style={{ color: C.mut, fontSize: 10 }}>hora de pico · {horaPico.n} pessoas</div>
+                  </>
+                : <>
+                    <div style={{ color: C.acc, fontSize: 20, fontWeight: 900 }}>{Math.round(fin.checkins / dailyCI.length)}</div>
+                    <div style={{ color: C.mut, fontSize: 10 }}>média/dia</div>
+                  </>}
             </div>
           )}
         </div>
         {dailyCI.length === 0
           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '36px 0' }}>Sem check-ins no período.</div>
+          : umaNoite
+          ? <div className="r-scroll-x"><div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 150, minWidth: horaCI.length * 34 }}>
+              {horaCI.map(h => (
+                <div key={h.hora} title={`${h.label}: ${h.n} check-ins · ${fmtCurrency(h.rev)}`}
+                  style={{ flex: 1, minWidth: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                  <div style={{ fontSize: 10, color: h.n > 0 ? C.sub : C.mut, fontWeight: 700, marginBottom: 3 }}>{h.n || ''}</div>
+                  <div className={`pbar ${h.n >= horaMax ? 'pbar-verde' : 'pbar-azul'}`}
+                    style={{
+                      width: '100%', maxWidth: 34, borderRadius: 5, transition: 'height .4s',
+                      background: h.n >= horaMax ? 'linear-gradient(180deg,#10b981,#059669)' : 'linear-gradient(180deg,#3b82f6,#1e3a8a)',
+                      height: `${Math.max(h.n > 0 ? 4 : 1, (h.n / horaMax) * 100)}%`,
+                      opacity: h.n > 0 ? 1 : 0.35,
+                    }} />
+                  <div style={{ fontSize: 9, color: C.mut, marginTop: 5, whiteSpace: 'nowrap' }}>{h.label}</div>
+                </div>
+              ))}
+            </div></div>
           : <div className="r-scroll-x"><div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 150, minWidth: dailyCI.length * 26 }}>
               {dailyCI.map((d, i) => (
                 <div key={i} title={`${d.label}: ${d.n} check-ins · ${fmtCurrency(d.rev)}`} style={{ flex: 1, minWidth: 22, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
