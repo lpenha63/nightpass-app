@@ -315,7 +315,24 @@ export function ReportsPage({ house }: Props) {
   const [eventReferral, setEventReferral] = useState<Record<string, { k: string; v: number }[]>>({})
   const [birthdays, setBirthdays] = useState<{ name: string; phone: string; date: string; mmdd: string; festa: string | null }[]>([])
 
-  const { start, end, label } = rangeFor(period, customStart, customEnd)
+  // O que esta no campo (customStart/customEnd) e o que MANDA no relatorio sao coisas
+  // diferentes de proposito.
+  //
+  // <input type="date"> dispara onChange a cada digito do ano: digitar "2026" passa
+  // por 0002, 0020, 0202 e so entao 2026 — quatro datas completas e validas, cada uma
+  // recarregando o relatorio inteiro. A tela reprocessava no meio da digitacao e os
+  // digitos seguintes se perdiam. Foi assim que nasceu um periodo terminando em 2222.
+  //
+  // Agora o campo responde na hora e a consulta espera a digitacao parar.
+  const [aplicado, setAplicado] = useState({ ini: '', fim: '' })
+  useEffect(() => {
+    const id = setTimeout(() => setAplicado({ ini: customStart, fim: customEnd }), 800)
+    return () => clearTimeout(id)
+  }, [customStart, customEnd])
+  const digitando = period === 'custom'
+    && (customStart !== aplicado.ini || customEnd !== aplicado.fim)
+
+  const { start, end, label } = rangeFor(period, aplicado.ini, aplicado.fim)
 
   // Trocou o periodo, o comparativo acompanha. Quem escolher outro dia no seletor
   // manda ate a proxima troca de periodo.
@@ -830,7 +847,7 @@ export function ReportsPage({ house }: Props) {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [house.id, period, customStart, customEnd])
+  useEffect(() => { load() }, [house.id, period, aplicado.ini, aplicado.fim])
 
   // Comparativo por dia da semana (últimas 6 sextas, sábados, etc.) — independente do período selecionado
   useEffect(() => {
@@ -1415,6 +1432,13 @@ export function ReportsPage({ house }: Props) {
             <input type="date" value={customEnd} min={customStart || RELATORIO.min} max={RELATORIO.max}
               onChange={e => { const v = e.target.value; setCustomEnd(v); if (!customStart || customStart > v) setCustomStart(v) }}
               style={dtInput} />
+            {/* Enquanto espera a digitacao parar, os numeros na tela ainda sao os do
+                periodo anterior. Dizer isso evita a pessoa ler o dado errado. */}
+            {digitando && (
+              <span style={{ color: C.gold, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' as const }}>
+                ⏳ atualizando…
+              </span>
+            )}
             {/* Atalhos: o caso real e "semana passada", nao datas soltas */}
             {([['Esta semana', 0], ['Semana passada', 1]] as const).map(([rot, atras]) => (
               <button key={rot} onClick={() => {
@@ -1422,6 +1446,7 @@ export function ReportsPage({ house }: Props) {
                 const seg = new Date(h); seg.setDate(h.getDate() - ((h.getDay() + 6) % 7) - 7 * atras)
                 const dom = new Date(seg); dom.setDate(seg.getDate() + 6)
                 setCustomStart(isoDay(seg)); setCustomEnd(isoDay(dom))
+                setAplicado({ ini: isoDay(seg), fim: isoDay(dom) })   // clique nao precisa esperar
               }} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '6px 10px', color: C.sub, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                 {rot}
               </button>
