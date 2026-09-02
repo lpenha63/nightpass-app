@@ -7,6 +7,7 @@ import { sendWADirect } from '../utils/whatsapp'
 import { sT, type ToastState } from '../utils/toast'
 import { Toast } from '../components/ui'
 import type { House } from '../types'
+import { custoDaEscala, type EscalaComCusto } from '../utils/custoEquipe'
 
 // Teto das tabelas de ranking: 12 linhas visiveis, o resto rola por dentro.
 // Sem isso a lista da equipe (49 pessoas) empurrava o restante do relatorio
@@ -20,15 +21,7 @@ import type { House } from '../types'
  * por isso o custo aqui divergia da folha (R$ 1.020 contra R$ 1.360 no mesmo dia)
  * e quem não tinha diária cadastrada aparecia como R$ 0,00.
  */
-function custoFreelancer(f: unknown): number {
-  const r = f as {
-    paid_cents?: number | null; custom_fee_cents?: number | null; discount_cents?: number | null
-    freelancers?: { daily_rate_cents?: number } | null
-  }
-  if (r.paid_cents != null) return r.paid_cents
-  const bruto = r.custom_fee_cents ?? r.freelancers?.daily_rate_cents ?? 0
-  return Math.max(0, bruto - (r.discount_cents ?? 0))
-}
+const custoFreelancer = (f: unknown): number => custoDaEscala(f as EscalaComCusto)
 
 // Colunas do "Público por Evento" — em uma const so para cabecalho e linha nunca
 // saírem de sincronia (ja aconteceu de a coluna nova desalinhar a tabela inteira).
@@ -582,7 +575,7 @@ export function ReportsPage({ house }: Props) {
     setEventCI(prev => prev.map(e => ({ ...e, ingressos: tkQtdPorEvento[e.id] ?? 0 })))
 
     const [frR, plR, riR, promosR, expR, tkTaskR] = await Promise.all([
-      supabase.from('event_freelancers').select('event_id,custom_fee_cents,discount_cents,paid_cents,freelancer_id,role,checkin_at,checkout_at,entry_time,freelancers(full_name,daily_rate_cents,pix_key,phone)').in('event_id', eventIds),
+      supabase.from('event_freelancers').select('event_id,custom_fee_cents,discount_cents,paid_cents,freelancer_id,role,checkin_at,checkout_at,entry_time,freelancers(full_name,daily_rate_cents,staff_type,pix_key,phone)').in('event_id', eventIds),
       supabase.from('promoter_lists').select('id,name,promoter_id,event_id,fixed_fee_cents,min_entries,entry_fee_cents,consumacao_cents').in('event_id', eventIds),
       supabase.from('reservation_items').select('quantity,unit_cost_cents,reservations!inner(event_id)').in('reservations.event_id', eventIds),
       supabase.from('promoters').select('id,full_name').eq('house_id', house.id),

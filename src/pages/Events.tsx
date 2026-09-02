@@ -11,6 +11,7 @@ import type { House, Event, ArtistEntry, PromotionEntry, PromoterPriceMode, Free
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 import { canUseFeature } from '../constants/permissions'
 import { NASCIMENTO, AGENDA, AGENDA_EDICAO, dataPlausivel } from '../utils/limitesDeData'
+import { custoDaEscala, type EscalaComCusto } from '../utils/custoEquipe'
 
 function fmtMoneyInput(v: number | string): string {
   const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')) || 0
@@ -290,12 +291,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
    * Antes o Budget usava só a diária: mostrava um número e a folha outro, para a mesma
    * noite, porque o cálculo da folha depende de chaves que vivem só naquela tela.
    */
-  const custoFr = (ef: EventFreelancer) => {
-    const pago = (ef as { paid_cents?: number | null }).paid_cents
-    if (pago != null) return pago
-    const bruto = (ef as { custom_fee_cents?: number | null }).custom_fee_cents ?? ef.freelancers?.daily_rate_cents ?? 0
-    return Math.max(0, bruto - ((ef as { discount_cents?: number | null }).discount_cents ?? 0))
-  }
+  const custoFr = (ef: EventFreelancer) => custoDaEscala(ef as unknown as EscalaComCusto)
   interface BudgetPromoterList { id: string; name: string; fixed_fee_cents: number; min_entries: number; entry_fee_cents: number; consumacao_cents: number; guest_count: number; promoters?: { full_name: string } }
   interface BudgetResItem { name: string; quantity: number; unit_cost_cents: number; reservations?: { name: string } }
   const [budgetPromoters, setBudgetPromoters] = useState<BudgetPromoterList[]>([])
@@ -483,7 +479,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       supabase.from('event_tasks').select('*').eq('event_id', ev.id).order('area').order('sort_order'),
       supabase.from('reservations').select('*, reservation_items(name, quantity, unit_cost_cents)')
         .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled'),
-      supabase.from('event_freelancers').select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', ev.id),
+      supabase.from('event_freelancers').select('*, freelancers(full_name, work_types, daily_rate_cents, staff_type, phone)').eq('event_id', ev.id),
     ])
     setProdTasks((tasksR.data ?? []) as EventTask[])
     setProdRes(((resR.data ?? []) as ProdReservation[]).filter(r => reservaConta(r, ev.event_date)))
@@ -493,7 +489,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   async function reloadProdFr() {
     if (!prodEv) return
     const { data } = await supabase.from('event_freelancers')
-      .select('*, freelancers(full_name, work_types, daily_rate_cents, phone)').eq('event_id', prodEv.id)
+      .select('*, freelancers(full_name, work_types, daily_rate_cents, staff_type, phone)').eq('event_id', prodEv.id)
     setProdFr((data ?? []) as EventFreelancer[])
   }
 
@@ -932,7 +928,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   function loadEvFreelancers(ev: EventWithCounts) {
     setFrModal(ev)
     setEvFreelancers([])
-    supabase.from('event_freelancers').select('*,freelancers(full_name,work_types,daily_rate_cents,phone)')
+    supabase.from('event_freelancers').select('*,freelancers(full_name,work_types,daily_rate_cents,staff_type,phone)')
       .eq('event_id', ev.id)
       .then(r => {
         const rows = (r.data ?? []) as EventFreelancer[]

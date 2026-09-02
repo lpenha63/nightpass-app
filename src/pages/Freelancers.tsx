@@ -382,7 +382,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     if (!evId) return
     setPontoLdg(true)
     const { data, error } = await supabase.from('event_freelancers')
-      .select('id,role,confirmed,checkin_at,checkout_at,custom_fee_cents,discount_cents,discount_reason,paid_cents,checkin_source,checkout_source,freelancer_id,freelancers(full_name,pix_key,phone,daily_rate_cents,hourly_rate_cents,work_meta)')
+      .select('id,role,confirmed,checkin_at,checkout_at,custom_fee_cents,discount_cents,discount_reason,paid_cents,checkin_source,checkout_source,freelancer_id,freelancers(full_name,pix_key,phone,daily_rate_cents,hourly_rate_cents,work_meta,staff_type)')
       .eq('event_id', evId)
     setPontoLdg(false)
     if (error) { st2('Erro ao carregar o ponto: ' + error.message, 'error'); return }
@@ -392,7 +392,7 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       checkin_source?: string; checkout_source?: string; freelancer_id: string
       freelancers?: {
         full_name?: string; pix_key?: string; phone?: string
-        daily_rate_cents?: number; hourly_rate_cents?: number
+        daily_rate_cents?: number; hourly_rate_cents?: number; staff_type?: string
         work_meta?: { shift_hours?: string | null } | null
       }
     }>).map(r => ({
@@ -401,7 +401,11 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
       pix: r.freelancers?.pix_key, phone: r.freelancers?.phone,
       checkin: r.checkin_at ?? null, checkout: r.checkout_at ?? null,
       entrada: hhmm(r.checkin_at ?? null), saida: hhmm(r.checkout_at ?? null),
-      diaria: r.custom_fee_cents ?? r.freelancers?.daily_rate_cents ?? 0,
+      // Funcionario e assalariado: a diaria do cadastro nao vale para ele. So custa
+      // quando fez jornada de freelance, e ai o valor foi lancado a mao.
+      diaria: r.custom_fee_cents
+        ?? ((r.freelancers?.staff_type ?? 'freelancer') === 'funcionario' ? 0 : r.freelancers?.daily_rate_cents)
+        ?? 0,
       hora: r.freelancers?.hourly_rate_cents ?? null,
       contratadas: Number(r.freelancers?.work_meta?.shift_hours) || null,
       desconto: r.discount_cents ?? 0,
