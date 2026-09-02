@@ -26,6 +26,15 @@ const custoFreelancer = (f: unknown): number => custoDaEscala(f as EscalaComCust
 // Colunas do "Público por Evento" — em uma const so para cabecalho e linha nunca
 // saírem de sincronia (ja aconteceu de a coluna nova desalinhar a tabela inteira).
 const GRID_PUB = '1fr 62px 74px 62px 70px 82px 76px'
+/**
+ * Faixa dos campos de periodo. Relatorio olha para tras: nao existe desempenho de
+ * evento que ainda nao aconteceu, entao a data maxima e hoje.
+ */
+const RELATORIO = {
+  get min() { return `${new Date().getFullYear() - 5}-01-01` },
+  get max() { return new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10) },
+}
+
 const GRID_TK = '1.4fr 1fr 56px 96px 72px 60px'
 const LINHAS_VISIVEIS = 12
 const ALTURA_LINHA = 35   // padding 8+8 + linha ~18 + borda
@@ -158,8 +167,21 @@ function rangeFor(key: PeriodKey, cs: string, ce: string): { start: string; end:
   // hoje, entao nunca sai um range invertido que zeraria a tela inteira.
   const s = cs || ce || end
   const e = ce || cs || end
-  const [ini, fim] = s <= e ? [s, e] : [e, s]
-  const br = (d: string) => new Date(d + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  let [ini, fim] = s <= e ? [s, e] : [e, s]
+  // Segunda camada: min/max no campo marcam como invalido mas nao impedem o envio.
+  // Sem isto, um "2222" digitado no ano faz o relatorio varrer a base inteira e
+  // parecer que o filtro nao funciona.
+  if (ini < RELATORIO.min) ini = RELATORIO.min
+  if (fim > RELATORIO.max) fim = RELATORIO.max
+  if (ini > fim) ini = fim
+  // Mostra o ano quando ele NAO e o corrente. Sem isso, um periodo terminando em
+  // 2222 (ano digitado errado no campo) aparecia no titulo como "01/09", identico a
+  // um periodo de um dia — o relatorio trazia tudo e parecia nao estar filtrando.
+  const anoAtual = String(new Date().getFullYear())
+  const br = (d: string) => new Date(d + 'T12:00').toLocaleDateString('pt-BR',
+    d.slice(0, 4) === anoAtual
+      ? { day: '2-digit', month: '2-digit' }
+      : { day: '2-digit', month: '2-digit', year: 'numeric' })
   return { start: ini, end: fim, label: ini === fim ? br(ini) : `${br(ini)} a ${br(fim)}` }
 }
 
@@ -1331,11 +1353,11 @@ export function ReportsPage({ house }: Props) {
             <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>📅 De</span>
             {/* Antes um input so preenchia inicio E fim: dava para ver um dia, nunca
                 uma semana. Fechamento semanal/quinzenal precisa dos dois extremos. */}
-            <input type="date" value={customStart} max={customEnd || undefined}
+            <input type="date" value={customStart} min={RELATORIO.min} max={customEnd || RELATORIO.max}
               onChange={e => { const v = e.target.value; setCustomStart(v); if (!customEnd || customEnd < v) setCustomEnd(v) }}
               style={dtInput} />
             <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>até</span>
-            <input type="date" value={customEnd} min={customStart || undefined}
+            <input type="date" value={customEnd} min={customStart || RELATORIO.min} max={RELATORIO.max}
               onChange={e => { const v = e.target.value; setCustomEnd(v); if (!customStart || customStart > v) setCustomStart(v) }}
               style={dtInput} />
             {/* Atalhos: o caso real e "semana passada", nao datas soltas */}
