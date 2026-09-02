@@ -326,7 +326,9 @@ export function ReportsPage({ house }: Props) {
   // Agora o campo responde na hora e a consulta espera a digitacao parar.
   const [aplicado, setAplicado] = useState({ ini: '', fim: '' })
   useEffect(() => {
-    const id = setTimeout(() => setAplicado({ ini: customStart, fim: customEnd }), 800)
+    // 1,5s: 800ms ainda cortava a digitacao do ano. E tempo de espera, nao de leitura —
+    // o indicador ao lado do campo avisa que a tela esta aguardando.
+    const id = setTimeout(() => setAplicado({ ini: customStart, fim: customEnd }), 1500)
     return () => clearTimeout(id)
   }, [customStart, customEnd])
   const digitando = period === 'custom'
