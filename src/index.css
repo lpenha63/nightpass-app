@@ -91,6 +91,11 @@ html { scrollbar-width: auto; scrollbar-color: rgba(59,130,246,0.45) transparent
 
 /* Listas longas (convidados, rankings): mesmo azul do resto do app, só que mais
    forte — a distinção vem do contraste, não de uma cor diferente. */
+/* Conteudo mais largo que o card rola DENTRO dele, em qualquer tamanho de tela.
+   Esta regra existia so dentro do @media de celular; no desktop nao havia nenhuma, e
+   o grafico de 90 dias (45 barras x 26px) empurrava a pagina inteira para o lado. */
+.r-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
 .r-scroll-y { scrollbar-width: auto; scrollbar-color: rgba(59,130,246,0.65) transparent; }
 .r-scroll-y::-webkit-scrollbar { width: 14px; }
 .r-scroll-y::-webkit-scrollbar-thumb {

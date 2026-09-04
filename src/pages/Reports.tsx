@@ -299,6 +299,7 @@ export function ReportsPage({ house }: Props) {
   const [ops, setOps] = useState<OpsStats>({ bestDayLabel: '—', bestDayN: 0, peakHour: 0, peakHourN: 0, resTotal: 0, resArrived: 0 })
   const [dailyCI, setDailyCI] = useState<DailyCI[]>([])
   const [horaCI, setHoraCI] = useState<HoraCI[]>([])
+  const [agrupadoPorSemana, setAgrupadoPorSemana] = useState(false)
   const [weekdayCompare, setWeekdayCompare] = useState<DailyCI[]>([])
   // Dia da semana do comparativo. Comeca no dia do PERIODO selecionado, nao no dia de
   // hoje: quem filtrou o relatorio em 01/09 (terca) quer comparar com outras tercas, e
@@ -471,7 +472,30 @@ export function ReportsPage({ house }: Props) {
     const daily: DailyCI[] = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).map(([d, v]) => ({
       day: d, label: new Date(d + 'T12:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), n: v.n, rev: v.rev,
     }))
-    setDailyCI(daily)
+    // Periodo longo agrupa por SEMANA. Noventa dias viram 45 barras de 26px — 1.170px
+    // dentro de um card de ~760px, que rola mas ninguem le. Mesmo princípio do grafico
+    // por hora: a granularidade acompanha o periodo.
+    const AGRUPA_ACIMA_DE = 35
+    if (daily.length > AGRUPA_ACIMA_DE) {
+      const porSemana: Record<string, { n: number; rev: number; ini: string }> = {}
+      daily.forEach(d => {
+        const dt = new Date(d.day + 'T12:00')
+        // Segunda-feira da semana daquele dia
+        const seg = new Date(dt); seg.setDate(dt.getDate() - ((dt.getDay() + 6) % 7))
+        const chave = localDay(seg)
+        if (!porSemana[chave]) porSemana[chave] = { n: 0, rev: 0, ini: chave }
+        porSemana[chave].n += d.n; porSemana[chave].rev += d.rev
+      })
+      setDailyCI(Object.values(porSemana).sort((a, b) => a.ini.localeCompare(b.ini)).map(s => {
+        const fim = new Date(s.ini + 'T12:00'); fim.setDate(fim.getDate() + 6)
+        const br = (x: Date) => `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}`
+        return { day: s.ini, label: `${br(new Date(s.ini + 'T12:00'))}–${br(fim)}`, n: s.n, rev: s.rev }
+      }))
+      setAgrupadoPorSemana(true)
+    } else {
+      setDailyCI(daily)
+      setAgrupadoPorSemana(false)
+    }
 
     // ── Check-ins por hora ──
     // Só faz sentido quando o período cobre UMA noite: com várias, a soma por hora
@@ -1633,10 +1657,12 @@ export function ReportsPage({ house }: Props) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 16, color: C.txt }}>
-              🚪 Check-ins por {umaNoite ? 'hora' : 'dia'}
+              🚪 Check-ins por {umaNoite ? 'hora' : agrupadoPorSemana ? 'semana' : 'dia'}
             </div>
             <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
-              {umaNoite ? 'Fluxo de chegada da noite' : 'Movimento da portaria'} — {label}
+              {umaNoite ? 'Fluxo de chegada da noite'
+                : agrupadoPorSemana ? 'Agrupado por semana — o período é longo demais para ler dia a dia'
+                : 'Movimento da portaria'} — {label}
             </div>
           </div>
           {dailyCI.length > 0 && (
@@ -1648,7 +1674,7 @@ export function ReportsPage({ house }: Props) {
                   </>
                 : <>
                     <div style={{ color: C.acc, fontSize: 20, fontWeight: 900 }}>{Math.round(fin.checkins / dailyCI.length)}</div>
-                    <div style={{ color: C.mut, fontSize: 10 }}>média/dia</div>
+                    <div style={{ color: C.mut, fontSize: 10 }}>média/{agrupadoPorSemana ? 'semana' : 'dia'}</div>
                   </>}
             </div>
           )}
@@ -1672,7 +1698,7 @@ export function ReportsPage({ house }: Props) {
                 </div>
               ))}
             </div></div>
-          : <div className="r-scroll-x"><div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 150, minWidth: dailyCI.length * 26 }}>
+          : <div className="r-scroll-x"><div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 150, minWidth: dailyCI.length * (agrupadoPorSemana ? 64 : 26) }}>
               {dailyCI.map((d, i) => (
                 <div key={i} title={`${d.label}: ${d.n} check-ins · ${fmtCurrency(d.rev)}`} style={{ flex: 1, minWidth: 22, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
                   <div style={{ fontSize: 10, color: C.sub, fontWeight: 700, marginBottom: 3 }}>{d.n}</div>
