@@ -38,6 +38,13 @@ interface Props { house: House; role?: string; allowedPages?: string[]; onGoToRe
  */
 
 
+/** Uma linha do fechamento mensal (RPC artistas_por_mes). */
+interface MesArtistas {
+  mes: string; noites: number
+  cache_cents: number; consumacao_cents: number; publico: number
+  cache_por_pessoa_cents: number | null; portaria_por_pessoa_cents: number | null
+}
+
 /** Resumo das noites com atracao (RPC artistas_resumo). */
 interface ResumoArtistas {
   noites: number; atracoes_distintas: number
@@ -49,6 +56,7 @@ interface ResumoArtistas {
 
 /** Colunas da tela de artistas — cabecalho e linha leem a mesma const. */
 const GRID_ART = '1.6fr 62px 82px 88px 96px 78px'
+const GRID_MES = '1.3fr 62px 96px 82px 92px 88px'
 
 /** Cadastro do artista: referencia reaproveitavel entre eventos. */
 interface ArtistaCad {
@@ -385,6 +393,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   const [listaArtistas, setListaArtistas] = useState(false)
   const [resumoArt, setResumoArt] = useState<ResumoArtistas | null>(null)
   const [artPeriodo, setArtPeriodo] = useState<'90' | '365' | 'tudo'>('tudo')
+  const [mesesArt, setMesesArt] = useState<MesArtistas[]>([])
   const [salvandoArtista, setSalvandoArtista] = useState(false)
 
   const acharArtista = (nome: string) =>
@@ -410,6 +419,8 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   function abrirArtistas() {
     setListaArtistas(true)
     carregarResumoArtistas(artPeriodo)
+    supabase.rpc('artistas_por_mes', { p_house: house.id, p_meses: 12 })
+      .then(r => setMesesArt((r.data as MesArtistas[] | null) ?? []))
     supabase.from('artists').select('*').eq('house_id', house.id).eq('active', true).order('name')
       .then(r => {
         const lista = (r.data ?? []) as ArtistaCad[]
@@ -5055,6 +5066,52 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
             </div>
           )
         })()}
+
+        {/* Fechamento mes a mes. O total do periodo esconde a variacao: nos dados de
+            hoje a portaria cobre 42% no geral, mas cobriu 23% em julho e 185% em
+            agosto. E a linha do mes que mostra isso. */}
+        {mesesArt.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ color: C.txt, fontWeight: 800, fontSize: 13.5, marginBottom: 2 }}>📆 Fechamento mês a mês</div>
+            <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 8 }}>
+              A cobertura é quanto a portaria pagou do cachê naquele mês.
+            </div>
+            <div className="r-scroll-x"><div style={{ minWidth: 560 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: GRID_MES, gap: 6, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '.05em' }}>
+                <div>MÊS</div>
+                <div style={{ textAlign: 'right' }}>NOITES</div>
+                <div style={{ textAlign: 'right' }}>CACHÊ</div>
+                <div style={{ textAlign: 'right' }}>PÚBLICO</div>
+                <div style={{ textAlign: 'right' }}>R$/PESSOA</div>
+                <div style={{ textAlign: 'right' }}>COBERTURA</div>
+              </div>
+              {mesesArt.map(m => {
+                const cpp = m.cache_por_pessoa_cents ?? 0
+                const ppp = m.portaria_por_pessoa_cents ?? 0
+                const cob = cpp > 0 ? Math.round((ppp / cpp) * 100) : null
+                const cor = cob == null ? C.mut : cob >= 100 ? C.grn : cob >= 60 ? C.gold : C.red
+                return (
+                  <div key={m.mes} style={{ display: 'grid', gridTemplateColumns: GRID_MES, gap: 6, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
+                    <div style={{ color: C.txt, fontWeight: 600, textTransform: 'capitalize' as const }}>
+                      {new Date(m.mes + '-02T12:00').toLocaleDateString('pt-BR', { month: 'long', year: '2-digit' })}
+                    </div>
+                    <div style={{ textAlign: 'right', color: C.sub }}>{m.noites}</div>
+                    <div style={{ textAlign: 'right', color: C.gold, fontWeight: 700, fontSize: 12 }}>{fmtCurrency(m.cache_cents)}</div>
+                    <div style={{ textAlign: 'right', color: C.acc, fontWeight: 700 }}>{Number(m.publico).toLocaleString('pt-BR')}</div>
+                    <div style={{ textAlign: 'right', color: C.sub, fontSize: 12 }}>{cpp ? fmtCurrency(cpp) : '—'}</div>
+                    <div style={{ textAlign: 'right' }}>
+                      {cob == null ? <span style={{ color: C.mut }}>—</span> : (
+                        <span style={{ background: cor + '22', color: cor, borderRadius: 6, padding: '2px 8px', fontSize: 12, fontWeight: 700 }}>
+                          {cob}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div></div>
+          </div>
+        )}
 
         {artistasCad.length === 0
           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '28px 0' }}>Nenhum artista cadastrado ainda.</div>
