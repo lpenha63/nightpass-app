@@ -167,7 +167,7 @@ export function DashboardPage({ house, role, houses = [], onTrocarCasa }: Props)
   const [dashRes, setDashRes] = useState<DashRes[]>([])
   const [todayEvent, setTodayEvent] = useState<TodayEvent | null>(null)
   const [upcoming, setUpcoming] = useState<InviteEvent[]>([])
-  const [upcomingRes, setUpcomingRes] = useState<{ event_id?: string | null; reservation_date?: string; people_count?: number }[]>([])
+  const [upcomingRes, setUpcomingRes] = useState<{ event_id?: string | null; reservation_date?: string; people_count?: number; reservation_guests?: Array<unknown> | null }[]>([])
   const [upcomingGuests, setUpcomingGuests] = useState<Record<string, { total: number; confirmed: number }>>({})
   const [evMetrics, setEvMetrics] = useState<EventMetrics | null>(null)
   const [teamToday, setTeamToday] = useState<TeamRow[]>([])
@@ -223,11 +223,15 @@ export function DashboardPage({ house, role, houses = [], onTrocarCasa }: Props)
       supabase.from('events').select('id,name,event_date,start_time,flyer_url')
         .eq('house_id', house.id).not('status', 'in', '(cancelado,encerrado)').gte('event_date', today)
         .order('event_date').order('start_time').limit(4),
-      supabase.from('reservations').select('event_id,reservation_date,people_count')
+      // reservation_guests(id) NAO e opcional aqui: esperadoDaReserva compara o
+      // declarado com o que ja foi cadastrado e, sem essa lista, ele degrada em
+      // silencio para o declarado — que foi como este card passou a mostrar 181
+      // enquanto a tela de Eventos mostrava 237 para o mesmo evento.
+      supabase.from('reservations').select('event_id,reservation_date,people_count,reservation_guests(id)')
         .eq('house_id', house.id).gte('reservation_date', today).is('archived_at', null).neq('status', 'cancelled'),
     ])
     setUpcoming((upEvR.data ?? []) as InviteEvent[])
-    setUpcomingRes((upResR.data ?? []) as { event_id?: string | null; reservation_date?: string; people_count?: number }[])
+    setUpcomingRes((upResR.data ?? []) as { event_id?: string | null; reservation_date?: string; people_count?: number; reservation_guests?: Array<unknown> | null }[])
     // Convidados (listas de promoter/casa) e confirmados por evento futuro
     const upEvIds = (upEvR.data ?? []).map(e => e.id)
     if (upEvIds.length > 0) {
@@ -1100,7 +1104,10 @@ export function DashboardPage({ house, role, houses = [], onTrocarCasa }: Props)
             const isToday = ev.event_date === bizTodayStr()
             const matchRes = upcomingRes.filter(r => r.event_id ? r.event_id === ev.id : r.reservation_date === ev.event_date)
             const resN = matchRes.length
-            const resPeople = matchRes.reduce((s, r) => s + (r.people_count ?? 0), 0)
+            // Mesma regra da tela de Eventos: vale o MAIOR entre o que a reserva
+            // declarou e quem ja foi cadastrado nela. Quem reservou para 70 e ja
+            // cadastrou 123 leva 123 — planejar a porta pelo declarado fura.
+            const resPeople = matchRes.reduce((s, r) => s + esperadoDaReserva(r), 0)
             const g = upcomingGuests[ev.id] ?? { total: 0, confirmed: 0 }
             const convidadosTotal = g.total + resPeople
             return (
