@@ -38,6 +38,24 @@ interface Props { house: House; role?: string; allowedPages?: string[]; onGoToRe
  */
 
 
+/** Cadastro do artista: referencia reaproveitavel entre eventos. */
+interface ArtistaCad {
+  id: string; name: string
+  genre?: string | null; members?: number | null; show_minutes?: number | null
+  fee_reference_cents?: number | null
+  contact_name?: string | null; whatsapp?: string | null; phone?: string | null
+  pix_key?: string | null; pix_holder?: string | null; instagram?: string | null
+  notes?: string | null
+}
+
+/** Resumo do que o artista ja fez na casa (RPC artista_historico). */
+interface HistArtista {
+  shows: number; publico_medio: number; melhor_noite: number
+  cache_medio_cents: number; ultimo_cache_cents: number
+  custo_por_pessoa_cents: number | null
+  shows_sozinho: number; ultima_data: string | null
+}
+
 interface EventUiCounts {
   checkinCount?: number
   pagantesCount?: number
@@ -344,6 +362,77 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
 
   // Artists
   const [artists, setArtists] = useState<ArtistEntry[]>([])
+
+  // ── Cadastro de artistas ──
+  // O cadastro guarda REFERENCIA (cache habitual, tempo de show, contato); o evento
+  // guarda a verdade daquela noite. Por isso nada aqui sobrescreve o que ja foi
+  // digitado no evento: so preenche campo vazio.
+  const [artistasCad, setArtistasCad] = useState<ArtistaCad[]>([])
+  const [histArtista, setHistArtista] = useState<Record<string, HistArtista>>({})
+  const [novoArtista, setNovoArtista] = useState<Partial<ArtistaCad> | null>(null)
+  const [salvandoArtista, setSalvandoArtista] = useState(false)
+
+  const acharArtista = (nome: string) =>
+    artistasCad.find(a => a.name.trim().toLowerCase() === nome.trim().toLowerCase())
+
+  useEffect(() => {
+    if (!modal) return
+    supabase.from('artists').select('*').eq('house_id', house.id).eq('active', true).order('name')
+      .then(r => setArtistasCad((r.data ?? []) as ArtistaCad[]))
+  }, [modal, house.id])
+
+  /** Busca o historico de um artista uma vez e guarda — o autocomplete redispara muito. */
+  function carregarHistorico(nome: string) {
+    const chave = nome.trim().toLowerCase()
+    if (!chave || histArtista[chave]) return
+    supabase.rpc('artista_historico', { p_house: house.id, p_nome: nome.trim() }).then(r => {
+      const h = (r.data as HistArtista[] | null)?.[0]
+      if (h) setHistArtista(prev => ({ ...prev, [chave]: h }))
+    })
+  }
+
+  /** Nome escolhido/digitado: preenche o que estiver VAZIO e busca o historico. */
+  function aoTrocarNomeArtista(i: number, nome: string) {
+    const atual = artists[i]
+    const cad = acharArtista(nome)
+    const patch: Partial<ArtistEntry> = { name: nome }
+    // Cache so entra se o campo estiver zerado: cada evento tem sua negociacao, e
+    // sobrescrever um valor ja combinado seria pior que nao preencher nada.
+    if (cad && !atual?.fee_cents && cad.fee_reference_cents) {
+      patch.fee_cents = cad.fee_reference_cents / 100
+    }
+    setArtist(i, patch)
+    if (cad) carregarHistorico(nome)
+  }
+
+  async function salvarNovoArtista() {
+    const nome = (novoArtista?.name ?? '').trim()
+    if (!nome) { st2('Informe o nome do artista.', 'warn'); return }
+    setSalvandoArtista(true)
+    const { data, error } = await supabase.from('artists').insert({
+      house_id: house.id,
+      name: nome,
+      genre: novoArtista?.genre || null,
+      members: novoArtista?.members || null,
+      show_minutes: novoArtista?.show_minutes || null,
+      fee_reference_cents: novoArtista?.fee_reference_cents || null,
+      contact_name: novoArtista?.contact_name || null,
+      whatsapp: novoArtista?.whatsapp || null,
+      phone: novoArtista?.phone || null,
+      pix_key: novoArtista?.pix_key || null,
+      pix_holder: novoArtista?.pix_holder || null,
+      instagram: novoArtista?.instagram || null,
+      notes: novoArtista?.notes || null,
+    }).select().single()
+    setSalvandoArtista(false)
+    if (error) {
+      st2(error.code === '23505' ? 'Já existe um artista com esse nome.' : 'Erro: ' + error.message, 'error')
+      return
+    }
+    setArtistasCad(prev => [...prev, data as ArtistaCad].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')))
+    setNovoArtista(null)
+    st2(`🎤 ${nome} cadastrado.`, 'success')
+  }
   function addArtist() { setArtists(a => [...a, { name: '', fee_type: 'fixed', fee_cents: 0, fee_percent: 0, consumption_cents: 0 }]) }
   function removeArtist(i: number) { setArtists(a => a.filter((_, idx) => idx !== i)) }
   function setArtist(i: number, patch: Partial<ArtistEntry>) { setArtists(a => a.map((ar, idx) => idx === i ? { ...ar, ...patch } : ar)) }
@@ -3447,9 +3536,16 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
               <span />
             </div>
           )}
+          {/* Lista do cadastro. O <datalist> nativo funciona no celular e e o mesmo
+              padrao ja usado em outros campos do app. */}
+          <datalist id="artistas-cadastrados">
+            {artistasCad.map(a => <option key={a.id} value={a.name} />)}
+          </datalist>
           {artists.map((ar, i) => (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 150px 1fr 110px 36px', gap: 8, marginBottom: 6, alignItems: 'center' }}>
-              <input {...inp} value={ar.name} onChange={e => setArtist(i, { name: e.target.value })} placeholder="Nome do artista..." />
+              <input {...inp} list="artistas-cadastrados" value={ar.name}
+                onChange={e => aoTrocarNomeArtista(i, e.target.value)}
+                placeholder="Buscar ou digitar..." />
               <select {...inp} value={ar.fee_type} onChange={e => setArtist(i, { fee_type: e.target.value as ArtistEntry['fee_type'] })}>
                 <option value="fixed">Fixo (R$)</option>
                 <option value="percent">% portaria</option>
@@ -3475,6 +3571,58 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
               {/* Consumação */}
               <input inputMode="decimal" {...inp} value={`R$ ${fmtMoneyInput(ar.consumption_cents)}`} onChange={e => setArtist(i, { consumption_cents: parseMoneyInput(e.target.value) })} />
               <button onClick={() => removeArtist(i)} style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 8, padding: '6px 8px', color: C.red, cursor: 'pointer', fontSize: 14 }}>✕</button>
+
+              {/* Faixa de apoio: ou o historico de quem ja tocou aqui, ou o convite
+                  para cadastrar quem ainda nao existe. Ocupa a linha inteira. */}
+              {(() => {
+                const nome = ar.name.trim()
+                if (!nome) return null
+                const cad = acharArtista(nome)
+                if (!cad) {
+                  return (
+                    <div style={{ gridColumn: '1 / -1', marginTop: -2, marginBottom: 4 }}>
+                      <button type="button" onClick={() => setNovoArtista({ name: nome })}
+                        style={{ background: C.gold + '18', border: `1px solid ${C.gold}44`, borderRadius: 8, padding: '4px 10px', color: C.gold, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        ＋ Cadastrar “{nome}”
+                      </button>
+                    </div>
+                  )
+                }
+                const h = histArtista[nome.toLowerCase()]
+                if (!h || h.shows === 0) return null
+                // A ressalva importa: numa noite com varias atracoes o publico e de
+                // todas. Sem dizer isso, o numero vira merito de um so.
+                const dividiu = h.shows - h.shows_sozinho
+                return (
+                  <div style={{ gridColumn: '1 / -1', marginTop: -2, marginBottom: 4, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5 }}>
+                    <span style={{ color: C.mut }}>
+                      🎤 {h.shows} {h.shows === 1 ? 'show' : 'shows'} aqui
+                    </span>
+                    {h.publico_medio > 0 && (
+                      <span style={{ color: C.acc, fontWeight: 700 }}>
+                        👥 {h.publico_medio} de público{h.shows > 1 ? ' em média' : ''}
+                      </span>
+                    )}
+                    {h.custo_por_pessoa_cents != null && h.custo_por_pessoa_cents > 0 && (
+                      <span style={{ color: C.grn, fontWeight: 700 }}
+                        title="Cachê dividido pelo público que veio — o número que diz se valeu">
+                        💸 {fmtCurrency(h.custo_por_pessoa_cents)} por pessoa
+                      </span>
+                    )}
+                    {h.ultimo_cache_cents > 0 && (
+                      <span style={{ color: C.sub }}>
+                        último cachê {fmtCurrency(h.ultimo_cache_cents)}
+                        {h.ultima_data ? ` · ${fd(h.ultima_data)}` : ''}
+                      </span>
+                    )}
+                    {dividiu > 0 && (
+                      <span style={{ color: C.gold }} title="Nessas noites o público foi de todas as atrações juntas">
+                        ⚠️ {dividiu === h.shows ? 'sempre dividiu' : `${dividiu} ${dividiu === 1 ? 'noite dividida' : 'noites divididas'}`} o palco
+                      </span>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           ))}
         </div>
@@ -4717,6 +4865,65 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Cadastro rápido de artista, aberto de dentro do evento.
+          Nasce com o nome que a pessoa ja digitou: cadastrar deixa de ser tarefa
+          separada e vira consequencia do trabalho normal. */}
+      <Modal open={!!novoArtista} title="🎤 Cadastrar artista" onClose={() => setNovoArtista(null)}>
+        {novoArtista && (() => {
+          const campo = (k: keyof ArtistaCad, rot: string, extra: Record<string, unknown> = {}) => (
+            <div>
+              <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 3 }}>{rot}</label>
+              <input {...inp} {...extra} value={String((novoArtista as Record<string, unknown>)[k] ?? '')}
+                onChange={e => setNovoArtista(p => ({ ...p, [k]: e.target.value }))} />
+            </div>
+          )
+          return (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div>
+                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 3 }}>Artista / banda *</label>
+                <input {...inp} value={novoArtista.name ?? ''} autoFocus
+                  onChange={e => setNovoArtista(p => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                {campo('genre', 'Estilo', { placeholder: 'Samba, pop…' })}
+                {campo('members', 'Integrantes', { type: 'number', min: 1 })}
+                {campo('show_minutes', 'Show (min)', { type: 'number', min: 0, placeholder: '90' })}
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 3 }}>Cachê de referência</label>
+                <input inputMode="decimal" {...inp}
+                  value={`R$ ${fmtMoneyInput((novoArtista.fee_reference_cents ?? 0) / 100)}`}
+                  onChange={e => setNovoArtista(p => ({ ...p, fee_reference_cents: Math.round(parseMoneyInput(e.target.value) * 100) }))} />
+                <div style={{ color: C.mut, fontSize: 10.5, marginTop: 3, lineHeight: 1.45 }}>
+                  Só pré-preenche o evento. O valor de cada noite continua sendo o que
+                  estiver no evento — cada show tem sua negociação.
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {campo('contact_name', 'Contato (quem negocia)')}
+                {campo('whatsapp', 'WhatsApp')}
+                {campo('phone', 'Telefone')}
+                {campo('instagram', 'Instagram', { placeholder: '@' })}
+                {campo('pix_key', 'Chave PIX')}
+                {campo('pix_holder', 'Favorecido do PIX')}
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 3 }}>Observações / rider</label>
+                <textarea {...inp} rows={2} value={novoArtista.notes ?? ''}
+                  onChange={e => setNovoArtista(p => ({ ...p, notes: e.target.value }))}
+                  placeholder="2 microfones sem fio, não toca antes das 22h…" />
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+                <Btn onClick={() => setNovoArtista(null)} variant="ghost">Cancelar</Btn>
+                <Btn onClick={salvarNovoArtista} disabled={salvandoArtista || !(novoArtista.name ?? '').trim()}>
+                  {salvandoArtista ? 'Salvando...' : 'Cadastrar'}
+                </Btn>
+              </div>
+            </div>
+          )
+        })()}
       </Modal>
 
       {/* Reservas — consulta (somente leitura + impressão p/ montagem) */}
