@@ -203,7 +203,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   const [editListForm, setEditListForm] = useState({ male: '', female: '', cutoff_exempt: false, fixed: '', minEntries: '', consumacao: '' })
   const [editListSaving, setEditListSaving] = useState(false)
   // Reservas dentro do modal de listas (interação completa)
-  interface RReserva { id: string; name: string; phone?: string; location?: string; people_count?: number; status: string; expected_arrival?: string; observations?: string; amount_cents?: number; list_type?: string; list_male_value_cents?: number; list_female_value_cents?: number; list_custom_value_cents?: number }
+  interface RReserva { id: string; name: string; phone?: string; location?: string; people_count?: number; status: string; expected_arrival?: string; observations?: string; amount_cents?: number; list_type?: string; list_male_value_cents?: number; list_female_value_cents?: number; list_custom_value_cents?: number; reservation_guests?: Array<unknown> | null }
   interface RGuestRow { id: string; name: string; phone?: string; birth_date?: string; checked_in?: boolean; confirmed?: boolean }
   const [listReservas, setListReservas] = useState<RReserva[]>([])
   const [selReserva, setSelReserva] = useState<string | null>(null)
@@ -1601,7 +1601,10 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
         supabase.from('promoter_lists').select('id,name,token,promoter_id,entry_fee_cents,entry_fee_male_cents,entry_fee_female_cents,consumacao_cents,min_entries,promoters(full_name)').eq('event_id', ev.id),
         supabase.from('birthday_lists').select('id,birthday_person_name').eq('event_id', ev.id).neq('status', 'cancelled'),
         // Inclui reservas feitas para a data do evento mas sem event_id vinculado (mesma regra do card)
-        supabase.from('reservations').select('id,people_count,status,event_id,reservation_date,archived_at')
+        // reservation_guests(id) e obrigatorio: esperadoDaReserva compara o declarado
+        // com quem ja foi cadastrado e, sem essa lista, degrada em silencio para o
+        // declarado. Trocar so a formula nao resolveria nada.
+        supabase.from('reservations').select('id,people_count,status,event_id,reservation_date,archived_at,reservation_guests(id)')
           .eq('house_id', house.id).neq('status', 'cancelled')
           .or(`event_id.eq.${ev.id},reservation_date.eq.${ev.event_date}`),
       ])
@@ -1623,10 +1626,13 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
         const { count } = await supabase.from('birthday_guests').select('id', { count: 'exact', head: true }).eq('birthday_list_id', b.id)
         rows.push({ key: 'bd_' + b.id, kind: 'birthday', icon: '🎂', label: `Aniversário · ${b.birthday_person_name}`, count: count ?? 0 })
       }
-      const resData = ((rsv.data ?? []) as Array<{ people_count?: number; event_id?: string | null; reservation_date?: string; archived_at?: string | null }>)
+      const resData = ((rsv.data ?? []) as Array<{ people_count?: number; event_id?: string | null; reservation_date?: string; archived_at?: string | null; reservation_guests?: Array<unknown> | null }>)
         .filter(row => row.event_id === ev.id || (!row.event_id && row.reservation_date === ev.event_date))
         .filter(row => reservaConta(row, ev.event_date))
-      if (resData.length) rows.push({ key: 'res', kind: 'res', icon: '🪑', label: 'Reservas', count: resData.length, people: resData.reduce((s, r) => s + (r.people_count ?? 0), 0) })
+      // Vale o MAIOR entre declarado e cadastrado — mesma regra do card do evento e do
+      // Dashboard. Aqui o numero fica lado a lado com o das listas de promoter, entao
+      // subestimar so este desequilibra a leitura da tela inteira.
+      if (resData.length) rows.push({ key: 'res', kind: 'res', icon: '🪑', label: 'Reservas', count: resData.length, people: resData.reduce((s, r) => s + esperadoDaReserva(r), 0) })
       setListSummary(rows)
     } catch { /* schema opcional — ignora se alguma tabela não existir */ }
   }
@@ -1705,7 +1711,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   function loadListReservas(ev: EventWithCounts) {
     // Inclui reservas feitas para a data do evento mas sem event_id vinculado (mesma regra do card)
     supabase.from('reservations')
-      .select('id,name,phone,location,people_count,status,expected_arrival,observations,amount_cents,list_type,list_male_value_cents,list_female_value_cents,list_custom_value_cents,event_id,reservation_date,archived_at')
+      .select('id,name,phone,location,people_count,status,expected_arrival,observations,amount_cents,list_type,list_male_value_cents,list_female_value_cents,list_custom_value_cents,event_id,reservation_date,archived_at,reservation_guests(id)')
       .eq('house_id', house.id).neq('status', 'cancelled')
       .or(`event_id.eq.${ev.id},reservation_date.eq.${ev.event_date}`)
       .order('expected_arrival')
@@ -3641,7 +3647,9 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
         {/* Lotação do evento: ocupação prevista (confirmados + pessoas em reservas) vs capacidade */}
         {guestEv && (guestEv.capacity ?? 0) > 0 && (() => {
           const confirmados = guests.filter(g => g.confirmed_at).length
-          const reservasPeople = listReservas.reduce((sum, r) => sum + (r.people_count ?? 0), 0)
+          // Contra a CAPACIDADE, subestimar e o erro perigoso: a tela diria que ainda
+          // cabe gente quando ja nao cabe. Vale o maior entre declarado e cadastrado.
+          const reservasPeople = listReservas.reduce((sum, r) => sum + esperadoDaReserva(r), 0)
           const ocup = confirmados + reservasPeople
           const cap = guestEv.capacity ?? 0
           const pct = Math.round((ocup / cap) * 100)
@@ -3680,7 +3688,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
           const houseTotal = houseLists0.reduce((s, r) => s + listStats(r.listId).total, 0)
           const promoterLists = listSummary.filter(r => r.kind === 'list' && !r.isHouse)
           const promoterTotal = promoterLists.reduce((s, r) => s + listStats(r.listId).total, 0)
-          const reservasPeople = listReservas.reduce((s, r) => s + (r.people_count ?? 0), 0)
+          const reservasPeople = listReservas.reduce((s, r) => s + esperadoDaReserva(r), 0)
           // Marcador da aba: nº de listas + total de pessoas (ex: "3 · 74")
           const tabBadge = (lists: number, people: number) => (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
