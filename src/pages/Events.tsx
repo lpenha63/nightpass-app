@@ -38,6 +38,15 @@ interface Props { house: House; role?: string; allowedPages?: string[]; onGoToRe
  */
 
 
+/** Resumo das noites com atracao (RPC artistas_resumo). */
+interface ResumoArtistas {
+  noites: number; atracoes_distintas: number
+  cache_total_cents: number; consumacao_total_cents: number; publico_total: number
+  cache_por_pessoa_cents: number | null; portaria_por_pessoa_cents: number | null
+  melhor_nome: string | null; melhor_custo_cents: number | null
+  pior_nome: string | null; pior_custo_cents: number | null
+}
+
 /** Colunas da tela de artistas — cabecalho e linha leem a mesma const. */
 const GRID_ART = '1.6fr 62px 82px 88px 96px 78px'
 
@@ -374,6 +383,8 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   const [histArtista, setHistArtista] = useState<Record<string, HistArtista>>({})
   const [novoArtista, setNovoArtista] = useState<Partial<ArtistaCad> | null>(null)
   const [listaArtistas, setListaArtistas] = useState(false)
+  const [resumoArt, setResumoArt] = useState<ResumoArtistas | null>(null)
+  const [artPeriodo, setArtPeriodo] = useState<'90' | '365' | 'tudo'>('tudo')
   const [salvandoArtista, setSalvandoArtista] = useState(false)
 
   const acharArtista = (nome: string) =>
@@ -388,8 +399,17 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   }, [modal, listaArtistas, house.id])
 
   /** Abre a tela e ja busca o historico de todos — e a coluna que da sentido a lista. */
+  function carregarResumoArtistas(periodo: '90' | '365' | 'tudo') {
+    const desde = periodo === 'tudo'
+      ? null
+      : new Date(Date.now() - Number(periodo) * 86400000).toISOString().slice(0, 10)
+    supabase.rpc('artistas_resumo', { p_house: house.id, p_desde: desde })
+      .then(r => setResumoArt(((r.data as ResumoArtistas[] | null) ?? [])[0] ?? null))
+  }
+
   function abrirArtistas() {
     setListaArtistas(true)
+    carregarResumoArtistas(artPeriodo)
     supabase.from('artists').select('*').eq('house_id', house.id).eq('active', true).order('name')
       .then(r => {
         const lista = (r.data ?? []) as ArtistaCad[]
@@ -4965,13 +4985,76 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       {/* Artistas da casa. A lista so se justifica pelas colunas de historico: sem
           elas seria uma agenda de contatos, e disso o celular ja da conta. */}
       <Modal open={listaArtistas} title="🎤 Artistas da casa" onClose={() => setListaArtistas(false)} wide>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-          <div style={{ color: C.sub, fontSize: 12.5, lineHeight: 1.5 }}>
-            O <b style={{ color: C.txt }}>custo por pessoa</b> é o cachê dividido pelo público que veio —
-            é ele que diz se valeu, não o público sozinho.
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {([['90', '90 dias'], ['365', '12 meses'], ['tudo', 'Tudo']] as const).map(([k, rot]) => (
+              <button key={k} onClick={() => { setArtPeriodo(k); carregarResumoArtistas(k) }}
+                style={{ background: artPeriodo === k ? C.acc + '22' : 'transparent', border: `1px solid ${artPeriodo === k ? C.acc : C.brd}`, color: artPeriodo === k ? C.acc : C.mut, borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {rot}
+              </button>
+            ))}
           </div>
           <Btn onClick={() => setNovoArtista({ name: '' })} small>＋ Novo artista</Btn>
         </div>
+
+        {/* Painel. A comparacao cache x portaria e o motivo dele existir: o resto
+            sao numeros que a lista abaixo ja mostra artista a artista. */}
+        {resumoArt && resumoArt.noites > 0 && (() => {
+          const cpp = resumoArt.cache_por_pessoa_cents ?? 0
+          const ppp = resumoArt.portaria_por_pessoa_cents ?? 0
+          const cobertura = cpp > 0 ? Math.round((ppp / cpp) * 100) : 0
+          const kpi = (rot: string, val: string, cor: string, sub?: string) => (
+            <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 12px', minWidth: 0 }}>
+              <div style={{ color: C.mut, fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' as const, marginBottom: 4, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rot}</div>
+              <div style={{ color: cor, fontSize: 18, fontWeight: 900, letterSpacing: '-.02em', whiteSpace: 'nowrap' as const }}>{val}</div>
+              {sub && <div style={{ color: C.mut, fontSize: 10, marginTop: 2, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
+            </div>
+          )
+          return (
+            <div style={{ marginBottom: 16 }}>
+              <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8, marginBottom: 10 }}>
+                {kpi('Noites com atração', String(resumoArt.noites), C.txt,
+                     `${resumoArt.publico_total.toLocaleString('pt-BR')} pessoas`)}
+                {kpi('Gasto com atrações', fmtCurrency(resumoArt.cache_total_cents), C.gold,
+                     resumoArt.consumacao_total_cents > 0 ? `+ ${fmtCurrency(resumoArt.consumacao_total_cents)} consumação` : undefined)}
+                {kpi('Cachê por pessoa', cpp ? fmtCurrency(cpp) : '—', C.red)}
+                {kpi('Portaria por pessoa', ppp ? fmtCurrency(ppp) : '—', C.grn,
+                     cpp > 0 ? `cobre ${cobertura}% do cachê` : undefined)}
+              </div>
+
+              {/* O bar nao passa pelo sistema. Sem dizer isso, o numero acima parece
+                  prejuizo — e nao e: e a parte da conta que o sistema enxerga. */}
+              {cpp > 0 && (
+                <div style={{ background: cobertura >= 100 ? C.grn + '10' : C.gold + '10', border: `1px solid ${cobertura >= 100 ? C.grn : C.gold}33`, borderRadius: 10, padding: '10px 12px', fontSize: 12, color: C.sub, lineHeight: 1.55 }}>
+                  {cobertura >= 100
+                    ? <>A portaria sozinha já paga as atrações — cada pessoa rende {fmtCurrency(ppp)} e custa {fmtCurrency(cpp)}.</>
+                    : <>Cada pessoa custa <b style={{ color: C.txt }}>{fmtCurrency(cpp)}</b> de cachê e rende <b style={{ color: C.txt }}>{fmtCurrency(ppp)}</b> na portaria — <b style={{ color: C.gold }}>{cobertura}%</b>. O restante precisa vir do bar, que não passa pelo sistema.</>}
+                </div>
+              )}
+
+              {/* Melhor e pior so consideram quem tocou SOZINHO: em noite dividida o
+                  publico e de todas as atracoes, e o ranking seria injusto. */}
+              {resumoArt.melhor_nome && resumoArt.pior_nome && resumoArt.melhor_nome !== resumoArt.pior_nome && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                  <div style={{ flex: '1 1 200px', background: C.grn + '10', border: `1px solid ${C.grn}33`, borderRadius: 10, padding: '8px 12px' }}>
+                    <div style={{ color: C.grn, fontSize: 10, fontWeight: 800, letterSpacing: '.05em' }}>MELHOR CUSTO</div>
+                    <div style={{ color: C.txt, fontSize: 13, fontWeight: 700, marginTop: 2 }}>{resumoArt.melhor_nome}</div>
+                    <div style={{ color: C.grn, fontSize: 12, fontWeight: 700 }}>{fmtCurrency(resumoArt.melhor_custo_cents ?? 0)} por pessoa</div>
+                  </div>
+                  <div style={{ flex: '1 1 200px', background: C.red + '10', border: `1px solid ${C.red}33`, borderRadius: 10, padding: '8px 12px' }}>
+                    <div style={{ color: C.red, fontSize: 10, fontWeight: 800, letterSpacing: '.05em' }}>MAIOR CUSTO</div>
+                    <div style={{ color: C.txt, fontSize: 13, fontWeight: 700, marginTop: 2 }}>{resumoArt.pior_nome}</div>
+                    <div style={{ color: C.red, fontSize: 12, fontWeight: 700 }}>{fmtCurrency(resumoArt.pior_custo_cents ?? 0)} por pessoa</div>
+                  </div>
+                </div>
+              )}
+              <div style={{ color: C.mut, fontSize: 10.5, marginTop: 8, lineHeight: 1.5 }}>
+                Melhor e maior custo consideram só quem tocou sozinho na noite — quando há
+                várias atrações, o público é de todas e o número não seria de ninguém.
+              </div>
+            </div>
+          )
+        })()}
 
         {artistasCad.length === 0
           ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '28px 0' }}>Nenhum artista cadastrado ainda.</div>
