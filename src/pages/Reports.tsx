@@ -35,6 +35,7 @@ const RELATORIO = {
   get max() { return new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10) },
 }
 
+const GRID_ATR = '1.7fr 62px 96px 88px 96px'
 const GRID_TK = '1.4fr 1fr 56px 96px 72px 60px'
 const LINHAS_VISIVEIS = 12
 const ALTURA_LINHA = 35   // padding 8+8 + linha ~18 + borda
@@ -100,6 +101,20 @@ interface FinSummary { faturamento: number; revCheckins: number; revTickets: num
 interface ClientStats { novos: number; distinct: number; recorrentes: number; recorrenciaPct: number }
 /** Uma barra do gráfico por hora, numa noite só */
 interface HoraCI { hora: number; label: string; n: number; rev: number }
+
+/** Resumo das noites com atracao no periodo (RPC artistas_resumo). */
+interface ResumoArt {
+  noites: number; cache_total_cents: number; consumacao_total_cents: number
+  publico_total: number
+  cache_por_pessoa_cents: number | null; portaria_por_pessoa_cents: number | null
+  melhor_nome: string | null; melhor_custo_cents: number | null
+  pior_nome: string | null; pior_custo_cents: number | null
+}
+/** Uma atracao no periodo (RPC artistas_no_periodo). */
+interface LinhaArt {
+  nome: string; shows: number; cache_cents: number; publico: number
+  custo_por_pessoa_cents: number | null; sozinho: number
+}
 
 interface OpsStats { bestDayLabel: string; bestDayN: number; peakHour: number; peakHourN: number; resTotal: number; resArrived: number }
 interface DailyCI { day: string; label: string; n: number; rev: number }
@@ -299,6 +314,8 @@ export function ReportsPage({ house }: Props) {
   const [ops, setOps] = useState<OpsStats>({ bestDayLabel: '—', bestDayN: 0, peakHour: 0, peakHourN: 0, resTotal: 0, resArrived: 0 })
   const [dailyCI, setDailyCI] = useState<DailyCI[]>([])
   const [horaCI, setHoraCI] = useState<HoraCI[]>([])
+  const [resumoArt, setResumoArt] = useState<ResumoArt | null>(null)
+  const [linhasArt, setLinhasArt] = useState<LinhaArt[]>([])
   const [agrupadoPorSemana, setAgrupadoPorSemana] = useState(false)
   const [weekdayCompare, setWeekdayCompare] = useState<DailyCI[]>([])
   // Dia da semana do comparativo. Comeca no dia do PERIODO selecionado, nao no dia de
@@ -396,6 +413,13 @@ export function ReportsPage({ house }: Props) {
     const tks = tkR.data ?? []
     const resv = resR.data ?? []
     setReservasPeriodo(resv.filter(r => (r.status ?? '') !== 'cancelled').length)
+
+    // Atracoes do periodo. Em Relatorios o recorte e o periodo da tela — e o que
+    // diferencia deste card do painel da aba Eventos, que tem janela propria.
+    supabase.rpc('artistas_resumo', { p_house: house.id, p_desde: start, p_ate: end })
+      .then(r => setResumoArt(((r.data as ResumoArt[] | null) ?? [])[0] ?? null))
+    supabase.rpc('artistas_no_periodo', { p_house: house.id, p_ini: start, p_fim: end })
+      .then(r => setLinhasArt((r.data as LinhaArt[] | null) ?? []))
 
     // Populate WA list (deduplicated by client — keep latest checkin per client)
     const byClient: Record<string, WACIItem> = {}
@@ -1787,6 +1811,88 @@ export function ReportsPage({ house }: Props) {
                   )
                 })()}
               </>
+            )}
+          </Card>
+        )
+      })()}
+
+      {/* Atrações do período. Fica junto dos outros custos porque é disso que se trata:
+          quanto a casa pagou de cachê e o que voltou pela porta. */}
+      {resumoArt && resumoArt.noites > 0 && (() => {
+        const cpp = resumoArt.cache_por_pessoa_cents ?? 0
+        const ppp = resumoArt.portaria_por_pessoa_cents ?? 0
+        const cob = cpp > 0 ? Math.round((ppp / cpp) * 100) : null
+        const cor = cob == null ? C.mut : cob >= 100 ? C.grn : cob >= 60 ? C.gold : C.red
+        return (
+          <Card style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: C.txt }}>🎤 Atrações</div>
+                <div style={{ color: C.mut, fontSize: 12, marginTop: 2 }}>
+                  {resumoArt.noites} {resumoArt.noites === 1 ? 'noite' : 'noites'} com atração — {label}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' as const }}>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ color: C.gold, fontSize: 18, fontWeight: 900 }}>{fmtCurrency(resumoArt.cache_total_cents)}</div>
+                  <div style={{ color: C.mut, fontSize: 10 }}>cachê no período</div>
+                </div>
+                <div style={{ textAlign: 'right' }} title="Cachê dividido pelo público das noites com atração">
+                  <div style={{ color: C.red, fontSize: 18, fontWeight: 900 }}>{cpp ? fmtCurrency(cpp) : '—'}</div>
+                  <div style={{ color: C.mut, fontSize: 10 }}>custo/pessoa</div>
+                </div>
+                {cob != null && (
+                  <div style={{ textAlign: 'right' }} title="Quanto a portaria pagou do cachê">
+                    <div style={{ color: cor, fontSize: 18, fontWeight: 900 }}>{cob}%</div>
+                    <div style={{ color: C.mut, fontSize: 10 }}>coberto pela porta</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* A ressalva anda junto do numero: sem ela os 42% parecem prejuizo. */}
+            {cpp > 0 && cob != null && cob < 100 && (
+              <div style={{ background: C.gold + '10', border: `1px solid ${C.gold}33`, borderRadius: 10, padding: '9px 12px', marginBottom: 12, fontSize: 11.5, color: C.sub, lineHeight: 1.5 }}>
+                A portaria cobre {cob}% do cachê. O restante vem do bar, que não passa pelo sistema —
+                o número não significa prejuízo, é a parte da conta que o sistema enxerga.
+              </div>
+            )}
+
+            <div className="r-scroll-x"><div style={{ minWidth: 560 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: GRID_ATR, gap: 6, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '.05em' }}>
+                <div>ATRAÇÃO</div>
+                <div style={{ textAlign: 'right' }}>SHOWS</div>
+                <div style={{ textAlign: 'right' }}>CACHÊ</div>
+                <div style={{ textAlign: 'right' }}>PÚBLICO</div>
+                <div style={{ textAlign: 'right' }}>R$/PESSOA</div>
+              </div>
+              <div className="r-scroll-y" style={{ maxHeight: LINHAS_VISIVEIS * ALTURA_LINHA + 26, overflowY: 'auto' }}>
+                {linhasArt.map((a, i) => {
+                  const dividiu = a.shows - a.sozinho
+                  return (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: GRID_ATR, gap: 6, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
+                      <div style={{ color: C.txt, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.nome}</div>
+                      <div style={{ textAlign: 'right', color: C.sub }}>{a.shows}</div>
+                      <div style={{ textAlign: 'right', color: C.gold, fontWeight: 700, fontSize: 12 }}>{a.cache_cents ? fmtCurrency(a.cache_cents) : '—'}</div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ color: C.acc, fontWeight: 700 }}>{Number(a.publico).toLocaleString('pt-BR')}</span>
+                        {dividiu > 0 && <span title="Dividiu o palco: o público foi de todas as atrações da noite" style={{ color: C.gold, marginLeft: 4 }}>⚠️</span>}
+                      </div>
+                      <div style={{ textAlign: 'right', color: C.grn, fontWeight: 700, fontSize: 12 }}>
+                        {a.custo_por_pessoa_cents ? fmtCurrency(a.custo_por_pessoa_cents) : '—'}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div></div>
+
+            {resumoArt.melhor_nome && resumoArt.pior_nome && resumoArt.melhor_nome !== resumoArt.pior_nome && (
+              <div style={{ color: C.mut, fontSize: 11, marginTop: 10, lineHeight: 1.5 }}>
+                Melhor custo no período: <b style={{ color: C.grn }}>{resumoArt.melhor_nome}</b> ({fmtCurrency(resumoArt.melhor_custo_cents ?? 0)}/pessoa) ·
+                maior: <b style={{ color: C.red }}>{resumoArt.pior_nome}</b> ({fmtCurrency(resumoArt.pior_custo_cents ?? 0)}/pessoa).
+                Só entram atrações que tocaram sozinhas na noite.
+              </div>
             )}
           </Card>
         )

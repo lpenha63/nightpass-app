@@ -392,7 +392,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   const [novoArtista, setNovoArtista] = useState<Partial<ArtistaCad> | null>(null)
   const [listaArtistas, setListaArtistas] = useState(false)
   const [resumoArt, setResumoArt] = useState<ResumoArtistas | null>(null)
-  const [artPeriodo, setArtPeriodo] = useState<'90' | '365' | 'tudo'>('tudo')
+  const [artPeriodo, setArtPeriodo] = useState<'mes' | '90' | '365' | 'tudo'>('tudo')
   const [mesesArt, setMesesArt] = useState<MesArtistas[]>([])
   const [salvandoArtista, setSalvandoArtista] = useState(false)
 
@@ -408,11 +408,16 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   }, [modal, listaArtistas, house.id])
 
   /** Abre a tela e ja busca o historico de todos — e a coluna que da sentido a lista. */
-  function carregarResumoArtistas(periodo: '90' | '365' | 'tudo') {
-    const desde = periodo === 'tudo'
-      ? null
-      : new Date(Date.now() - Number(periodo) * 86400000).toISOString().slice(0, 10)
-    supabase.rpc('artistas_resumo', { p_house: house.id, p_desde: desde })
+  function carregarResumoArtistas(periodo: 'mes' | '90' | '365' | 'tudo') {
+    const hoje = new Date()
+    // "Mes" e o mes corrente fechado nos dois lados — do dia 1 ao ultimo dia. Os
+    // demais sao janelas para tras a partir de hoje.
+    const ini = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const desde = periodo === 'tudo' ? null
+      : periodo === 'mes' ? ini(new Date(hoje.getFullYear(), hoje.getMonth(), 1))
+      : ini(new Date(Date.now() - Number(periodo) * 86400000))
+    const ate = periodo === 'mes' ? ini(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0)) : null
+    supabase.rpc('artistas_resumo', { p_house: house.id, p_desde: desde, p_ate: ate })
       .then(r => setResumoArt(((r.data as ResumoArtistas[] | null) ?? [])[0] ?? null))
   }
 
@@ -4998,7 +5003,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       <Modal open={listaArtistas} title="🎤 Artistas da casa" onClose={() => setListaArtistas(false)} wide>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6 }}>
-            {([['90', '90 dias'], ['365', '12 meses'], ['tudo', 'Tudo']] as const).map(([k, rot]) => (
+            {([['mes', 'Mês'], ['90', '90 dias'], ['365', '12 meses'], ['tudo', 'Tudo']] as const).map(([k, rot]) => (
               <button key={k} onClick={() => { setArtPeriodo(k); carregarResumoArtistas(k) }}
                 style={{ background: artPeriodo === k ? C.acc + '22' : 'transparent', border: `1px solid ${artPeriodo === k ? C.acc : C.brd}`, color: artPeriodo === k ? C.acc : C.mut, borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                 {rot}
@@ -5010,6 +5015,15 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
 
         {/* Painel. A comparacao cache x portaria e o motivo dele existir: o resto
             sao numeros que a lista abaixo ja mostra artista a artista. */}
+        {/* Periodo sem atracao precisa DIZER isso. Esconder o painel inteiro faria o
+            botao "Mês" parecer quebrado — em setembro, por exemplo, ainda nao houve
+            noite com atracao. */}
+        {resumoArt && resumoArt.noites === 0 && (
+          <div style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '16px 14px', marginBottom: 16, color: C.mut, fontSize: 13, textAlign: 'center' as const }}>
+            Nenhuma noite com atração {artPeriodo === 'mes' ? 'neste mês' : 'no período'} ainda.
+            {artPeriodo === 'mes' && <> Toque em <b style={{ color: C.sub }}>Tudo</b> para ver o histórico.</>}
+          </div>
+        )}
         {resumoArt && resumoArt.noites > 0 && (() => {
           const cpp = resumoArt.cache_por_pessoa_cents ?? 0
           const ppp = resumoArt.portaria_por_pessoa_cents ?? 0
