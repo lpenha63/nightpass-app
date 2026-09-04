@@ -4903,7 +4903,10 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       {/* Cadastro rápido de artista, aberto de dentro do evento.
           Nasce com o nome que a pessoa ja digitou: cadastrar deixa de ser tarefa
           separada e vira consequencia do trabalho normal. */}
-      <Modal open={!!novoArtista} title={novoArtista?.id ? '🎤 Editar artista' : '🎤 Cadastrar artista'} onClose={() => setNovoArtista(null)}>
+      {/* zIndex acima do padrao: este modal e aberto de DENTRO da tela de artistas, que
+          vem depois no arquivo e, com o mesmo z-index, pintava por cima dele. O botao
+          funcionava e o formulario abria — atras da lista. */}
+      <Modal open={!!novoArtista} zIndex={1100} title={novoArtista?.id ? '🎤 Editar artista' : '🎤 Cadastrar artista'} onClose={() => setNovoArtista(null)}>
         {novoArtista && (() => {
           const campo = (k: keyof ArtistaCad, rot: string, extra: Record<string, unknown> = {}) => (
             <div>
