@@ -38,6 +38,9 @@ interface Props { house: House; role?: string; allowedPages?: string[]; onGoToRe
  */
 
 
+/** Colunas da tela de artistas — cabecalho e linha leem a mesma const. */
+const GRID_ART = '1.6fr 62px 82px 88px 96px 78px'
+
 /** Cadastro do artista: referencia reaproveitavel entre eventos. */
 interface ArtistaCad {
   id: string; name: string
@@ -370,16 +373,38 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   const [artistasCad, setArtistasCad] = useState<ArtistaCad[]>([])
   const [histArtista, setHistArtista] = useState<Record<string, HistArtista>>({})
   const [novoArtista, setNovoArtista] = useState<Partial<ArtistaCad> | null>(null)
+  const [listaArtistas, setListaArtistas] = useState(false)
   const [salvandoArtista, setSalvandoArtista] = useState(false)
 
   const acharArtista = (nome: string) =>
     artistasCad.find(a => a.name.trim().toLowerCase() === nome.trim().toLowerCase())
 
+  // Carrega ao abrir o formulario de evento OU a tela de artistas — os dois usam a
+  // mesma lista, entao ela nunca fica desencontrada entre as telas.
   useEffect(() => {
-    if (!modal) return
+    if (!modal && !listaArtistas) return
     supabase.from('artists').select('*').eq('house_id', house.id).eq('active', true).order('name')
       .then(r => setArtistasCad((r.data ?? []) as ArtistaCad[]))
-  }, [modal, house.id])
+  }, [modal, listaArtistas, house.id])
+
+  /** Abre a tela e ja busca o historico de todos — e a coluna que da sentido a lista. */
+  function abrirArtistas() {
+    setListaArtistas(true)
+    supabase.from('artists').select('*').eq('house_id', house.id).eq('active', true).order('name')
+      .then(r => {
+        const lista = (r.data ?? []) as ArtistaCad[]
+        setArtistasCad(lista)
+        lista.forEach(a => carregarHistorico(a.name))
+      })
+  }
+
+  async function desativarArtista(a: ArtistaCad) {
+    if (!confirm(`Tirar "${a.name}" da lista?\n\nEle some da busca de novos eventos, mas o histórico dos shows que já fez continua intacto.`)) return
+    const { error } = await supabase.from('artists').update({ active: false, updated_at: new Date().toISOString() }).eq('id', a.id)
+    if (error) { st2('Erro: ' + error.message, 'error'); return }
+    setArtistasCad(prev => prev.filter(x => x.id !== a.id))
+    st2(`${a.name} saiu da lista.`, 'success')
+  }
 
   /** Busca o historico de um artista uma vez e guarda — o autocomplete redispara muito. */
   function carregarHistorico(nome: string) {
@@ -409,7 +434,8 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     const nome = (novoArtista?.name ?? '').trim()
     if (!nome) { st2('Informe o nome do artista.', 'warn'); return }
     setSalvandoArtista(true)
-    const { data, error } = await supabase.from('artists').insert({
+    // Mesmo formulario para cadastrar e editar: com id, atualiza.
+    const campos = {
       house_id: house.id,
       name: nome,
       genre: novoArtista?.genre || null,
@@ -423,15 +449,22 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       pix_holder: novoArtista?.pix_holder || null,
       instagram: novoArtista?.instagram || null,
       notes: novoArtista?.notes || null,
-    }).select().single()
+    }
+    const editando = !!novoArtista?.id
+    const { data, error } = editando
+      ? await supabase.from('artists').update({ ...campos, updated_at: new Date().toISOString() }).eq('id', novoArtista!.id!).select().single()
+      : await supabase.from('artists').insert(campos).select().single()
     setSalvandoArtista(false)
     if (error) {
       st2(error.code === '23505' ? 'Já existe um artista com esse nome.' : 'Erro: ' + error.message, 'error')
       return
     }
-    setArtistasCad(prev => [...prev, data as ArtistaCad].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')))
+    setArtistasCad(prev => {
+      const sem = prev.filter(x => x.id !== (data as ArtistaCad).id)
+      return [...sem, data as ArtistaCad].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+    })
     setNovoArtista(null)
-    st2(`🎤 ${nome} cadastrado.`, 'success')
+    st2(`🎤 ${nome} ${editando ? 'atualizado' : 'cadastrado'}.`, 'success')
   }
   function addArtist() { setArtists(a => [...a, { name: '', fee_type: 'fixed', fee_cents: 0, fee_percent: 0, consumption_cents: 0 }]) }
   function removeArtist(i: number) { setArtists(a => a.filter((_, idx) => idx !== i)) }
@@ -4870,7 +4903,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
       {/* Cadastro rápido de artista, aberto de dentro do evento.
           Nasce com o nome que a pessoa ja digitou: cadastrar deixa de ser tarefa
           separada e vira consequencia do trabalho normal. */}
-      <Modal open={!!novoArtista} title="🎤 Cadastrar artista" onClose={() => setNovoArtista(null)}>
+      <Modal open={!!novoArtista} title={novoArtista?.id ? '🎤 Editar artista' : '🎤 Cadastrar artista'} onClose={() => setNovoArtista(null)}>
         {novoArtista && (() => {
           const campo = (k: keyof ArtistaCad, rot: string, extra: Record<string, unknown> = {}) => (
             <div>
@@ -4924,6 +4957,66 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
             </div>
           )
         })()}
+      </Modal>
+
+      {/* Artistas da casa. A lista so se justifica pelas colunas de historico: sem
+          elas seria uma agenda de contatos, e disso o celular ja da conta. */}
+      <Modal open={listaArtistas} title="🎤 Artistas da casa" onClose={() => setListaArtistas(false)} wide>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ color: C.sub, fontSize: 12.5, lineHeight: 1.5 }}>
+            O <b style={{ color: C.txt }}>custo por pessoa</b> é o cachê dividido pelo público que veio —
+            é ele que diz se valeu, não o público sozinho.
+          </div>
+          <Btn onClick={() => setNovoArtista({ name: '' })} small>＋ Novo artista</Btn>
+        </div>
+
+        {artistasCad.length === 0
+          ? <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '28px 0' }}>Nenhum artista cadastrado ainda.</div>
+          : <div className="r-scroll-x"><div style={{ minWidth: 660 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: GRID_ART, gap: 6, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '.05em' }}>
+                <div>ARTISTA</div>
+                <div style={{ textAlign: 'right' }}>SHOWS</div>
+                <div style={{ textAlign: 'right' }}>PÚBLICO</div>
+                <div style={{ textAlign: 'right' }} title="Cachê ÷ público">R$/PESSOA</div>
+                <div style={{ textAlign: 'right' }}>ÚLT. CACHÊ</div>
+                <div />
+              </div>
+              <div className="r-scroll-y" style={{ maxHeight: 12 * 44, overflowY: 'auto' }}>
+                {artistasCad.map(a => {
+                  const h = histArtista[a.name.trim().toLowerCase()]
+                  const dividiu = h ? h.shows - h.shows_sozinho : 0
+                  return (
+                    <div key={a.id} style={{ display: 'grid', gridTemplateColumns: GRID_ART, gap: 6, padding: '9px 8px', borderBottom: `1px solid ${C.brd}22`, alignItems: 'center', fontSize: 13 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: C.txt, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                        <div style={{ color: C.mut, fontSize: 11 }}>
+                          {[a.genre, a.members ? `${a.members} integrantes` : null, a.show_minutes ? `${a.show_minutes} min` : null]
+                            .filter(Boolean).join(' · ') || '—'}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', color: h?.shows ? C.txt : C.mut, fontWeight: 700 }}>{h?.shows ?? '—'}</div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ color: h?.publico_medio ? C.acc : C.mut, fontWeight: 700 }}>{h?.publico_medio || '—'}</span>
+                        {dividiu > 0 && <span title="Noites em que dividiu o palco: o público foi de todas as atrações" style={{ color: C.gold, marginLeft: 4 }}>⚠️</span>}
+                      </div>
+                      <div style={{ textAlign: 'right', color: C.grn, fontWeight: 700, fontSize: 12 }}>
+                        {h?.custo_por_pessoa_cents ? fmtCurrency(h.custo_por_pessoa_cents) : '—'}
+                      </div>
+                      <div style={{ textAlign: 'right', color: C.sub, fontSize: 12 }}>
+                        {h?.ultimo_cache_cents ? fmtCurrency(h.ultimo_cache_cents) : (a.fee_reference_cents ? `${fmtCurrency(a.fee_reference_cents)} ref.` : '—')}
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        <button onClick={() => setNovoArtista(a)} title="Editar"
+                          style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 7, padding: '4px 8px', color: C.sub, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✏️</button>
+                        <button onClick={() => desativarArtista(a)} title="Tirar da lista"
+                          style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 7, padding: '4px 8px', color: C.mut, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div></div>
+        }
       </Modal>
 
       {/* Reservas — consulta (somente leitura + impressão p/ montagem) */}
@@ -5345,6 +5438,10 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
               🎫 Ingressos{pendCount > 0 ? ` (${pendCount})` : ''}
             </Btn>
           )}
+          <Btn onClick={abrirArtistas} variant="secondary" style={cbtn('#f59e0b')}
+            title="Artistas cadastrados, com histórico de público e cachê">
+            🎤 Artistas
+          </Btn>
           <Btn onClick={openNew} icon="➕">Novo Evento</Btn>
         </div>
       </div>
