@@ -22,7 +22,9 @@ interface PromoterList {
     name: string; event_date: string; start_time?: string; flyer_url?: string
     price_male_cents?: number; price_female_cents?: number
     price_male_list_cents?: number; price_female_list_cents?: number
-    artists?: Array<{ name?: string }>
+    // artists_public: so os nomes. A coluna `artists` guarda o cache de cada atracao
+    // e nao e legivel por anonimo — pedi-la aqui derrubava a pagina inteira.
+    artists_public?: Array<{ name?: string }>
     promotions?: string
     promotions_list?: Array<{ label?: string; value_cents?: number }>
     list_locks?: { casa?: boolean; promoters?: boolean; reservas?: boolean }
@@ -85,7 +87,7 @@ export function ListaPublicPage({ token }: { token: string }) {
     // Não carregamos a lista de convidados existente: o cliente não deve ver
     // a contagem nem os nomes de quem já confirmou.
     supabase.from('promoter_lists')
-      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists,promotions,promotions_list,list_locks,house_list_enabled,promoter_enabled,promoter_invites),houses(name,logo_url)')
+      .select('*,promoters(full_name,photo_url),events(name,event_date,start_time,flyer_url,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,artists_public,promotions,promotions_list,list_locks,house_list_enabled,promoter_enabled,promoter_invites),houses(name,logo_url)')
       .eq('token', token).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
@@ -223,7 +225,7 @@ export function ListaPublicPage({ token }: { token: string }) {
 
         {/* Detalhes do evento — valores, atrações e promoções */}
         {(() => {
-          const artistNames = (ev?.artists ?? []).map(a => a?.name).filter((n): n is string => !!n && n.trim().length > 0)
+          const artistNames = (ev?.artists_public ?? []).map(a => a?.name).filter((n): n is string => !!n && n.trim().length > 0)
           const promosArr = (ev?.promotions_list ?? []).map(p => p?.label).filter((l): l is string => !!l && l.trim().length > 0)
           const promoText = promosArr.length > 0 ? promosArr : (ev?.promotions ? [ev.promotions] : [])
           // Valor da LISTA do promoter tem prioridade sobre o valor de lista do evento.

@@ -49,3 +49,10 @@ GRANT SELECT (
 
 COMMENT ON TABLE public.events IS
   'anon enxerga apenas a lista branca de colunas concedida. Cache de atracao, notas internas, termos de parceria e custos ficam fora. Coluna nova nasce privada: para expo-la ao publico e preciso conceder explicitamente.';
+
+-- Correcao de 08/09: a pagina publica da lista de promoter precisa saber se AQUELE
+-- promoter pode usar o link, e isso vem de promoter_enabled/promoter_invites. Ficaram
+-- de fora da lista branca e derrubaram a pagina com "permission denied", que na tela
+-- virou "Lista nao encontrada" na noite do evento.
+-- Nao sao segredo: um booleano e uma lista de ids de promoter convidados.
+GRANT SELECT (promoter_enabled, promoter_invites) ON public.events TO anon;
