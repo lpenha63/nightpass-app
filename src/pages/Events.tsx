@@ -540,7 +540,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   const [resEdit, setResEdit] = useState<string | null>(null)
 
   // Consulta de reservas do card (somente leitura + impressão)
-  interface ResView { id: string; name: string; location?: string; people_count?: number; observations?: string; status: string; expected_arrival?: string; archived_at?: string | null }
+  interface ResView { id: string; name: string; location?: string; people_count?: number; observations?: string; status: string; expected_arrival?: string; archived_at?: string | null; reservation_guests?: Array<unknown> | null }
   const [resViewEv, setResViewEv] = useState<EventWithCounts | null>(null)
   const [resViewList, setResViewList] = useState<ResView[]>([])
 
@@ -1117,16 +1117,19 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
           .sort((a, b) => a.full_name.localeCompare(b.full_name)))
       })
     const { data } = await supabase.from('reservations')
-      .select('name, location, people_count, expected_arrival, observations, archived_at, reservation_items(name, quantity)')
+      .select('name, location, people_count, expected_arrival, observations, archived_at, reservation_guests(id), reservation_items(name, quantity)')
       .eq('house_id', house.id).eq('reservation_date', ev.event_date).neq('status', 'cancelled')
       .order('location')
-    const res = ((data ?? []) as Array<{ name: string; location?: string; people_count?: number; expected_arrival?: string; observations?: string; archived_at?: string | null; reservation_items?: Array<{ name: string; quantity: number }> }>)
+    const res = ((data ?? []) as Array<{ name: string; location?: string; people_count?: number; expected_arrival?: string; observations?: string; archived_at?: string | null; reservation_guests?: Array<unknown> | null; reservation_items?: Array<{ name: string; quantity: number }> }>)
       .filter(r => reservaConta(r, ev.event_date))
-    const totalPeople = res.reduce((s, r) => s + (r.people_count ?? 0), 0)
+    // A casa e montada por este numero: tem que ser o maior entre o combinado e os
+    // nomes ja cadastrados, senao a equipe poe mesa para menos gente do que vem.
+    const totalPeople = res.reduce((s, r) => s + esperadoDaReserva(r), 0)
     const dateStr = new Date(ev.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
     const lines = res.map(r => {
       const items = (r.reservation_items ?? []).map(i => `${i.quantity > 1 ? i.quantity + '× ' : ''}${i.name}`).join(', ')
-      return `• *${r.location || r.name}*${r.people_count ? ` — ${r.people_count}p` : ''}${r.name && r.location ? ` (${r.name})` : ''}${items ? `\n   ↳ ${items}` : ''}`
+      const pax = esperadoDaReserva(r)
+      return `• *${r.location || r.name}*${pax ? ` — ${pax}p` : ''}${r.name && r.location ? ` (${r.name})` : ''}${items ? `\n   ↳ ${items}` : ''}`
     })
     setMontagemMsg([
       `📐 *Montagem — ${ev.name}*`,
@@ -2561,7 +2564,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
 
   function openResView(ev: EventWithCounts) {
     setResViewEv(ev); setResViewList([])
-    supabase.from('reservations').select('id,name,location,people_count,observations,status,expected_arrival,archived_at')
+    supabase.from('reservations').select('id,name,location,people_count,observations,status,expected_arrival,archived_at,reservation_guests(id)')
       .eq('house_id', house.id).or(`reservation_date.eq.${ev.event_date},event_id.eq.${ev.id}`).neq('status', 'cancelled')
       .order('location', { nullsFirst: false }).order('name')
       .then(r => setResViewList(((r.data ?? []) as ResView[]).filter(x => reservaConta(x, ev.event_date))))
@@ -2569,7 +2572,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
 
   function printResView(ev: EventWithCounts) {
     const rows = resViewList
-    const totalPeople = rows.reduce((s, r) => s + (r.people_count ?? 0), 0)
+    const totalPeople = rows.reduce((s, r) => s + esperadoDaReserva(r), 0)
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reservas — ${ev.name}</title>
     <style>
       body { font-family: Arial, sans-serif; padding: 32px; max-width: 900px; margin: 0 auto; color: #111; }
@@ -2587,7 +2590,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     <table>
       <thead><tr><th class="c" style="width:70px">Local</th><th>Nome</th><th class="c" style="width:70px">Pessoas</th><th>Observação</th></tr></thead>
       <tbody>
-        ${rows.map(r => `<tr><td class="c loc">${r.location ?? '—'}</td><td>${r.name}</td><td class="c">${r.people_count ?? '-'}</td><td>${r.observations ?? ''}</td></tr>`).join('')}
+        ${rows.map(r => `<tr><td class="c loc">${r.location ?? '—'}</td><td>${r.name}</td><td class="c">${esperadoDaReserva(r) || '-'}</td><td>${r.observations ?? ''}</td></tr>`).join('')}
       </tbody>
     </table>
     <div class="footer">Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — NightPass</div>

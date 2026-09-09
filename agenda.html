@@ -781,6 +781,9 @@ function render(){
         byLoc[loc].forEach(function(r){
           html+='<div class="task"><div style="width:26px;flex-shrink:0;text-align:center;font-size:16px">🪑</div>'
             +'<div class="task-body"><div class="task-title">'+esc(r.name)+' · '+(r.people||0)+'p</div>'
+            // combinou 70 e cadastrou 135: a equipe monta pelo maior, mas precisa
+            // ver os dois numeros para saber que a mesa cresceu depois de fechada
+            +((r.declarado!=null&&r.people>r.declarado)?'<div class="task-meta">👥 '+r.declarado+' combinadas · '+r.people+' nomes cadastrados</div>':'')
             +(r.arrival?'<div class="task-meta">🕐 chega '+esc(String(r.arrival).slice(0,5))+'</div>':'')
             +(r.obs?'<div class="task-desc">📝 '+esc(r.obs)+'</div>':'')
             +'</div></div>';

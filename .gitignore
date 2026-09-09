@@ -38,3 +38,5 @@ build-id.json
 # Supabase CLI (local)
 supabase/.temp
 supabase/.branches
+
+.env*
