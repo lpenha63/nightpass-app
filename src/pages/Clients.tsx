@@ -548,7 +548,10 @@ export function ClientsPage({ house, user }: Props) {
   }
 
   const now = new Date()
-  const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay())
+  // Meia-noite. Comparar com a hora atual jogava o aniversariante do proprio
+  // domingo para fora da semana, porque a data dele e 00:00 e o "agora" nao.
+  const hoje = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfWeek = new Date(hoje); startOfWeek.setDate(hoje.getDate() - hoje.getDay())
   const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(startOfWeek.getDate() + 6)
 
   const filteredBd = bdClients.filter(c => {
@@ -558,14 +561,17 @@ export function ClientsPage({ house, user }: Props) {
       return !!c._mmdd && set.has(c._mmdd)
     }
     // Botões Semana/Mês recortam o ANO inteiro (não a janela de "próximos N dias")
+    // Semana e mes recortam o calendario, mas comecam em HOJE: quem ja fez
+    // aniversario so faz de novo ano que vem, e a lista existe para mandar
+    // parabens. Sem isso o dia 07 aparecia como "Em 363 dias" no dia 09.
     if (bdFilter === 'week') {
       const bd = new Date((c.birth_date ?? '') + 'T00:00:00')
       const ty = new Date(now.getFullYear(), bd.getMonth(), bd.getDate())
-      return ty >= startOfWeek && ty <= endOfWeek
+      return ty >= hoje && ty <= endOfWeek
     }
     if (bdFilter === 'month') {
       const bd = new Date((c.birth_date ?? '') + 'T00:00:00')
-      return bd.getMonth() === now.getMonth()
+      return bd.getMonth() === now.getMonth() && bd.getDate() >= hoje.getDate()
     }
     // "Todos" → usa a janela do dropdown (próximos N dias)
     return c.daysUntil <= parseInt(bdDays)

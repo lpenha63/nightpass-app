@@ -474,10 +474,11 @@ export function DashboardPage({ house, role, houses = [], onTrocarCasa }: Props)
           const diff = (bd.getTime() - now.getTime()) / 86400000
           return diff > 0 && diff <= 7
         })
-        // This month (excluding today)
+        // Resto do mes (sem hoje). Tem que ser o que ainda vem: a lista tem botao
+        // de mandar "feliz aniversario", e quem fez dia 07 so faz de novo ano que vem.
         const monthBd = all.filter(c => {
           const d = new Date(c.birth_date! + 'T00:00:00')
-          return d.getMonth() === mo && d.getDate() !== da
+          return d.getMonth() === mo && d.getDate() > da
         })
         setBirthdays(dayBd.map(c => ({ id: c.id, full_name: c.full_name, phone: c.phone })) as Birthday[])
         setBdWeek(weekBd.map(c => ({ id: c.id, full_name: c.full_name, phone: c.phone })) as Birthday[])
