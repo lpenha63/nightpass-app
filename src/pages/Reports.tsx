@@ -35,6 +35,13 @@ const RELATORIO = {
   get max() { return new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10) },
 }
 
+/**
+ * O <input type="date"> emite um valor a cada tecla do ano: digitar "2026" passa
+ * por 0002, 0020 e 0202 — datas completas e validas para o navegador. Reagir a
+ * elas era o que fazia o ano "zerar" no meio da digitacao.
+ */
+const anoCompleto = (d: string) => !d || Number(d.slice(0, 4)) >= 1000
+
 const GRID_ATR = '1.7fr 62px 96px 88px 96px'
 const GRID_TK = '1.4fr 1fr 56px 96px 72px 60px'
 const LINHAS_VISIVEIS = 12
@@ -344,6 +351,9 @@ export function ReportsPage({ house }: Props) {
   // Agora o campo responde na hora e a consulta espera a digitacao parar.
   const [aplicado, setAplicado] = useState({ ini: '', fim: '' })
   useEffect(() => {
+    // Ano pela metade nao vira consulta: aplicar 0002 recarregava a tela no meio da
+    // digitacao. O indicador ao lado do campo continua avisando que ha algo pendente.
+    if (!anoCompleto(customStart) || !anoCompleto(customEnd)) return
     // 3s: 800ms e depois 1,5s ainda cortavam a digitacao do ano. E tempo de espera,
     // nao de leitura — o indicador ao lado do campo avisa que a tela esta aguardando.
     const id = setTimeout(() => setAplicado({ ini: customStart, fim: customEnd }), 3000)
@@ -1475,12 +1485,17 @@ export function ReportsPage({ house }: Props) {
             <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>📅 De</span>
             {/* Antes um input so preenchia inicio E fim: dava para ver um dia, nunca
                 uma semana. Fechamento semanal/quinzenal precisa dos dois extremos. */}
-            <input type="date" value={customStart} min={RELATORIO.min} max={customEnd || RELATORIO.max}
-              onChange={e => { const v = e.target.value; setCustomStart(v); if (!customEnd || customEnd < v) setCustomEnd(v) }}
+            {/* min/max sao a faixa fixa, NAO o outro campo: amarrar um no outro
+                marcava o campo como invalido enquanto o ano estava pela metade.
+                A ordem (inicio depois do fim) ja e resolvida em rangeFor. */}
+            <input type="date" value={customStart} min={RELATORIO.min} max={RELATORIO.max}
+              onChange={e => { const v = e.target.value; setCustomStart(v); if (!customEnd && anoCompleto(v)) setCustomEnd(v) }}
               style={dtInput} />
             <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>até</span>
-            <input type="date" value={customEnd} min={customStart || RELATORIO.min} max={RELATORIO.max}
-              onChange={e => { const v = e.target.value; setCustomEnd(v); if (!customStart || customStart > v) setCustomStart(v) }}
+            {/* Espelha no vizinho so quando ele esta VAZIO: sobrescrever um campo ja
+                preenchido era o que jogava o ano 0002 no outro lado. */}
+            <input type="date" value={customEnd} min={RELATORIO.min} max={RELATORIO.max}
+              onChange={e => { const v = e.target.value; setCustomEnd(v); if (!customStart && anoCompleto(v)) setCustomStart(v) }}
               style={dtInput} />
             {/* Enquanto espera a digitacao parar, os numeros na tela ainda sao os do
                 periodo anterior. Dizer isso evita a pessoa ler o dado errado. */}
