@@ -344,9 +344,9 @@ export function ReportsPage({ house }: Props) {
   // Agora o campo responde na hora e a consulta espera a digitacao parar.
   const [aplicado, setAplicado] = useState({ ini: '', fim: '' })
   useEffect(() => {
-    // 1,5s: 800ms ainda cortava a digitacao do ano. E tempo de espera, nao de leitura —
-    // o indicador ao lado do campo avisa que a tela esta aguardando.
-    const id = setTimeout(() => setAplicado({ ini: customStart, fim: customEnd }), 1500)
+    // 3s: 800ms e depois 1,5s ainda cortavam a digitacao do ano. E tempo de espera,
+    // nao de leitura — o indicador ao lado do campo avisa que a tela esta aguardando.
+    const id = setTimeout(() => setAplicado({ ini: customStart, fim: customEnd }), 3000)
     return () => clearTimeout(id)
   }, [customStart, customEnd])
   const digitando = period === 'custom'
@@ -1486,7 +1486,7 @@ export function ReportsPage({ house }: Props) {
                 periodo anterior. Dizer isso evita a pessoa ler o dado errado. */}
             {digitando && (
               <span style={{ color: C.gold, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' as const }}>
-                ⏳ atualizando…
+                ⏳ atualiza ao parar de digitar
               </span>
             )}
             {/* Atalhos: o caso real e "semana passada", nao datas soltas */}
