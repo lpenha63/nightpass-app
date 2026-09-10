@@ -13,7 +13,15 @@
  */
 
 const ano = () => new Date().getFullYear()
-const iso = (d: Date) => d.toISOString().slice(0, 10)
+
+/**
+ * Data LOCAL em 'YYYY-MM-DD'. Com toISOString() sairia a data UTC: das 21h a
+ * meia-noite no Brasil ja e o dia seguinte la, entao AGENDA.min viraria amanha e o
+ * app recusaria "evento no passado" um evento marcado para HOJE — justamente no
+ * horario em que a casa esta trabalhando.
+ */
+const iso = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 /** Nascimento: de 1920 ate hoje. Ninguem nasce amanha. */
 export const NASCIMENTO = {

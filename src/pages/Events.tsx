@@ -35,6 +35,12 @@ interface Props { house: House; role?: string; allowedPages?: string[]; onGoToRe
  * inteiro (`setForm({ ...ev })`) e o payload de gravacao precisa remove-los: o
  * PostgREST recusa o UPDATE INTEIRO se receber um campo que nao e coluna, com a
  * mensagem "Could not find the 'X' column of 'events' in the schema cache".
+ *
+ * ATENCAO: existe uma SEGUNDA classe de campo que tambem derruba a gravacao, e ela
+ * NAO aparece aqui porque É coluna de verdade: a coluna GERADA pelo banco. Escrever
+ * nela da `column "X" can only be updated to DEFAULT` (SQLSTATE 428C9) e mata o
+ * UPDATE inteiro igual. Hoje e `artists_public` (= artistas_sem_valores(artists)).
+ * Coluna gerada nova em `events` precisa entrar em CAMPOS_DO_BANCO abaixo.
  */
 
 
@@ -104,6 +110,16 @@ const CAMPOS_SO_DA_TELA = [
   'checkinCount', 'pagantesCount', 'cortesiasCount', 'resCount', 'resPeople',
   'listGuests', 'tasksTotal', 'tasksDone', 'teamTotal', 'teamOk', 'teamByArea',
 ] as const
+
+/**
+ * Colunas que o BANCO mantem sozinho. Vem no `select *`, entram no formulario pelo
+ * `{ ...ev }` e precisam sair do payload — escrever nelas e erro, nao no-op.
+ *
+ * `artists_public` e GENERATED ALWAYS (artistas_sem_valores(artists)): existe para
+ * as paginas publicas verem o line-up sem os caches. Mandar o valor de volta da
+ * `can only be updated to DEFAULT` e derruba a edicao inteira do evento.
+ */
+const CAMPOS_DO_BANCO = ['artists_public'] as const
 
 // Se um campo novo entrar em EventUiCounts e nao entrar na lista acima, esta linha
 // para de compilar. E o ponto: falhar no build, nao na porta da casa.
@@ -2399,6 +2415,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     // `artists`. Qualquer um deles faz o PostgREST recusar a gravacao inteira.
     const FORA_DO_PAYLOAD = new Set<string>([
       ...CAMPOS_SO_DA_TELA,
+      ...CAMPOS_DO_BANCO,
       'id', 'created_at',
       'artist_fee_cents', 'artist_fee_type', 'artist_fee_percent', 'consumption_cents',
     ])
