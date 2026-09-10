@@ -47,6 +47,9 @@ interface Props { house: House; role?: string; allowedPages?: string[]; onGoToRe
 /** Uma linha do fechamento mensal (RPC artistas_por_mes). */
 interface MesArtistas {
   mes: string; noites: number
+  /** Eventos do mes (fora dia de operacao). Denominador de `noites`: sem ele
+   *  "2 noites" e lido como "so teve 2 shows", e nao como "so 2 tem line-up". */
+  eventos_mes: number
   cache_cents: number; consumacao_cents: number; publico: number
   cache_por_pessoa_cents: number | null; portaria_por_pessoa_cents: number | null
 }
@@ -5107,13 +5110,15 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
         {mesesArt.length > 0 && (
           <div style={{ marginBottom: 18 }}>
             <div style={{ color: C.txt, fontWeight: 800, fontSize: 13.5, marginBottom: 2 }}>📆 Fechamento mês a mês</div>
-            <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 8 }}>
-              A cobertura é quanto a portaria pagou do cachê naquele mês.
+            <div style={{ color: C.mut, fontSize: 11.5, marginBottom: 8, lineHeight: 1.5 }}>
+              Conta só as noites com o line-up preenchido no evento — por isso a coluna
+              mostra <b style={{ color: C.sub }}>quantas de quantas</b>. A cobertura é
+              quanto a portaria pagou do cachê naquele mês.
             </div>
             <div className="r-scroll-x"><div style={{ minWidth: 560 }}>
               <div style={{ display: 'grid', gridTemplateColumns: GRID_MES, gap: 6, padding: '4px 8px', fontSize: 10, color: C.mut, fontWeight: 700, letterSpacing: '.05em' }}>
                 <div>MÊS</div>
-                <div style={{ textAlign: 'right' }}>NOITES</div>
+                <div style={{ textAlign: 'right' }}>NOITES</div>{/* com line-up / total */}
                 <div style={{ textAlign: 'right' }}>CACHÊ</div>
                 <div style={{ textAlign: 'right' }}>PÚBLICO</div>
                 <div style={{ textAlign: 'right' }}>R$/PESSOA</div>
@@ -5129,7 +5134,18 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                     <div style={{ color: C.txt, fontWeight: 600, textTransform: 'capitalize' as const }}>
                       {new Date(m.mes + '-02T12:00').toLocaleDateString('pt-BR', { month: 'long', year: '2-digit' })}
                     </div>
-                    <div style={{ textAlign: 'right', color: C.sub }}>{m.noites}</div>
+                    <div style={{ textAlign: 'right', color: C.sub, whiteSpace: 'nowrap' as const }}>
+                      {m.noites}
+                      {m.eventos_mes > m.noites && (
+                        <span style={{ color: C.mut, fontSize: 11 }}> de {m.eventos_mes}</span>
+                      )}
+                      {/* Abaixo de um terco preenchido o mes nao representa a casa:
+                          o cache e o R$/pessoa ao lado falam de uma minoria das noites. */}
+                      {m.eventos_mes > 0 && m.noites * 3 < m.eventos_mes && (
+                        <span title={`Só ${m.noites} de ${m.eventos_mes} noites deste mês têm o line-up preenchido — os valores ao lado falam só delas.`}
+                          style={{ color: C.gold, marginLeft: 4 }}>⚠️</span>
+                      )}
+                    </div>
                     <div style={{ textAlign: 'right', color: C.gold, fontWeight: 700, fontSize: 12 }}>{fmtCurrency(m.cache_cents)}</div>
                     <div style={{ textAlign: 'right', color: C.acc, fontWeight: 700 }}>{Number(m.publico).toLocaleString('pt-BR')}</div>
                     <div style={{ textAlign: 'right', color: C.sub, fontSize: 12 }}>{cpp ? fmtCurrency(cpp) : '—'}</div>
