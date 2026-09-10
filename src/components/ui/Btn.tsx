@@ -35,7 +35,14 @@ export function Btn({
     variant === 'secondary' ? C.card :
     `linear-gradient(135deg,${C.acd},${C.acc})`
 
-  const col = variant === 'ghost' ? C.mut : C.txt
+  // Primario e danger tem fundo forte e escuro nos DOIS temas, entao o texto e
+  // branco fixo — nao C.txt. No tema claro C.txt e #0f172a (quase preto), e o
+  // rotulo saia cinza-escuro sobre o azul, parecendo botao desabilitado.
+  // Secundario e ghost seguem o tema porque o fundo deles e que muda.
+  const col =
+    variant === 'ghost' ? C.mut :
+    variant === 'secondary' ? C.txt :
+    '#ffffff'
   const bd =
     variant === 'danger'    ? '#7f1d1d55' :
     variant === 'secondary' ? C.brd :
