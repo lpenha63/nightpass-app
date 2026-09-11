@@ -130,7 +130,7 @@ export function SetupGuide({ houseId }: { houseId: string }) {
         passos: [
           'Aba Eventos → "Novo Evento": nome, data, horário e valores de entrada.',
           'Envie o flyer com menos de 600KB — acima disso o WhatsApp não mostra a imagem na prévia do link.',
-          'Para vender ingresso, abra "Ingressos" no card do evento e crie um lote.',
+          'Para vender ingresso, abra "Ticketeria" no card do evento e crie um lote.',
         ],
       },
     ])
