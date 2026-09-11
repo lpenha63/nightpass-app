@@ -36,8 +36,7 @@ export const PAGE_FEATURES: Record<string, { key: string; label: string; icon: s
     { key: 'listas',    label: 'Listas',        icon: 'people-fill' },
     { key: 'reservas',  label: 'Reservas',      icon: 'calendar2-check-fill' },
     { key: 'equipe',    label: 'Equipe / Escala', icon: 'person-badge-fill' },
-    // chave 'ingressos' preservada: esta gravada nas permissoes de cada usuario.
-    { key: 'ingressos', label: 'Ticketeria',    icon: 'ticket-perforated-fill' },
+    { key: 'ingressos', label: 'Ingressos',     icon: 'ticket-perforated-fill' },
     { key: 'budget',    label: 'Budget',        icon: 'cash-stack' },
     { key: 'producao',  label: 'Produção',      icon: 'box-seam-fill' },
   ],

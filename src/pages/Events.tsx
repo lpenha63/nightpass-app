@@ -4580,7 +4580,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
         ) : allBatches.length === 0 ? (
           <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '30px 20px', lineHeight: 1.6 }}>
             Nenhum lote de ingresso criado ainda.<br />
-            Abra um evento e use <b style={{ color: C.txt }}>🎫 Ticketeria → ➕ Novo lote</b> para começar a vender.
+            Abra um evento e use <b style={{ color: C.txt }}>🎫 Ingressos → ➕ Novo lote</b> para começar a vender.
           </div>
         ) : (() => {
           const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
@@ -4834,7 +4834,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
         })()}
       </Modal>
 
-      <Modal open={!!ticketEv} title={`🎫 Ticketeria — ${ticketEv?.name ?? ''}`} onClose={() => { setTicketEv(null); setBatches([]) }}>
+      <Modal open={!!ticketEv} title={`🎫 Ingressos — ${ticketEv?.name ?? ''}`} onClose={() => { setTicketEv(null); setBatches([]) }}>
         {ticketEv && (
           <div>
             {/* Share link */}
@@ -5825,7 +5825,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                       <span style={{ background: '#f59e0b', color: '#000', borderRadius: '50%', width: 18, height: 18, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, animation: 'badgePulse 1.4s ease-in-out infinite' }}>{totalMissing}</span>
                     )}
                   </Btn>}
-                  {canFeat('ingressos') && <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎫 Ticketeria</Btn>}
+                  {canFeat('ingressos') && <Btn onClick={() => openTickets(ev)} small variant="secondary" style={cbtn('#ec4899')}>🎫 Ingressos</Btn>}
                   {canFeat('budget') && <Btn onClick={() => openBudget(ev)} small variant="secondary" style={cbtn('#10b981')}>💰 Budget</Btn>}
                   {canFeat('producao') && <Btn onClick={() => openProd(ev)} small variant="secondary" style={cbtn('#f59e0b')}>🏭 Produção</Btn>}
                   {/* Encerrar → escolhe entre arquivar ou excluir (cadastro errado) */}

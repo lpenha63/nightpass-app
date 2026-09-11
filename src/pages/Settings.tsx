@@ -1007,7 +1007,7 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
           {window.location.origin}/e/<span style={{ color: C.acc }}>ID_DO_EVENTO</span>
         </div>
         <div style={{ color: C.mut, fontSize: 11, marginTop: 6 }}>
-          Disponível no botão 🎫 Ticketeria de cada evento.
+          Disponível no botão 🎫 Ingressos de cada evento.
         </div>
       </Section>
 
