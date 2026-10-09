@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo} from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import { supabasePublico } from '../lib/supabase'
 import { InstallButton } from '../components/InstallButton'
 
@@ -7,6 +7,18 @@ const C = {
   acc: '#3b82f6', grn: '#10b981', red: '#f87171',
   gold: '#f59e0b', txt: '#f9fafb', mut: '#6b7280', sub: '#9ca3af',
   purp: '#7c3aed', purpL: '#a78bfa',
+}
+
+/** Numeros do painel (RPC promoter_painel). */
+interface Painel {
+  mes_cadastrados: number; mes_entraram: number
+  total_cadastrados: number; total_entraram: number
+  meta: number; comissao_pct: number; taxa_entrada_cents: number
+  fixo_cents: number; consumacao_cents: number
+  proximo_id: string | null; proximo_nome: string | null
+  proximo_data: string | null; proximo_hora: string | null
+  proximo_na_lista: number
+  melhor_nome: string | null; melhor_entradas: number
 }
 
 interface PromoterInfo {
@@ -68,6 +80,7 @@ export function PromoterPortal({ token }: { token: string }) {
   const [viewingList, setViewingList] = useState<string | null>(null)
   const [genreFilter, setGenreFilter] = useState<string>('all')
   const [viewMode, setViewMode] = useState<'all' | 'mine'>('all')
+  const [painel, setPainel] = useState<Painel | null>(null)
 
   // Manifest do app instalado: abre direto neste portal e leva a logo da casa.
   //
@@ -123,6 +136,10 @@ export function PromoterPortal({ token }: { token: string }) {
       // 1. Promoter + casa a partir do token, numa RPC só.
       //    Antes isto lia promoter_tokens direto, e a tabela estava com SELECT aberto:
       //    dava para listar TODOS os tokens de portal e entrar no de qualquer promoter.
+      // Numeros do painel. Vem de RPC propria porque o portal e anonimo: ele nao
+      // pode ler checkins nem promoters direto.
+      supabase.rpc('promoter_painel', { p_token: token })
+        .then(r => setPainel(((r.data as Painel[] | null) ?? [])[0] ?? null))
       const { data: rpc } = await supabase.rpc('get_promoter_by_token', { p_token: token })
       const info = (rpc?.[0] ?? null) as {
         promoter_id: string; house_id: string
@@ -270,6 +287,97 @@ export function PromoterPortal({ token }: { token: string }) {
 
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 60px' }}>
 
+        {/* Painel. Os tres numeros antigos (total de convidados, eventos futuros,
+            minhas listas) nao levavam a lugar nenhum. O que decide a vida do
+            promoter e quantos dos cadastrados ENTRARAM — numero que so passou a
+            existir com a atribuicao de check-in. */}
+        {painel && (
+          <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+
+            {/* Proximo evento: e nele que ele precisa agir hoje */}
+            {painel.proximo_nome && (
+              <div style={{ background: `linear-gradient(135deg, ${C.purp}22, ${C.card})`, border: `1px solid ${C.purp}55`, borderRadius: 14, padding: '14px 16px' }}>
+                <div style={{ color: C.purpL, fontSize: 10, fontWeight: 800, letterSpacing: '.08em' }}>PRÓXIMO EVENTO</div>
+                <div style={{ color: C.txt, fontWeight: 800, fontSize: 17, marginTop: 3 }}>{painel.proximo_nome}</div>
+                <div style={{ color: C.sub, fontSize: 12.5, marginTop: 2 }}>
+                  📅 {painel.proximo_data ? fdateShort(painel.proximo_data) : ''}
+                  {painel.proximo_hora ? ` às ${painel.proximo_hora.slice(0, 5)}` : ''}
+                  {' · '}
+                  <b style={{ color: painel.proximo_na_lista > 0 ? C.purpL : C.gold }}>
+                    {painel.proximo_na_lista > 0
+                      ? `${painel.proximo_na_lista} na sua lista`
+                      : 'ninguém na sua lista ainda'}
+                  </b>
+                </div>
+              </div>
+            )}
+
+            {/* Mes corrente. A taxa e o que a casa olha para renovar com o promoter. */}
+            {(() => {
+              const cad = painel.mes_cadastrados, ent = painel.mes_entraram
+              const taxa = cad > 0 ? Math.round((ent / cad) * 100) : null
+              const cor = taxa == null ? C.mut : taxa >= 50 ? C.grn : taxa >= 25 ? C.gold : C.red
+              return (
+                <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '12px 16px' }}>
+                  <div style={{ color: C.mut, fontSize: 10, fontWeight: 800, letterSpacing: '.08em', marginBottom: 8 }}>ESTE MÊS</div>
+                  <div style={{ display: 'flex', gap: 18, alignItems: 'flex-end' }}>
+                    <div><div style={{ color: C.txt, fontWeight: 800, fontSize: 21 }}>{cad}</div>
+                      <div style={{ color: C.mut, fontSize: 11 }}>cadastrou</div></div>
+                    <div><div style={{ color: C.grn, fontWeight: 800, fontSize: 21 }}>{ent}</div>
+                      <div style={{ color: C.mut, fontSize: 11 }}>entraram</div></div>
+                    {taxa != null && (
+                      <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                        <div style={{ color: cor, fontWeight: 800, fontSize: 21 }}>{taxa}%</div>
+                        <div style={{ color: C.mut, fontSize: 11 }}>compareceram</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Meta: so aparece se a casa cadastrou uma. */}
+                  {painel.meta > 0 && (() => {
+                    const pct = Math.min(100, Math.round((ent / painel.meta) * 100))
+                    return (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: C.sub, marginBottom: 4 }}>
+                          <span>Meta do mês: {painel.meta} entradas</span>
+                          <span style={{ color: ent >= painel.meta ? C.grn : C.gold, fontWeight: 700 }}>
+                            {ent >= painel.meta ? '✅ batida' : `faltam ${painel.meta - ent}`}
+                          </span>
+                        </div>
+                        <div style={{ background: C.bg, borderRadius: 999, height: 7, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: ent >= painel.meta ? C.grn : C.purp, borderRadius: 999, transition: 'width .4s' }} />
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Ganho: so quando a casa configurou alguma remuneracao. */}
+                  {(painel.taxa_entrada_cents > 0 || painel.fixo_cents > 0) && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.brd}`, fontSize: 12.5, color: C.sub }}>
+                      💰 <b style={{ color: C.grn }}>
+                        {(((painel.fixo_cents + ent * painel.taxa_entrada_cents) / 100)
+                          .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))}
+                      </b>{' '}
+                      no mês
+                      {painel.taxa_entrada_cents > 0 && (
+                        <span style={{ color: C.mut }}>
+                          {' '}· {(painel.taxa_entrada_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} por entrada
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {painel.melhor_nome && painel.melhor_entradas > 0 && (
+              <div style={{ color: C.mut, fontSize: 11.5, textAlign: 'center' }}>
+                🏆 Seu melhor evento: <b style={{ color: C.sub }}>{painel.melhor_nome}</b> — {painel.melhor_entradas} entradas
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Stats bar */}
         <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '14px 20px', marginBottom: 24, display: 'flex', gap: 24, justifyContent: 'center' }}>
           <div style={{ textAlign: 'center' }}>
@@ -340,13 +448,38 @@ export function PromoterPortal({ token }: { token: string }) {
               </div>
             )}
 
-            {shownEvents.map(event => {
+            {shownEvents.map((event, i) => {
               const list = lists.find(l => l.event_id === event.id)
               const isCreating = creatingFor === event.id
               const isViewingGuests = viewingList === event.id
 
+              // Cabecalho de mes. A lista vinha corrida: em novembro cheio, o
+              // promoter rolava sem saber onde um mes acaba e o outro comeca.
+              // Os eventos ja chegam ordenados por data, entao basta comparar
+              // com o anterior.
+              const mes = event.event_date.slice(0, 7)
+              const abreMes = i === 0 || shownEvents[i - 1].event_date.slice(0, 7) !== mes
+              const nomeMes = new Date(event.event_date + 'T12:00')
+                .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+              const quantos = shownEvents.filter(e => e.event_date.slice(0, 7) === mes).length
+
               return (
-                <div key={event.id} style={{
+                <Fragment key={event.id}>
+                {abreMes && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    margin: i === 0 ? '4px 0 12px' : '24px 0 12px',
+                  }}>
+                    <span style={{ color: C.purpL, fontSize: 12, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase' as const, whiteSpace: 'nowrap' }}>
+                      {nomeMes}
+                    </span>
+                    <span style={{ color: C.mut, fontSize: 11, whiteSpace: 'nowrap' }}>
+                      {quantos} evento{quantos !== 1 ? 's' : ''}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: C.brd }} />
+                  </div>
+                )}
+                <div style={{
                   background: C.card,
                   border: `1px solid ${list ? '#7c3aed44' : C.brd}`,
                   borderRadius: 16,
@@ -446,6 +579,7 @@ export function PromoterPortal({ token }: { token: string }) {
                     )}
                   </div>
                 </div>
+                </Fragment>
               )
             })}
           </>
