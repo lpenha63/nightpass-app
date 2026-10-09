@@ -175,6 +175,19 @@ try{
   else token=localStorage.getItem(CHAVE_TOKEN);
 }catch(e){}
 var data=null, busy={}, team=[], openEv={}, view='home', sent=[], pushOn=false, reports=[], resList=[], resEvName='';
+
+// ── Icone do app: a logo DESTA casa ──
+// O /agenda.webmanifest do <head> e o padrao e continua valendo sozinho. Quando
+// sabemos a casa, trocamos por um manifest que traz o nome e a logo dela.
+// O `id` dos dois e o mesmo (/agenda.html), entao isto NAO cria um app novo nem
+// reabre a porta para instalar em duplicata.
+if(token){
+  SB.rpc('casa_da_agenda',{p_token:token}).then(function(r){
+    if(r.error||!r.data)return;                           // sem casa: fica o padrao
+    var l=document.querySelector('link[rel="manifest"]');
+    if(l)l.setAttribute('href','/api/manifest?app=agenda&casa='+encodeURIComponent(r.data));
+  }).catch(function(){});
+}
 // Carimbado no build (copy-static.js). Em dev fica o literal.
 var APP_BUILD='__APP_BUILD__';
 var docs=[], docLido={}, docFoto={};

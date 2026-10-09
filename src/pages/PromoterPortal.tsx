@@ -69,31 +69,26 @@ export function PromoterPortal({ token }: { token: string }) {
   const [genreFilter, setGenreFilter] = useState<string>('all')
   const [viewMode, setViewMode] = useState<'all' | 'mine'>('all')
 
-  // Manifest dinâmico: o app instalado abre direto neste portal do promoter
+  // Manifest do app instalado: abre direto neste portal e leva a logo da casa.
+  //
+  // Antes era montado aqui e servido como `blob:`. A URL de blob muda a cada
+  // carregamento, entao o navegador nao reconhecia o app instalado como o mesmo —
+  // instalacao instavel e atalho duplicado. E o mesmo defeito ja corrigido na
+  // agenda da equipe; agora o manifest tem URL fixa (/api/manifest).
+  //
+  // Roda em duas etapas de proposito: a primeira (sem a casa) entra assim que a
+  // pagina abre, para o navegador nunca oferecer instalar com o manifest do painel
+  // admin (start_url "/") caso a pessoa toque em instalar antes dos dados chegarem.
   useEffect(() => {
-    const manifest = {
-      name: 'Portal do Promoter',
-      short_name: 'Promoter',
-      start_url: window.location.pathname,
-      scope: window.location.pathname,
-      display: 'standalone',
-      orientation: 'portrait-primary',
-      background_color: '#0a0e1a',
-      theme_color: '#7c3aed',
-      lang: 'pt-BR',
-      icons: [
-        { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-        { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-      ],
-    }
-    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' })
-    const url = URL.createObjectURL(blob)
+    const inicio = window.location.pathname
+    const url = `/api/manifest?app=promoter&inicio=${encodeURIComponent(inicio)}`
+      + (houseId ? `&casa=${encodeURIComponent(houseId)}` : '')
     let link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null
-    const prev = link ? link.getAttribute('href') : null
+    const anterior = link ? link.getAttribute('href') : null
     if (!link) { link = document.createElement('link'); link.rel = 'manifest'; document.head.appendChild(link) }
     link.setAttribute('href', url)
-    return () => { URL.revokeObjectURL(url); if (prev) link!.setAttribute('href', prev) }
-  }, [token])
+    return () => { if (anterior) link!.setAttribute('href', anterior) }
+  }, [token, houseId])
 
   async function loadLists(pId: string, hId: string) {
     const { data } = await supabase
