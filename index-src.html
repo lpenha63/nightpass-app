@@ -27,6 +27,34 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" crossorigin="anonymous" />
+    <script>
+      /*
+       * Portal do promoter (/p/<token>): trocar o manifest AQUI, no head, e nao
+       * depois que o React monta.
+       *
+       * O navegador decide se a pagina e instalavel — e QUAL app seria instalado —
+       * lendo o manifest no carregamento. Com o manifest padrao desta SPA, o que
+       * ele via era o painel admin (start_url "/"): ou nao oferecia instalar o
+       * portal, ou ofereceria instalar o app errado.
+       *
+       * E exatamente por isso que a agenda da equipe instala e o portal nao
+       * instalava: agenda.html e uma pagina estatica, com o manifest certo desde o
+       * primeiro byte. Aqui o manifest so era corrigido por JS depois da montagem,
+       * tarde demais.
+       *
+       * O ajuste fino (nome e logo da casa) continua no React, quando a casa fica
+       * conhecida. O `id` dos dois e o mesmo, entao refinar nao cria um app novo.
+       */
+      (function () {
+        if (location.pathname.indexOf('/p/') !== 0) return
+        var l = document.querySelector('link[rel="manifest"]')
+        if (l) l.setAttribute('href', '/api/manifest?app=promoter&inicio=' + encodeURIComponent(location.pathname))
+        var t = document.querySelector('meta[name="apple-mobile-web-app-title"]')
+        if (t) t.setAttribute('content', 'Promoter')
+        var c = document.querySelector('meta[name="theme-color"]')
+        if (c) c.setAttribute('content', '#ec4899')
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
