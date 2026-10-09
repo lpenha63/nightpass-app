@@ -43,6 +43,8 @@ interface EventItem {
 interface PromoterListItem {
   id: string
   name: string
+  /** Teto de vagas definido pela casa. null/0 = sem limite. */
+  max_guests?: number | null
   token: string
   event_id: string
   house_id: string
@@ -108,7 +110,7 @@ export function PromoterPortal({ token }: { token: string }) {
   async function loadLists(pId: string, hId: string) {
     const { data } = await supabase
       .from('promoter_lists')
-      .select('id, name, token, event_id, house_id, promoter_id, events(promoter_enabled,promoter_invites)')
+      .select('id, name, token, max_guests, event_id, house_id, promoter_id, events(promoter_enabled,promoter_invites)')
       .eq('promoter_id', pId)
       .eq('house_id', hId)
 
@@ -549,10 +551,31 @@ export function PromoterPortal({ token }: { token: string }) {
                   <div style={{ padding: '12px 16px 16px' }}>
                     {list ? (
                       <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                          <span style={{ color: C.purpL, fontWeight: 800, fontSize: 18 }}>{list.guest_count ?? 0}</span>
-                          <span style={{ color: C.mut, fontSize: 12 }}>convidado{list.guest_count !== 1 ? 's' : ''}</span>
-                        </div>
+{(() => {
+                          const usados = list.guest_count ?? 0
+                          const teto = list.max_guests ?? 0
+                          const cheia = teto > 0 && usados >= teto
+                          const pct = teto > 0 ? Math.min(100, Math.round((usados / teto) * 100)) : 0
+                          return (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ color: cheia ? C.gold : C.purpL, fontWeight: 800, fontSize: 18 }}>{usados}</span>
+                                {teto > 0
+                                  ? <span style={{ color: C.mut, fontSize: 12 }}>de {teto} vagas</span>
+                                  : <span style={{ color: C.mut, fontSize: 12 }}>convidado{usados !== 1 ? 's' : ''}</span>}
+                                {cheia && <span style={{ marginLeft: 'auto', color: C.gold, fontSize: 11, fontWeight: 800 }}>LOTADA</span>}
+                              </div>
+                              {/* Barra so quando ha teto: sem limite, uma barra sempre vazia
+                                  nao diz nada e ainda sugere que falta gente. */}
+                              {teto > 0 && (
+                                <div style={{ background: C.bg, borderRadius: 999, height: 6, overflow: 'hidden', marginTop: 6 }}>
+                                  <div style={{ width: `${pct}%`, height: '100%', borderRadius: 999, transition: 'width .4s',
+                                    background: cheia ? C.gold : pct >= 80 ? C.gold : C.purp }} />
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
                         <div style={{ display: 'flex', gap: 8 }}>
                           <button onClick={() => copyLink(list.token)}
                             style={{
@@ -701,7 +724,9 @@ function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdde
       full_name: nm, phone: phone.trim() || null, gender: gender || null, list_type: 'promoter',
     }).select('id, full_name, phone, gender').single()
     setSaving(false)
-    if (error) { setErr('Erro ao adicionar: ' + error.message); return }
+    // 23514 (check_violation) vem do gatilho de limite de vagas, e a mensagem
+    // dele ja esta escrita para o convidado ler.
+    if (error) { setErr(error.code === '23514' ? error.message : 'Erro ao adicionar: ' + error.message); return }
     if (data) {
       setGuests(gs => [...gs, data])
       setName(''); setPhone(''); setGender('')

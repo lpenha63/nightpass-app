@@ -19,6 +19,8 @@ interface Promoter {
 interface PromoterList {
   id: string; name: string; token: string; event_id: string
   fixed_fee_cents: number; min_entries: number; entry_fee_cents: number; consumacao_cents: number
+  /** Teto de convidados. null/0 = sem limite. Diferente de min_entries, que e meta. */
+  max_guests?: number | null
   entry_fee_male_cents?: number; entry_fee_female_cents?: number
   cutoff_exempt?: boolean
   cutoff_time?: string | null; early_male_cents?: number; early_female_cents?: number
@@ -33,7 +35,7 @@ interface Guest {
 interface UpcomingEvent { id: string; name: string; event_date: string }
 
 const DEF = { full_name: '', phone: '', email: '', commission_pct: 10, notes: '', fixed_fee_cents: '', min_entries: '', entry_fee_cents: '', consumacao_cents: '' }
-const TERMS_DEF = { fixed_fee_cents: '', min_entries: '', entry_fee_male_cents: '', entry_fee_female_cents: '', consumacao_cents: '', cutoff_exempt: false, cutoff_time: '', early_male_cents: '', early_female_cents: '' }
+const TERMS_DEF = { fixed_fee_cents: '', min_entries: '', max_guests: '', entry_fee_male_cents: '', entry_fee_female_cents: '', consumacao_cents: '', cutoff_exempt: false, cutoff_time: '', early_male_cents: '', early_female_cents: '' }
 
 /** Lista fica aberta até 1 dia depois do evento; a partir daí é histórico.
  *  Data local (toISOString devolveria UTC e viraria o dia à noite, no meio da operação). */
@@ -74,7 +76,7 @@ export function PromotersPage({ house }: Props) {
 
   // ── Editar termos comerciais ──
   const [editTermsId, setEditTermsId] = useState<string | null>(null)
-  const [termsForm, setTermsForm] = useState<{ fixed_fee_cents: string; min_entries: string; entry_fee_male_cents: string; entry_fee_female_cents: string; consumacao_cents: string; cutoff_exempt: boolean; cutoff_time: string; early_male_cents: string; early_female_cents: string }>(TERMS_DEF)
+  const [termsForm, setTermsForm] = useState<{ fixed_fee_cents: string; min_entries: string; max_guests: string; entry_fee_male_cents: string; entry_fee_female_cents: string; consumacao_cents: string; cutoff_exempt: boolean; cutoff_time: string; early_male_cents: string; early_female_cents: string }>(TERMS_DEF)
 
   // ── Ver convidados de uma lista ──
   const [viewGuests, setViewGuests] = useState<PromoterList | null>(null)
@@ -236,7 +238,7 @@ export function PromotersPage({ house }: Props) {
     loadUpcomingEvents()
     const { data } = await supabase
       .from('promoter_lists')
-      .select('id, name, token, event_id, fixed_fee_cents, min_entries, entry_fee_cents, entry_fee_male_cents, entry_fee_female_cents, cutoff_exempt, cutoff_time, early_male_cents, early_female_cents, consumacao_cents, events(name, event_date)')
+      .select('id, name, token, event_id, fixed_fee_cents, min_entries, max_guests, entry_fee_cents, entry_fee_male_cents, entry_fee_female_cents, cutoff_exempt, cutoff_time, early_male_cents, early_female_cents, consumacao_cents, events(name, event_date)')
       .eq('promoter_id', pr.id)
       .eq('house_id', house.id)
       .order('created_at', { ascending: false })
@@ -263,6 +265,7 @@ export function PromotersPage({ house }: Props) {
     setTermsForm({
       fixed_fee_cents: l.fixed_fee_cents > 0 ? (l.fixed_fee_cents / 100).toFixed(2) : '',
       min_entries: l.min_entries > 0 ? String(l.min_entries) : '',
+      max_guests: (l.max_guests ?? 0) > 0 ? String(l.max_guests) : '',
       entry_fee_male_cents: male > 0 ? (male / 100).toFixed(2) : '',
       entry_fee_female_cents: female > 0 ? (female / 100).toFixed(2) : '',
       consumacao_cents: l.consumacao_cents > 0 ? (l.consumacao_cents / 100).toFixed(2) : '',
@@ -279,6 +282,9 @@ export function PromotersPage({ house }: Props) {
     const data = {
       fixed_fee_cents: Math.round((parseFloat(termsForm.fixed_fee_cents) || 0) * 100),
       min_entries: parseInt(termsForm.min_entries) || 0,
+      // Vazio = sem limite. Guardar 0 e null da no mesmo para o gatilho, mas null
+      // deixa claro no banco que a casa nao definiu teto.
+      max_guests: parseInt(termsForm.max_guests) || null,
       entry_fee_cents: maleCents, // valor geral = masculino (compatibilidade)
       entry_fee_male_cents: maleCents, entry_fee_female_cents: femaleCents,
       consumacao_cents: Math.round((parseFloat(termsForm.consumacao_cents) || 0) * 100),
@@ -639,6 +645,12 @@ export function PromotersPage({ house }: Props) {
                           <input type="number" min="0" value={termsForm.min_entries}
                             onChange={e => setTermsForm(p => ({ ...p, min_entries: e.target.value }))}
                             placeholder="0" style={SL} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>🚧 LIMITE DE VAGAS</label>
+                          <input type="number" min="0" value={termsForm.max_guests}
+                            onChange={e => setTermsForm(p => ({ ...p, max_guests: e.target.value }))}
+                            placeholder="vazio = sem limite" style={SL} />
                         </div>
                         <div>
                           <label style={{ fontSize: 11, color: '#60a5fa', fontWeight: 600, display: 'block', marginBottom: 4 }}>♂ ENTRADA MASCULINO (R$)</label>
