@@ -224,6 +224,32 @@ export function PromoterPortal({ token }: { token: string }) {
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
   }
 
+  /**
+   * Imagem 9:16 do evento para o promoter postar no Stories.
+   *
+   * O flyer cru postado direto sai com tarja ou cortado — cartaz e 2:3, story e
+   * 9:16. O endpoint devolve o flyer inteiro sobre o fundo desfocado.
+   *
+   * Tenta o compartilhamento nativo com arquivo: no celular isso abre o
+   * Instagram direto, sem passar por download. Onde nao houver, abre numa aba
+   * para a pessoa segurar e salvar.
+   */
+  async function compartilharStory(listToken: string, nomeEvento: string) {
+    const url = `${window.location.origin}/api/preview-imagem?type=lista&token=${listToken}&formato=story`
+    try {
+      const r = await fetch(url)
+      if (r.ok) {
+        const arquivo = new File([await r.blob()], `${nomeEvento.replace(/[^\w\s-]/g, '').trim() || 'evento'}.jpg`, { type: 'image/jpeg' })
+        const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean }
+        if (nav.canShare?.({ files: [arquivo] })) {
+          await navigator.share({ files: [arquivo] })
+          return
+        }
+      }
+    } catch { /* sem compartilhamento nativo: abre a imagem */ }
+    window.open(url, '_blank')
+  }
+
   async function copyLink(listToken: string) {
     try {
       await navigator.clipboard.writeText(getListUrl(listToken))
@@ -535,6 +561,15 @@ export function PromoterPortal({ token }: { token: string }) {
                               fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                             }}>
                             {copied === list.token ? '✅' : '🔗'}
+                          </button>
+                          <button onClick={() => compartilharStory(list.token, event.name)}
+                            title="Imagem para o Stories"
+                            style={{
+                              background: 'transparent', border: `1px solid ${C.brd}`,
+                              borderRadius: 10, padding: '8px 12px', color: C.mut,
+                              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                            }}>
+                            📸
                           </button>
                           <button onClick={() => shareWhatsApp(list, event)}
                             style={{
