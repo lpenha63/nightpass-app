@@ -319,8 +319,23 @@ export function PromotersPage({ house }: Props) {
   }
   function setF(k: string, v: unknown) { setForm(p => ({ ...p, [k]: v })) }
 
+  /** So os digitos: "(11) 99999-9999" e "11999999999" sao o mesmo telefone. */
+  const soDigitos = (v: unknown) => String(v ?? '').replace(/\D/g, '')
+
   function save() {
     if (!String(form.full_name ?? '').trim()) { st2('Nome obrigatório', 'warn'); return }
+
+    // Aviso amigavel antes de tentar gravar. A trava de verdade e um gatilho no
+    // banco (promoter_telefone_unico) — esta checagem existe para a pessoa ler o
+    // nome de quem ja usa o numero, em vez de um erro de banco.
+    const tel = soDigitos(form.phone)
+    if (tel) {
+      const jaTem = promos.find(p => p.id !== editing && soDigitos(p.phone) === tel)
+      if (jaTem) {
+        st2(`Este telefone já é do promoter "${jaTem.full_name.trim()}". Um telefone só pode ter um cadastro.`, 'warn')
+        return
+      }
+    }
     const d = {
       ...form,
       house_id: house.id,
@@ -332,7 +347,10 @@ export function PromotersPage({ house }: Props) {
     }
     const q = editing ? supabase.from('promoters').update(d).eq('id', editing) : supabase.from('promoters').insert(d)
     q.then(r => {
-      if (r.error) st2('Erro: ' + r.error.message, 'error')
+      // 23505 vem do gatilho do banco: alguem cadastrou o mesmo numero enquanto
+      // esta tela estava aberta. A mensagem dele ja e escrita para o usuario ler.
+      if (r.error) st2(r.error.code === '23505' ? r.error.message : 'Erro: ' + r.error.message,
+        r.error.code === '23505' ? 'warn' : 'error')
       else { st2(editing ? 'Atualizado!' : 'Promoter criado!'); setModal(false); load() }
     })
   }
