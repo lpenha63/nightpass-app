@@ -22,6 +22,12 @@ interface Painel {
   melhor_nome: string | null; melhor_entradas: number
 }
 
+/** Um evento do promoter com o resultado dele (RPC promoter_eventos). */
+interface EventoResumo {
+  event_id: string; nome: string; data: string; hora: string | null; flyer: string | null
+  passado: boolean; cadastrados: number; entraram: number
+}
+
 interface PromoterInfo {
   id: string
   full_name: string
@@ -82,7 +88,8 @@ export function PromoterPortal({ token }: { token: string }) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [viewingList, setViewingList] = useState<string | null>(null)
   const [genreFilter, setGenreFilter] = useState<string>('all')
-  const [viewMode, setViewMode] = useState<'all' | 'mine'>('all')
+  const [viewMode, setViewMode] = useState<'all' | 'mine' | 'feitos'>('all')
+  const [historico, setHistorico] = useState<EventoResumo[]>([])
   const [painel, setPainel] = useState<Painel | null>(null)
   const [qrDe, setQrDe] = useState<{ token: string; evento: string } | null>(null)
 
@@ -144,6 +151,10 @@ export function PromoterPortal({ token }: { token: string }) {
       // pode ler checkins nem promoters direto.
       supabase.rpc('promoter_painel', { p_token: token })
         .then(r => setPainel(((r.data as Painel[] | null) ?? [])[0] ?? null))
+      // Eventos com resultado. O portal so lista evento futuro; sem isto o
+      // promoter perde de vista tudo que ja produziu assim que a noite passa.
+      supabase.rpc('promoter_eventos', { p_token: token, p_meses: 6 })
+        .then(r => setHistorico((r.data as EventoResumo[] | null) ?? []))
       const { data: rpc } = await supabase.rpc('get_promoter_by_token', { p_token: token })
       const info = (rpc?.[0] ?? null) as {
         promoter_id: string; house_id: string
@@ -426,6 +437,15 @@ export function PromoterPortal({ token }: { token: string }) {
             <div style={{ color: viewMode === 'mine' ? C.purpL : C.txt, fontWeight: 800, fontSize: 22 }}>{lists.length}</div>
             <div style={{ color: viewMode === 'mine' ? C.purpL : C.mut, fontSize: 11, fontWeight: viewMode === 'mine' ? 700 : 400 }}>minhas listas</div>
           </button>
+          <div style={{ width: 1, background: C.brd }} />
+          {/* Realizados: o que ele ja produziu. Antes sumia da tela junto com o evento. */}
+          <button onClick={() => setViewMode('feitos')}
+            style={{ textAlign: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0, borderRadius: 8, opacity: viewMode === 'feitos' ? 1 : 0.55 }}>
+            <div style={{ color: viewMode === 'feitos' ? C.grn : C.txt, fontWeight: 800, fontSize: 22 }}>
+              {historico.filter(h => h.passado).length}
+            </div>
+            <div style={{ color: viewMode === 'feitos' ? C.grn : C.mut, fontSize: 11, fontWeight: viewMode === 'feitos' ? 700 : 400 }}>realizados</div>
+          </button>
         </div>
 
         {/* Instalar como app */}
@@ -440,8 +460,82 @@ export function PromoterPortal({ token }: { token: string }) {
           </div>
         )}
 
+        {/* Realizados: o que o promoter ja produziu, com o resultado de cada noite.
+            Fica separado da lista de futuros porque a pergunta e outra — ali ele
+            age, aqui ele confere (inclusive o acerto com a casa). */}
+        {viewMode === 'feitos' && (() => {
+          const feitos = historico.filter(h => h.passado)
+          if (feitos.length === 0) {
+            return (
+              <div style={{ color: C.mut, fontSize: 13, textAlign: 'center', padding: '32px 16px', lineHeight: 1.6 }}>
+                Nenhum evento realizado ainda.<br />
+                Assim que a primeira noite passar, o resultado dela aparece aqui.
+              </div>
+            )
+          }
+          const totCad = feitos.reduce((s, h) => s + h.cadastrados, 0)
+          const totEnt = feitos.reduce((s, h) => s + h.entraram, 0)
+          return (
+            <>
+              <div style={{ color: C.grn, fontSize: 11, fontWeight: 700, marginBottom: 12, letterSpacing: '0.06em' }}>
+                ✅ REALIZADOS · últimos 6 meses
+              </div>
+
+              <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '12px 16px', marginBottom: 14, display: 'flex', gap: 18 }}>
+                <div><div style={{ color: C.txt, fontWeight: 800, fontSize: 19 }}>{feitos.length}</div>
+                  <div style={{ color: C.mut, fontSize: 11 }}>noites</div></div>
+                <div><div style={{ color: C.purpL, fontWeight: 800, fontSize: 19 }}>{totCad}</div>
+                  <div style={{ color: C.mut, fontSize: 11 }}>cadastrou</div></div>
+                <div><div style={{ color: C.grn, fontWeight: 800, fontSize: 19 }}>{totEnt}</div>
+                  <div style={{ color: C.mut, fontSize: 11 }}>entraram</div></div>
+                {totCad > 0 && (
+                  <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                    <div style={{ color: C.gold, fontWeight: 800, fontSize: 19 }}>{Math.round((totEnt / totCad) * 100)}%</div>
+                    <div style={{ color: C.mut, fontSize: 11 }}>média</div>
+                  </div>
+                )}
+              </div>
+
+              {feitos.map(h => {
+                const lista = lists.find(l => l.event_id === h.event_id)
+                const aberta = viewingList === h.event_id
+                const taxa = h.cadastrados > 0 ? Math.round((h.entraram / h.cadastrados) * 100) : null
+                const cor = taxa == null ? C.mut : taxa >= 50 ? C.grn : taxa >= 25 ? C.gold : C.red
+                return (
+                  <div key={h.event_id} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '12px 14px', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: C.txt, fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.nome}</div>
+                        <div style={{ color: C.mut, fontSize: 11.5, marginTop: 2 }}>📅 {fdateShort(h.data)}</div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>
+                          <span style={{ color: C.grn }}>{h.entraram}</span>
+                          <span style={{ color: C.mut, fontWeight: 400 }}> / {h.cadastrados}</span>
+                        </div>
+                        {taxa != null && <div style={{ color: cor, fontSize: 11, fontWeight: 700 }}>{taxa}% entraram</div>}
+                      </div>
+                    </div>
+                    {lista && (
+                      <button onClick={() => setViewingList(aberta ? null : h.event_id)}
+                        style={{ marginTop: 10, width: '100%', background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 10, padding: '7px 0', color: C.sub, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                        {aberta ? 'Ocultar convidados' : '👥 Ver quem entrou'}
+                      </button>
+                    )}
+                    {aberta && lista && (
+                      <div style={{ marginTop: 10 }}>
+                        <GuestList list={lista} supabase={supabase} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </>
+          )
+        })()}
+
         {/* Events list */}
-        {events.length > 0 && (() => {
+        {viewMode !== 'feitos' && events.length > 0 && (() => {
           const genres = Array.from(new Set(events.map(e => (e.genre ?? '').trim()).filter(Boolean)))
           const base = viewMode === 'mine' ? events.filter(e => lists.some(l => l.event_id === e.id)) : events
           const shownEvents = genreFilter === 'all' ? base : base.filter(e => (e.genre ?? '').trim() === genreFilter)
@@ -563,6 +657,18 @@ export function PromoterPortal({ token }: { token: string }) {
                                 {teto > 0
                                   ? <span style={{ color: C.mut, fontSize: 12 }}>de {teto} vagas</span>
                                   : <span style={{ color: C.mut, fontSize: 12 }}>convidado{usados !== 1 ? 's' : ''}</span>}
+                                {/* Entradas da noite, ao vivo. So aparece depois que
+                                    alguem entrou — antes disso um "0 entraram" no
+                                    cartao de um evento que nem comecou so assusta. */}
+                                {(() => {
+                                  const ent = historico.find(h => h.event_id === event.id)?.entraram ?? 0
+                                  if (ent <= 0) return null
+                                  return (
+                                    <span style={{ marginLeft: 'auto', color: C.grn, fontSize: 12, fontWeight: 800 }}>
+                                      ✅ {ent} entraram
+                                    </span>
+                                  )
+                                })()}
                                 {cheia && <span style={{ marginLeft: 'auto', color: C.gold, fontSize: 11, fontWeight: 800 }}>LOTADA</span>}
                               </div>
                               {/* Barra so quando ha teto: sem limite, uma barra sempre vazia
@@ -696,7 +802,7 @@ export function PromoterPortal({ token }: { token: string }) {
 // o RLS não devolve convidado nenhum.
 type SB = ReturnType<typeof supabasePublico>
 function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdded?: () => void; supabase: SB }) {
-  const [guests, setGuests] = useState<{ id: string; full_name: string; phone?: string; gender?: string; checked_in?: boolean }[]>([])
+  const [guests, setGuests] = useState<{ id: string; full_name: string; phone?: string; gender?: string; checked_in?: boolean; checked_in_at?: string | null }[]>([])
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -707,7 +813,7 @@ function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdde
   useEffect(() => {
     supabase
       .from('promoter_list_guests')
-      .select('id, full_name, phone, gender, checked_in')
+      .select('id, full_name, phone, gender, checked_in, checked_in_at')
       .eq('list_id', list.id)
       // Ordenava por created_at, coluna que não existe nesta tabela: a consulta
       // devolvia erro e a lista aparecia sempre vazia.
@@ -774,7 +880,24 @@ function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdde
       ) : guests.length === 0 ? (
         <div style={{ color: C.mut, fontSize: 12 }}>Nenhum convidado ainda</div>
       ) : (
-        guests.map((g, i) => (
+        <>
+        {/* Resumo da lista: e o numero que o promoter confere com a casa. */}
+        {(() => {
+          const ent = guests.filter(g => g.checked_in).length
+          if (guests.length === 0) return null
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 10px', borderBottom: `1px solid ${C.brd}`, marginBottom: 6 }}>
+              <span style={{ color: C.grn, fontWeight: 800, fontSize: 15 }}>{ent}</span>
+              <span style={{ color: C.mut, fontSize: 12 }}>de {guests.length} entraram</span>
+              {guests.length > 0 && (
+                <span style={{ marginLeft: 'auto', color: C.sub, fontSize: 12, fontWeight: 700 }}>
+                  {Math.round((ent / guests.length) * 100)}%
+                </span>
+              )}
+            </div>
+          )
+        })()}
+        {guests.map((g, i) => (
           <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.txt, fontSize: 13, padding: '6px 0', borderBottom: i < guests.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
             {/* Quem ja entrou fica verde. O dado existe desde que o check-in passou
                 a marcar o convidado — antes a lista nao sabia quem veio. */}
@@ -783,6 +906,11 @@ function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdde
             <span style={{ flex: 1, color: g.checked_in ? C.grn : C.txt }}>
               {i + 1}. {(g.gender === 'F' || g.gender === 'feminino') ? '♀ ' : (g.gender === 'M' || g.gender === 'masculino') ? '♂ ' : ''}{g.full_name}
               {g.phone ? <span style={{ color: C.mut, fontSize: 12 }}> · {g.phone}</span> : ''}
+              {g.checked_in && g.checked_in_at && (
+                <span style={{ color: C.grn, fontSize: 11.5 }}>
+                  {' · '}🕐 {new Date(g.checked_in_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
             </span>
             {/* Cutucar: so para quem tem telefone e ainda nao entrou. Abre o
                 WhatsApp do proprio promoter — nao depende da API da casa. */}
@@ -794,7 +922,8 @@ function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdde
               </a>
             )}
           </div>
-        ))
+        ))}
+        </>
       )}
     </div>
   )
