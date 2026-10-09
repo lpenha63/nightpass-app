@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { supabasePublico } from '../lib/supabase'
 import { InstallButton } from '../components/InstallButton'
+import QRCode from 'react-qr-code'
 
 const C = {
   bg: '#0a0e1a', card: '#111827', brd: '#1e2736',
@@ -81,6 +82,7 @@ export function PromoterPortal({ token }: { token: string }) {
   const [genreFilter, setGenreFilter] = useState<string>('all')
   const [viewMode, setViewMode] = useState<'all' | 'mine'>('all')
   const [painel, setPainel] = useState<Painel | null>(null)
+  const [qrDe, setQrDe] = useState<{ token: string; evento: string } | null>(null)
 
   // Manifest do app instalado: abre direto neste portal e leva a logo da casa.
   //
@@ -562,6 +564,15 @@ export function PromoterPortal({ token }: { token: string }) {
                             }}>
                             {copied === list.token ? '✅' : '🔗'}
                           </button>
+                          <button onClick={() => setQrDe({ token: list.token, evento: event.name })}
+                            title="QR da lista"
+                            style={{
+                              background: 'transparent', border: `1px solid ${C.brd}`,
+                              borderRadius: 10, padding: '8px 12px', color: C.mut,
+                              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                            }}>
+                            ▣
+                          </button>
                           <button onClick={() => compartilharStory(list.token, event.name)}
                             title="Imagem para o Stories"
                             style={{
@@ -631,6 +642,28 @@ export function PromoterPortal({ token }: { token: string }) {
         <div style={{ color: C.mut, fontSize: 11, textAlign: 'center', marginTop: 32 }}>
           Compartilhe os links diretamente pelo WhatsApp com seus convidados
         </div>
+
+        {/* QR da lista: serve para o promoter que esta no balcao ou na rua — a
+            pessoa aponta a camera e se cadastra sozinha, sem pedir o numero
+            dela nem mandar link. */}
+        {qrDe && (
+          <div onClick={() => setQrDe(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: '#fff', borderRadius: 18, padding: '22px 22px 18px', maxWidth: 340, width: '100%', textAlign: 'center' }}>
+              <div style={{ color: '#111', fontWeight: 800, fontSize: 15, marginBottom: 2 }}>{qrDe.evento}</div>
+              <div style={{ color: '#666', fontSize: 12, marginBottom: 16 }}>Aponte a câmera para entrar na lista</div>
+              {/* Fundo branco fixo, nao do tema: QR em fundo escuro muitos leitores nao leem. */}
+              <div style={{ background: '#fff', padding: 8, display: 'inline-block' }}>
+                <QRCode value={getListUrl(qrDe.token)} size={232} />
+              </div>
+              <button onClick={() => setQrDe(null)}
+                style={{ marginTop: 18, width: '100%', background: C.purp, border: 'none', borderRadius: 10, padding: '11px 0', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -640,7 +673,7 @@ export function PromoterPortal({ token }: { token: string }) {
 // o RLS não devolve convidado nenhum.
 type SB = ReturnType<typeof supabasePublico>
 function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdded?: () => void; supabase: SB }) {
-  const [guests, setGuests] = useState<{ id: string; full_name: string; phone?: string; gender?: string }[]>([])
+  const [guests, setGuests] = useState<{ id: string; full_name: string; phone?: string; gender?: string; checked_in?: boolean }[]>([])
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -651,7 +684,7 @@ function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdde
   useEffect(() => {
     supabase
       .from('promoter_list_guests')
-      .select('id, full_name, phone, gender')
+      .select('id, full_name, phone, gender, checked_in')
       .eq('list_id', list.id)
       // Ordenava por created_at, coluna que não existe nesta tabela: a consulta
       // devolvia erro e a lista aparecia sempre vazia.
@@ -717,9 +750,24 @@ function GuestList({ list, onAdded, supabase }: { list: PromoterListItem; onAdde
         <div style={{ color: C.mut, fontSize: 12 }}>Nenhum convidado ainda</div>
       ) : (
         guests.map((g, i) => (
-          <div key={g.id} style={{ color: C.txt, fontSize: 13, padding: '4px 0', borderBottom: i < guests.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
-            {i + 1}. {(g.gender === 'F' || g.gender === 'feminino') ? '♀ ' : (g.gender === 'M' || g.gender === 'masculino') ? '♂ ' : ''}{g.full_name}
-            {g.phone ? <span style={{ color: C.mut, fontSize: 12 }}> · {g.phone}</span> : ''}
+          <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.txt, fontSize: 13, padding: '6px 0', borderBottom: i < guests.length - 1 ? `1px solid ${C.brd}` : 'none' }}>
+            {/* Quem ja entrou fica verde. O dado existe desde que o check-in passou
+                a marcar o convidado — antes a lista nao sabia quem veio. */}
+            <span title={g.checked_in ? 'Já entrou' : 'Ainda não entrou'}
+              style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: g.checked_in ? C.grn : C.brd }} />
+            <span style={{ flex: 1, color: g.checked_in ? C.grn : C.txt }}>
+              {i + 1}. {(g.gender === 'F' || g.gender === 'feminino') ? '♀ ' : (g.gender === 'M' || g.gender === 'masculino') ? '♂ ' : ''}{g.full_name}
+              {g.phone ? <span style={{ color: C.mut, fontSize: 12 }}> · {g.phone}</span> : ''}
+            </span>
+            {/* Cutucar: so para quem tem telefone e ainda nao entrou. Abre o
+                WhatsApp do proprio promoter — nao depende da API da casa. */}
+            {!g.checked_in && g.phone && (
+              <a href={`https://wa.me/55${g.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Oi ${g.full_name.split(' ')[0]}! Você está na lista — é só chegar e falar seu nome na portaria. Te espero! 🎉`)}`}
+                target="_blank" rel="noopener noreferrer" title="Lembrar pelo WhatsApp"
+                style={{ flexShrink: 0, textDecoration: 'none', border: `1px solid ${C.brd}`, borderRadius: 8, padding: '3px 8px', fontSize: 12 }}>
+                💬
+              </a>
+            )}
           </div>
         ))
       )}
