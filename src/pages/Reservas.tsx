@@ -745,8 +745,12 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     ].filter(l => l !== '').join('\n')
 
     if (!r.phone) { sT(setToast, 'Reserva sem telefone cadastrado', 'warn'); return }
-    const imageUrl = ev?.flyer_url || r.flyer_url || house.logo_url || undefined
-    const res = await sendWADirect(house.id, r.phone, lines, { type: 'reservation_list', mediaUrl: imageUrl })
+    // SEM mediaUrl de proposito. Indo como imagem+legenda, o WhatsApp NAO
+    // transforma o endereco em link: a cliente recebia o texto certo e nada
+    // clicavel — so virava link quando ela reencaminhava como texto.
+    // Como texto, o link funciona e o flyer volta pelo cartao de previa, que
+    // /r/<token> agora serve (api/lista-preview).
+    const res = await sendWADirect(house.id, r.phone, lines, { type: 'reservation_list' })
 
     // Marca que o link foi enviado (confirmação de envio)
     const ts = new Date().toISOString()

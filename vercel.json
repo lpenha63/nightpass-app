@@ -10,7 +10,7 @@
     },
     {
       "source": "/r/:token",
-      "destination": "/lista.html"
+      "destination": "/api/lista-preview?type=reserva&token=:token&base=lista"
     },
     {
       "source": "/e/:id",

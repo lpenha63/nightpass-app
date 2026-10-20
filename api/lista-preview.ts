@@ -41,12 +41,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const host = (req.headers['x-forwarded-host'] ?? req.headers.host) as string
   const origin = `https://${host}`
 
-  // HTML base do app — o SPA continua funcionando normalmente na mesma URL
+  // Documento base. Quase todo link publico e uma rota da SPA, mas a gestao da
+  // reserva (/r/<token>) e a pagina estatica lista.html — por isso o parametro.
+  const PAGINAS: Record<string, string> = { lista: '/lista.html' }
+  const base = PAGINAS[String(req.query.base ?? '')] ?? '/index-src.html'
   let html = ''
   try {
-    html = await (await fetch(`${origin}/index-src.html`)).text()
+    html = await (await fetch(`${origin}${base}`)).text()
   } catch {
-    return res.redirect(302, '/index-src.html')
+    return res.redirect(302, base)
   }
 
   let title = 'NightPass — Confirme sua presença'
