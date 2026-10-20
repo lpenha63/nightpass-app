@@ -278,9 +278,26 @@ window.shareWA=function(){
   var lines=msg+'🎉 *'+data.name+'* me convidou para um evento especial!\n';
   if(dateStr)lines+='📅 '+dateStr+'\n';
   if(data.location)lines+='📍 '+data.location+'\n';
-  lines+='\n👇 Confirme sua presença:\n'+inviteUrl();
-  window.open('https://wa.me/?text='+encodeURIComponent(lines),'_blank');
+  // O link fica SOZINHO na ultima linha, sem nada colado antes nem depois: e
+  // assim que o WhatsApp reconhece o endereco inteiro.
+  lines+='\nConfirme sua presenca:\n'+inviteUrl();
+
+  // Compartilhamento NATIVO primeiro. O caminho antigo era wa.me/?text=, que
+  // entrega o texto DENTRO de uma URL — e no repasse para o app do celular se
+  // perde caractere: os emojis chegavam como "?" e o endereco deixava de ser
+  // reconhecido como link. O nativo entrega texto como texto, sem essa volta.
+  if(navigator.share){
+    navigator.share({text:lines}).catch(function(){ abrirWhats(lines); });
+    return;
+  }
+  abrirWhats(lines);
 };
+
+// api.whatsapp.com/send no lugar de wa.me: mesmo destino, e e o endereco que o
+// proprio WhatsApp documenta para mensagem ja preenchida.
+function abrirWhats(texto){
+  window.open('https://api.whatsapp.com/send?text='+encodeURIComponent(texto),'_blank');
+}
 
 window.saveInviteMsg=function(){
   var msg=(document.getElementById('inviteMsg').value||'').trim();
