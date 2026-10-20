@@ -594,8 +594,14 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
     setGuestPanel(null)
   }
 
+  // Ver ReservaPublic: `savingGuest` e estado do React e so vale apos o
+  // re-render; o ref barra o segundo clique na hora.
+  const gravandoConvidado = useRef(false)
+
   async function addGuest() {
+    if (gravandoConvidado.current) return
     if (!newGuest.name.trim() || !guestPanel) return
+    gravandoConvidado.current = true
     setSavingGuest(true)
     const { data, error } = await supabase.from('reservation_guests').insert({
       reservation_id: guestPanel.id,
@@ -605,8 +611,15 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       birth_date: newGuest.birth_date || null,
       confirmed: true,
     }).select().single()
+    gravandoConvidado.current = false
     setSavingGuest(false)
-    if (error) { sT(setToast, 'Erro: ' + error.message, 'error'); return }
+    // 23505 = trava de clique duplo no banco. A mensagem dela ja esta escrita
+    // para o usuario, e nao e "erro": o convidado entrou na primeira vez.
+    if (error) {
+      sT(setToast, error.code === '23505' ? 'Esse convidado já está na reserva.' : 'Erro: ' + error.message,
+         error.code === '23505' ? 'warn' : 'error')
+      return
+    }
     setGuestList(p => [...p, data as ReservationGuest])
     setNewGuest({ name: '', phone: '', birth_date: '' })
   }

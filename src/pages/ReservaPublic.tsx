@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabasePublico } from '../lib/supabase'
 
 const C = {
@@ -81,10 +81,18 @@ export function ReservaPublicPage({ token }: { token: string }) {
       })
   }, [token, sb])
 
+  // Trava SINCRONA contra clique duplo. `submitting` e estado do React: so
+  // bloqueia depois do re-render, e dois toques rapidos disparam os dois
+  // manipuladores antes disso — foi assim que "diego" entrou tres vezes em um
+  // segundo. O ref muda na hora.
+  const gravando = useRef(false)
+
   async function addGuest() {
+    if (gravando.current) return
     if (!form.name.trim()) { setError('Nome obrigatório'); return }
     if (!reserva) return
     if (saved.length >= reserva.people_count) { setError(`Limite de ${reserva.people_count} convidado(s) atingido`); return }
+    gravando.current = true
     setSubmitting(true); setError('')
     const { data, error: err } = await sb.from('reservation_guests').insert({
       reservation_id: reserva.id,
@@ -96,7 +104,13 @@ export function ReservaPublicPage({ token }: { token: string }) {
       gender: form.gender || null,
       value_type: form.value_type || null,
     }).select().single()
-    if (err) { setError('Erro ao salvar. Tente novamente.'); setSubmitting(false); return }
+    gravando.current = false
+    // 23505 vem da trava de clique duplo no banco: o convidado JA entrou. Dizer
+    // "erro, tente novamente" faria a pessoa cadastrar de novo.
+    if (err) {
+      setError(err.code === '23505' ? 'Esse convidado já foi adicionado.' : 'Erro ao salvar. Tente novamente.')
+      setSubmitting(false); return
+    }
     setSaved(p => [...p, data as SavedGuest])
     setForm(EMPTY_GUEST)
     setSubmitting(false)
