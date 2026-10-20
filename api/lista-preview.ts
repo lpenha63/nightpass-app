@@ -80,7 +80,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const CAMINHO: Record<string, string> = {
     lista: '/lista/', reserva: '/reserva/', confirmar: '/confirmar/', niver: '/niver/', evento: '/e/',
   }
-  const urlPublica = `${origin}${CAMINHO[type] ?? '/lista/'}${token}`
+  // Com base=lista o endereco real e /r/<token> (gestao da reserva), nao
+  // /reserva/<token>. og:url apontando para outra pagina mandaria quem tocasse
+  // no cartao de previa para a tela errada.
+  const urlPublica = base === '/lista.html'
+    ? `${origin}/r/${token}`
+    : `${origin}${CAMINHO[type] ?? '/lista/'}${token}`
 
   const metas = `
     <meta property="og:type" content="website" />
