@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo} from 'react'
 import { CampoData } from '../components/CampoData'
+import { NASCIMENTO } from '../utils/limitesDeData'
 import { supabasePublico } from '../lib/supabase'
 
 const C = {
@@ -325,7 +326,11 @@ export function ListaPublicPage({ token }: { token: string }) {
             </div>
             <div>
               <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 5 }}>NASCIMENTO</label>
-              <CampoData style={{ ...INP, color: form.birth_date ? C.txt : C.mut }}
+              {/* A faixa nunca existiu aqui, e esta e a pagina de MAIOR volume: o
+                  convidado digita o proprio nascimento. Foi por caminhos assim que
+                  a base ganhou data de nascimento no ano 1 e no ano 275760. */}
+              <CampoData min={NASCIMENTO.min} max={NASCIMENTO.max}
+                style={{ ...INP, color: form.birth_date ? C.txt : C.mut }}
                 value={form.birth_date}
                 onChange={v => setForm(p => ({ ...p, birth_date: v }))} />
             </div>
