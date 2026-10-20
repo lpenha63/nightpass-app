@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/t/:token",
+      "destination": "/tarefa.html"
+    },
+    {
+      "source": "/r/:token",
+      "destination": "/lista.html"
+    },
+    {
       "source": "/e/:id",
       "destination": "/api/lista-preview?type=evento&token=:id"
     },

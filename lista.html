@@ -84,7 +84,11 @@ var SB_URL='https://irghwfzcbazujddfftsx.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw';
 var app=document.getElementById('app');
 var params=new URLSearchParams(window.location.search);
-var token=params.get('t');
+// O link enviado ao cliente agora e /r/<token>, sem query string: o WhatsApp
+// parava de reconhecer o link no '?' e so a parte depois dele ficava clicavel.
+// O formato antigo (?t=) continua valendo — ha links ja enviados por ai.
+var doCaminho=(window.location.pathname.match(/^\/r\/([A-Za-z0-9_-]+)/)||[])[1];
+var token=params.get('t')||doCaminho||null;
 var btoken=params.get('b');
 // O RLS dos convidados deixou de ser aberto: só devolve as linhas do link em uso,
 // e identifica o link por este cabeçalho. Sem ele a página não enxerga nada.

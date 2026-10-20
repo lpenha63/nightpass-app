@@ -7,6 +7,7 @@ import { fmtWAPhone, sendWADirect, notifyTaskAssigned } from '../utils/whatsapp'
 import { parseGuestsXlsx } from '../utils/importGuests'
 import { sT, _err, type ToastState } from '../utils/toast'
 import { esperadoDaReserva } from '../utils/reservas'
+import { linkTarefa } from '../utils/links'
 import type { House, Event, ArtistEntry, PromotionEntry, PromoterPriceMode, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 import { canUseFeature } from '../constants/permissions'
@@ -898,7 +899,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   }
 
   async function sendTaskWA(task: EventTask) {
-    const url = `${window.location.origin}/tarefa.html?t=${task.token}`
+    const url = linkTarefa(task.token)
     const deadline = task.deadline ? new Date(task.deadline).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
     const lines = [
       `📋 *${task.area}* — ${task.title}`,
@@ -2942,7 +2943,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                                     </div>
                                   )}
                                   <div style={{ fontSize: 11, color: C.mut }}>
-                                    🔗 Link: <span style={{ color: '#a78bfa', cursor: 'pointer' }} onClick={() => navigator.clipboard.writeText(`${window.location.origin}/tarefa.html?t=${task.token}`)}>Copiar</span>
+                                    🔗 Link: <span style={{ color: '#a78bfa', cursor: 'pointer' }} onClick={() => navigator.clipboard.writeText(linkTarefa(task.token))}>Copiar</span>
                                   </div>
                                 </div>
                               )}

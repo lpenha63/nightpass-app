@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { linkReserva } from '../utils/links'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal } from '../components/ui'
@@ -659,7 +660,10 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
   }
 
   async function sendListLink(r: Reservation) {
-    const url = `${window.location.origin}/lista.html?t=${r.token}`
+    const url = linkReserva(r.token)
+    // Reserva antiga pode nao ter token. Sem ele o cliente receberia um link que
+    // nao abre nada — melhor avisar quem esta enviando.
+    if (!url) { sT(setToast, 'Esta reserva nao tem link: reabra e salve para gerar.', 'warn'); return }
     const resType = resTypes.find(t => t.id === r.reservation_type)
     const typeLabel = resType ? `${resType.icon} ${resType.name}` : ''
     const dateStr = r.reservation_date
@@ -1869,7 +1873,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   {/* Link de gestão (aniversariante) */}
                   <div style={{ padding: '7px 12px', background: '#7c3aed11', border: '1px solid #7c3aed33', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ color: '#a78bfa', fontSize: 11, fontWeight: 600 }}>📋 Gerenciar lista</span>
-                    <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/lista.html?t=${guestPanel.token}`); sT(setToast, 'Link de gestão copiado!', 'success') }}
+                    <button onClick={() => { navigator.clipboard.writeText(linkReserva(guestPanel.token)); sT(setToast, 'Link de gestão copiado!', 'success') }}
                       style={{ background: '#7c3aed22', border: '1px solid #7c3aed44', borderRadius: 6, padding: '3px 10px', color: '#a78bfa', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       Copiar
                     </button>
