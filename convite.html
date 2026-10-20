@@ -87,7 +87,10 @@ var SB_URL='https://irghwfzcbazujddfftsx.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlyZ2h3ZnpjYmF6dWpkZGZmdHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjI4OTAsImV4cCI6MjA4ODEzODg5MH0.CMrdK4-7rWbgYcqttWtGF1CIWjywL0KVxYCBx27emhw';
 var app=document.getElementById('app');
 var params=new URLSearchParams(window.location.search);
-var token=params.get('t');
+// Link enviado como /c/<token>, sem query string: o WhatsApp parava de
+// reconhecer o link no '?'. O formato antigo (?t=) continua valendo.
+var doCaminho=(window.location.pathname.match(/^\/c\/([A-Za-z0-9_-]+)/)||[])[1];
+var token=params.get('t')||doCaminho||null;
 // O RLS das reservas exige o token do link neste cabeçalho; sem ele a página
 // não lê a reserva e mostrava "convite expirado" mesmo com link válido.
 var SB=window.supabase.createClient(SB_URL,SB_KEY,{

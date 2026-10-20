@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { linkReserva } from '../utils/links'
+import { linkReserva, linkConvite } from '../utils/links'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal } from '../components/ui'
@@ -1881,7 +1881,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                   {/* Link de convite (convidados) */}
                   <div style={{ padding: '7px 12px', background: '#10b98111', border: '1px solid #10b98133', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ color: '#10b981', fontSize: 11, fontWeight: 600 }}>📲 Link de convite (convidados)</span>
-                    <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/convite.html?t=${guestPanel.token}`); sT(setToast, 'Link de convite copiado!', 'success') }}
+                    <button onClick={() => { navigator.clipboard.writeText(linkConvite(guestPanel.token)); sT(setToast, 'Link de convite copiado!', 'success') }}
                       style={{ background: '#10b98122', border: '1px solid #10b98144', borderRadius: 6, padding: '3px 10px', color: '#10b981', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       Copiar
                     </button>

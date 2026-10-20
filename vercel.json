@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/c/:token",
+      "destination": "/convite.html"
+    },
+    {
       "source": "/t/:token",
       "destination": "/tarefa.html"
     },

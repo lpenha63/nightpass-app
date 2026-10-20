@@ -115,7 +115,9 @@ function showToast(msg,type){
   setTimeout(function(){if(toast)toast.remove();toast=null;},3000);
 }
 
-function inviteUrl(){return BASE+'/convite.html?t='+token;}
+// Caminho, nao query string: e ESTE o link que o cliente manda para cada
+// convidado, entao e o que mais sofre com o WhatsApp cortando no '?'.
+function inviteUrl(){return BASE+'/c/'+token;}
 
 function render(){
   if(!token&&!btoken){

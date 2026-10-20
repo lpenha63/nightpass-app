@@ -32,5 +32,11 @@ export function basePublica(): string {
  */
 export const linkReserva = (token?: string | null) => token ? `${basePublica()}/r/${token}` : ''
 
+/**
+ * Convite individual — o link que o titular da reserva manda para CADA convidado.
+ * É o de maior volume, e por isso o que mais sofria com o corte no "?".
+ */
+export const linkConvite = (token?: string | null) => token ? `${basePublica()}/c/${token}` : ''
+
 /** Página de uma tarefa da equipe. Mesma regra do link de reserva. */
 export const linkTarefa = (token?: string | null) => token ? `${basePublica()}/t/${token}` : ''
