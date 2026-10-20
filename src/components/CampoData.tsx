@@ -60,19 +60,29 @@ export function CampoData({
   'aria-label': ariaLabel,
 }: Props) {
   const [texto, setTexto] = useState(() => isoParaBr(value))
+  // Data completa que não vale: 31/02, ou fora da faixa (nascimento em 1850).
+  // Sem sinal na tela, a pessoa vê "31/02/1994" escrito e acha que salvou.
+  const [invalido, setInvalido] = useState(false)
   const oculto = useRef<HTMLInputElement>(null)
 
   // Mudou por fora (reset do formulário, carregar registro): acompanha.
-  useEffect(() => { setTexto(isoParaBr(value)) }, [value])
+  useEffect(() => { setTexto(isoParaBr(value)); setInvalido(false) }, [value])
 
   function digitou(bruto: string) {
     const dig = soDigitos(bruto)
     setTexto(mascara(dig))
-    if (dig.length === 0) { onChange(''); return }
-    const iso = brParaIso(dig)
+    if (dig.length === 0) { setInvalido(false); onChange(''); return }
+
     // Data pela metade não vira valor: avisar a cada tecla faria a tela recarregar
     // no meio da digitação — foi esse o defeito do período em Relatórios.
-    if (iso) onChange(iso)
+    if (dig.length < 8) { setInvalido(false); return }
+
+    const iso = brParaIso(dig)
+    // min/max valem para quem DIGITA também. Sem isto, a faixa de limitesDeData
+    // (que existe para barrar ano absurdo) seria contornada pelo teclado.
+    const naFaixa = !!iso && (!min || iso >= min) && (!max || iso <= max)
+    setInvalido(!naFaixa)
+    if (naFaixa && iso) onChange(iso)
   }
 
   function abrirSeletor() {
@@ -96,7 +106,10 @@ export function CampoData({
         disabled={disabled}
         className={className}
         aria-label={ariaLabel}
-        style={{ ...style, width: '100%', paddingRight: 38 }}
+        style={{
+          ...style, width: '100%', paddingRight: 38,
+          ...(invalido ? { borderColor: '#f87171', color: '#f87171' } : null),
+        }}
       />
       <button type="button" onClick={abrirSeletor} disabled={disabled} tabIndex={-1}
         aria-label="Abrir calendário"
@@ -107,6 +120,11 @@ export function CampoData({
         }}>
         📅
       </button>
+      {invalido && (
+        <span role="alert" style={{ position: 'absolute', left: 0, top: '100%', marginTop: 3, color: '#f87171', fontSize: 11, whiteSpace: 'nowrap' }}>
+          Data inválida
+        </span>
+      )}
       {/* O input de data de verdade, só para abrir o seletor nativo. Fica fora do
           fluxo mas NÃO com display:none — o navegador recusa showPicker em campo
           escondido assim. */}
