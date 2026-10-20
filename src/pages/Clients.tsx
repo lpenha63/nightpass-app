@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, type ChangeEvent } from 'react'
+import { CampoData } from '../components/CampoData'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal } from '../components/ui'
@@ -642,7 +643,7 @@ export function ClientsPage({ house, user }: Props) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>Nascimento *</label>
-              <input type="date" min={NASCIMENTO.min} max={NASCIMENTO.max} {...inp()} value={form.birth_date} onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} /></div>
+              <CampoData min={NASCIMENTO.min} max={NASCIMENTO.max} style={inp().style} value={form.birth_date} onChange={v => setForm(p => ({ ...p, birth_date: v }))} /></div>
             <div><label style={{ fontSize: 12, color: C.mut, fontWeight: 600 }}>E-mail (opcional)</label>
               <input {...inp()} type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} placeholder="email@exemplo.com" /></div>
           </div>
@@ -990,9 +991,9 @@ export function ClientsPage({ house, user }: Props) {
             </select>
             {bdDays === 'custom' ? (
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input type="date" value={bdStart} onChange={e => setBdStart(e.target.value)} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, minHeight: 44, fontFamily: 'inherit' }} />
+                <CampoData value={bdStart} onChange={setBdStart} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, minHeight: 44, fontFamily: 'inherit' }} />
                 <span style={{ color: C.mut }}>→</span>
-                <input type="date" value={bdEnd} onChange={e => setBdEnd(e.target.value)} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, minHeight: 44, fontFamily: 'inherit' }} />
+                <CampoData value={bdEnd} onChange={setBdEnd} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 10px', color: C.txt, fontSize: 13, minHeight: 44, fontFamily: 'inherit' }} />
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 6 }}>

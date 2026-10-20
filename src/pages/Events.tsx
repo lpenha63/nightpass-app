@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
+import { CampoData } from '../components/CampoData'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
@@ -3196,8 +3197,8 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                 {/* min/max fazem o proprio campo recusar ano absurdo. No <input type="date">
                     o segmento do ano aceita qualquer numero — digitar "26" grava o ano 26,
                     e foi assim que nasceram eventos em 0026 e 2006. */}
-                <input type="date" {...inp} min={faixaData.min} max={faixaData.max}
-                  value={String(form.event_date ?? '')} onChange={e => setF('event_date', e.target.value)} />
+                <CampoData style={inp.style} min={faixaData.min} max={faixaData.max}
+                  value={String(form.event_date ?? '')} onChange={v => setF('event_date', v)} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Gênero</label>
@@ -4273,7 +4274,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
           </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nascimento</label>
-            <input type="date" min={NASCIMENTO.min} max={NASCIMENTO.max} value={completeRGForm.birth_date} onChange={e => setCompleteRGForm(p => ({ ...p, birth_date: e.target.value }))}
+            <CampoData min={NASCIMENTO.min} max={NASCIMENTO.max} value={completeRGForm.birth_date} onChange={v => setCompleteRGForm(p => ({ ...p, birth_date: v }))}
               style={{ width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </div>
           <div style={{ display: 'flex', gap: 10 }}>

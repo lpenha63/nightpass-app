@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { CampoData } from '../components/CampoData'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Btn } from '../components/ui'
@@ -1488,14 +1489,14 @@ export function ReportsPage({ house }: Props) {
             {/* min/max sao a faixa fixa, NAO o outro campo: amarrar um no outro
                 marcava o campo como invalido enquanto o ano estava pela metade.
                 A ordem (inicio depois do fim) ja e resolvida em rangeFor. */}
-            <input type="date" value={customStart} min={RELATORIO.min} max={RELATORIO.max}
-              onChange={e => { const v = e.target.value; setCustomStart(v); if (!customEnd && anoCompleto(v)) setCustomEnd(v) }}
+            <CampoData value={customStart} min={RELATORIO.min} max={RELATORIO.max}
+              onChange={v => { setCustomStart(v); if (!customEnd && anoCompleto(v)) setCustomEnd(v) }}
               style={dtInput} />
             <span style={{ color: C.mut, fontSize: 13, fontWeight: 700 }}>até</span>
             {/* Espelha no vizinho so quando ele esta VAZIO: sobrescrever um campo ja
                 preenchido era o que jogava o ano 0002 no outro lado. */}
-            <input type="date" value={customEnd} min={RELATORIO.min} max={RELATORIO.max}
-              onChange={e => { const v = e.target.value; setCustomEnd(v); if (!customStart && anoCompleto(v)) setCustomStart(v) }}
+            <CampoData value={customEnd} min={RELATORIO.min} max={RELATORIO.max}
+              onChange={v => { setCustomEnd(v); if (!customStart && anoCompleto(v)) setCustomStart(v) }}
               style={dtInput} />
             {/* Enquanto espera a digitacao parar, os numeros na tela ainda sao os do
                 periodo anterior. Dizer isso evita a pessoa ler o dado errado. */}
@@ -2483,8 +2484,8 @@ export function ReportsPage({ house }: Props) {
                 onChange={e => acessoView === 'entradas' ? setAcessoSearch(e.target.value) : setListasSearch(e.target.value)}
                 placeholder="🔍 Buscar por nome…"
                 style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 14, fontFamily: 'inherit', minWidth: 180 }} />
-              <input type="date" value={acessoDay}
-                onChange={e => { const d = e.target.value; if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) { setAcessoDay(d); loadAcessos(d); loadListasDia(d) } }}
+              <CampoData value={acessoDay}
+                onChange={d => { if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) { setAcessoDay(d); loadAcessos(d); loadListasDia(d) } }}
                 style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '8px 12px', color: C.txt, fontSize: 14, fontFamily: 'inherit' }} />
               {acessoView === 'entradas' && acessoList.length > 0 && <Btn onClick={exportAcessosCSV} variant="secondary" small>📥 CSV</Btn>}
             </div>

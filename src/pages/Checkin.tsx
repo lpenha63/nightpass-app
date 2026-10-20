@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import { CampoData } from '../components/CampoData'
 import { supabase } from '../lib/supabase'
 import { inicioDoDia, viradaDa, diaOperacionalStr } from '../utils/diaOperacional'
 import { C } from '../constants/theme'
@@ -1699,7 +1700,7 @@ export function CheckinPage({ house, user }: Props) {
                     <input value={ftel(nc.phone)} onChange={e => setNc(p => ({ ...p, phone: cn(e.target.value).slice(0, 11) }))} placeholder="Celular"
                       style={{ background: C.bg2, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, minHeight: 44, fontFamily: 'inherit' }} />
                   </div>
-                  <input type="date" min={NASCIMENTO.min} max={NASCIMENTO.max} value={nc.birth_date} onChange={e => setNc(p => ({ ...p, birth_date: e.target.value }))}
+                  <CampoData min={NASCIMENTO.min} max={NASCIMENTO.max} value={nc.birth_date} onChange={v => setNc(p => ({ ...p, birth_date: v }))}
                     style={{ background: C.bg2, border: `1px solid ${C.brd}`, borderRadius: 8, padding: '10px 12px', color: C.txt, fontSize: 14, minHeight: 44, fontFamily: 'inherit', width: '100%' }} />
                   {/* Gênero — define o valor automático do evento */}
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -2627,7 +2628,7 @@ export function CheckinPage({ house, user }: Props) {
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>NASCIMENTO *</label>
-                  <input type="date" min={NASCIMENTO.min} max={NASCIMENTO.max} value={addForm.birth_date} onChange={e => setAddForm(p => ({ ...p, birth_date: e.target.value }))} style={{ ...SL }} />
+                  <CampoData min={NASCIMENTO.min} max={NASCIMENTO.max} value={addForm.birth_date} onChange={v => setAddForm(p => ({ ...p, birth_date: v }))} style={{ ...SL }} />
                 </div>
               </div>
               <div>
@@ -2792,7 +2793,7 @@ export function CheckinPage({ house, user }: Props) {
               </div>
               <div>
                 <label style={{ fontSize: 11, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>DATA DE NASCIMENTO *</label>
-                <input type="date" min={NASCIMENTO.min} max={NASCIMENTO.max} value={completeForm.birth_date} onChange={e => setCompleteForm(p => ({ ...p, birth_date: e.target.value }))}
+                <CampoData min={NASCIMENTO.min} max={NASCIMENTO.max} value={completeForm.birth_date} onChange={v => setCompleteForm(p => ({ ...p, birth_date: v }))}
                   style={{ ...SL }} />
               </div>
 

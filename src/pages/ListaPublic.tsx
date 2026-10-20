@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo} from 'react'
+import { CampoData } from '../components/CampoData'
 import { supabasePublico } from '../lib/supabase'
 
 const C = {
@@ -324,9 +325,9 @@ export function ListaPublicPage({ token }: { token: string }) {
             </div>
             <div>
               <label style={{ color: C.sub, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 5 }}>NASCIMENTO</label>
-              <input style={{ ...INP, color: form.birth_date ? C.txt : C.mut }} type="date"
+              <CampoData style={{ ...INP, color: form.birth_date ? C.txt : C.mut }}
                 value={form.birth_date}
-                onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))} />
+                onChange={v => setForm(p => ({ ...p, birth_date: v }))} />
             </div>
           </div>
         </div>

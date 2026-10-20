@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { CampoData } from '../components/CampoData'
 import { linkReserva, linkConvite } from '../utils/links'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
@@ -859,7 +860,7 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Data do Evento *</label>
             {/* Criar olha para a frente; editar precisa alcancar reserva que ja passou. */}
-            <input type="date" min={(editing ? AGENDA_EDICAO : AGENDA).min} max={AGENDA.max} style={SL} value={form.reservation_date} onChange={e => onFormDateChange(e.target.value)} />
+            <CampoData min={(editing ? AGENDA_EDICAO : AGENDA).min} max={AGENDA.max} style={SL} value={form.reservation_date} onChange={onFormDateChange} />
           </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Nome do Responsável *</label>
@@ -1334,14 +1335,14 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
         {/* Period filters + date picker */}
         {view === 'list' && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input type="date" value={selDate}
-              onChange={e => {
-                if (!e.target.value || !/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) return
-                setSelDate(e.target.value)
+            <CampoData value={selDate}
+              onChange={d => {
+                if (!d) return
+                setSelDate(d)
                 // Escolher uma data específica deve mostrar só as reservas daquele dia
                 if (viewPeriod !== 'day') { setEventFilter(null); setViewPeriod('day') }
               }}
-              style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '8px 12px', color: C.txt, fontSize: 14, minHeight: 40, fontFamily: 'inherit' }} />
+              style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '8px 12px', color: C.txt, fontSize: 14, minHeight: 40, fontFamily: 'inherit', width: 170 }} />
             {(['day', 'week', 'month'] as const).map(p => {
               const { res, people } = periodCounts[p]
               const label = p === 'day' ? '📅 Dia' : p === 'week' ? '📆 Semana' : '🗓️ Mês'
@@ -1834,11 +1835,11 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
                     onChange={e => setNewGuest(p => ({ ...p, phone: e.target.value }))}
                   />
                   <div style={{ position: 'relative' }}>
-                    <input
-                      type="date" min={NASCIMENTO.min} max={NASCIMENTO.max}
+                    <CampoData
+                      min={NASCIMENTO.min} max={NASCIMENTO.max}
                       style={{ ...SL, fontSize: 13, color: newGuest.birth_date ? C.txt : C.mut }}
                       value={newGuest.birth_date}
-                      onChange={e => setNewGuest(p => ({ ...p, birth_date: e.target.value }))}
+                      onChange={v => setNewGuest(p => ({ ...p, birth_date: v }))}
                     />
                     {!newGuest.birth_date && (
                       <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: C.mut, pointerEvents: 'none' }}>
