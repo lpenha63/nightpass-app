@@ -43,6 +43,30 @@ export function fmtWAPhone(phone: string): string | null {
   return null                                                // 9, 14, 15, 16, 18: impossivel
 }
 
+/**
+ * Aviso para mostrar ao lado do campo de celular, no momento do CADASTRO.
+ *
+ * Avisar aqui vale mais do que avisar no envio: no cadastro a pessoa esta na
+ * frente (ou ao telefone) e da para confirmar o numero. Depois, descobrir que a
+ * mensagem nao chegou ja e tarde.
+ *
+ * Nunca BLOQUEIA: reserva com telefone fixo existe, e o numero serve para ligar
+ * mesmo que nao receba WhatsApp.
+ */
+export function avisoDoTelefone(phone: string): string | null {
+  const d = (phone ?? '').replace(/\D/g, '')
+  if (!d) return null
+  if (!fmtWAPhone(d)) {
+    return d.length < 10
+      ? 'Faltam dígitos — use DDD + número.'
+      : 'Dígitos demais para um celular brasileiro — confira.'
+  }
+  if (d.length === 10 || (d.length === 12 && d.startsWith('55'))) {
+    return 'Sem o nono dígito: pode não ter WhatsApp. Confirme com a pessoa.'
+  }
+  return null
+}
+
 /** Motivo pelo qual uma mensagem nao foi entregue. */
 export type MotivoFalhaWA = 'numero_invalido' | 'sem_whatsapp' | 'api_falhou' | 'sem_api'
 

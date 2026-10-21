@@ -6,7 +6,7 @@ import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal } from '../components/ui'
 import { ftel, fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
-import { sendWADirect, avisoDoEnvioWA } from '../utils/whatsapp'
+import { sendWADirect, avisoDoEnvioWA, avisoDoTelefone } from '../utils/whatsapp'
 import { parseGuestsXlsx } from '../utils/importGuests'
 import type { House } from '../types'
 import { AGENDA, AGENDA_EDICAO, NASCIMENTO, dataPlausivel } from '../utils/limitesDeData'
@@ -873,7 +873,24 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
           </div>
           <div>
             <label style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: 'block', marginBottom: 4 }}>Celular *</label>
-            <input style={SL} value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} placeholder="Ex: (11) 99999-9999" />
+            {/* Limita a 13 digitos: e por aqui que entraram numeros de 14 e 16
+                digitos, que nunca teriam como receber nada. */}
+            {/* ftel so sabe formatar DDD + 9 digitos; com o 55 colado na frente ele
+                devolve "(55) 11987-654321". Nesse caso mostramos os digitos crus. */}
+            <input style={SL} placeholder="Ex: (11) 99999-9999"
+              value={(() => {
+                const d = String(form.phone ?? '').replace(/\D/g, '')
+                return d.length === 11 ? ftel(d) : d
+              })()}
+              inputMode="tel"
+              onChange={e => setForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} />
+            {/* Aviso, nao bloqueio: reserva com fixo existe e o numero serve para
+                ligar. O que nao pode e descobrir so depois que a mensagem nao foi. */}
+            {avisoDoTelefone(String(form.phone ?? '')) && (
+              <div style={{ color: C.gold, fontSize: 11.5, marginTop: 4, lineHeight: 1.4 }}>
+                ⚠️ {avisoDoTelefone(String(form.phone ?? ''))}
+              </div>
+            )}
           </div>
 
           {/* ── Linha: Nº Pessoas | Horário | Local/Mesa ── */}
