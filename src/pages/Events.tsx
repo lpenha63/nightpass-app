@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { fd, fmtCurrency } from '../utils/format'
-import { fmtWAPhone, sendWADirect, notifyTaskAssigned } from '../utils/whatsapp'
+import { fmtWAPhone, sendWADirect, notifyTaskAssigned, avisoDoEnvioWA } from '../utils/whatsapp'
 import { parseGuestsXlsx } from '../utils/importGuests'
 import { sT, _err, type ToastState } from '../utils/toast'
 import { esperadoDaReserva } from '../utils/reservas'
@@ -1989,7 +1989,8 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     const dateStr = new Date(guestEv.event_date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
     const msg = `Olá ${res.name.split(' ')[0]}! 🎉 Sua reserva${res.location ? ` em *${res.location}*` : ''} para *${guestEv.name}* — ${dateStr}${guestEv.start_time ? ` às ${guestEv.start_time.slice(0, 5)}` : ''} está confirmada.${res.people_count ? `\n👥 ${res.people_count} pessoas` : ''}${eventDetailsText(guestEv)}\n\nTe esperamos! 🔥`
     const r = await sendWADirect(house.id, res.phone, msg, { eventId: guestEv.id, type: 'reservation_invite', mediaUrl: guestEv.flyer_url || house.logo_url || undefined })
-    st2(r.viaApi ? '✅ Mensagem enviada pela API' : '📲 Abrindo WhatsApp...', 'success')
+    const aviso = avisoDoEnvioWA(r, '✅ Mensagem enviada pela API')
+    st2(aviso.texto, aviso.tipo)
   }
 
   // ── Helpers de lista reutilizados nas visões Casa e Promoters ──

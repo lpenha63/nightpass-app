@@ -6,7 +6,7 @@ import { C } from '../constants/theme'
 import { Card, Toast, Btn, Modal } from '../components/ui'
 import { ftel, fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
-import { sendWADirect } from '../utils/whatsapp'
+import { sendWADirect, avisoDoEnvioWA } from '../utils/whatsapp'
 import { parseGuestsXlsx } from '../utils/importGuests'
 import type { House } from '../types'
 import { AGENDA, AGENDA_EDICAO, NASCIMENTO, dataPlausivel } from '../utils/limitesDeData'
@@ -759,7 +759,8 @@ export function ReservasPage({ house, initialNav, onNavConsumed }: Props) {
       setResList(p => p.map(x => x.id === r.id ? { ...x, list_link_sent_at: ts } : x))
       setEditing(e => (e && e.id === r.id ? { ...e, list_link_sent_at: ts } : e))
     }
-    sT(setToast, res.viaApi ? '✅ Link enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
+    const aviso = avisoDoEnvioWA(res, '✅ Link enviado pela API')
+    sT(setToast, aviso.texto, aviso.tipo)
   }
 
   const TAB = (active: boolean): React.CSSProperties => ({

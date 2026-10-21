@@ -5,7 +5,7 @@ import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { fmtCurrency } from '../utils/format'
 import { sT, type ToastState } from '../utils/toast'
 import { QuickWA, type QuickWATarget } from '../components/QuickWA'
-import { sendWADirect } from '../utils/whatsapp'
+import { sendWADirect, avisoDoEnvioWA } from '../utils/whatsapp'
 import type { House } from '../types'
 
 interface Props { house: House; user: { id: string } }
@@ -186,7 +186,8 @@ export function PromotersPage({ house }: Props) {
     const msg = `Olá ${pr.full_name.split(' ')[0]}! 🎭\n\nVocê é promoter de *${house.name || 'nossa casa'}*.\n\nAcesse seu portal para criar e gerenciar suas listas dos eventos:\n${link}\n\n_Este link é pessoal — guarde com você._`
     const r = await sendWADirect(house.id, pr.phone, msg, { type: 'promoter_portal' })
     setSendingPortal(null)
-    st2(r.viaApi ? '✅ Portal enviado pela API' : '📲 Abrindo WhatsApp...', 'success')
+    const aviso = avisoDoEnvioWA(r, '✅ Portal enviado pela API')
+    st2(aviso.texto, aviso.tipo)
   }
 
   async function createListForEvent() {

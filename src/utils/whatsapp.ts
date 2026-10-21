@@ -19,12 +19,65 @@ export function waStateMessage(s: WAConnState): string {
   return 'WhatsApp desconectado. Reconecte a instância (escaneie o QR) em Configurações → WhatsApp.'
 }
 
+/**
+ * Numero em formato de WhatsApp brasileiro, ou null quando nao da para enviar.
+ *
+ * Antes isto aceitava quase tudo: 10 digitos viravam 55+10 (fixo, que nao tem
+ * WhatsApp) e qualquer coisa com 14 ou 16 digitos passava inteira. O envio saia,
+ * a API devolvia 400 e a tela dizia que tinha enviado. Na base ha
+ * `55119999194804` (14) e `5511963984855362` (16) — numeros que nunca poderiam
+ * funcionar.
+ *
+ * Celular no Brasil: DDD (2) + 9 + 8 digitos = 11, ou 13 com o 55 na frente.
+ */
 export function fmtWAPhone(phone: string): string | null {
-  const d = phone.replace(/\D/g, '')
-  if (d.startsWith('55') && d.length >= 12) return d
-  if (d.length === 11 || d.length === 10) return '55' + d
-  if (d.length === 13 && d.startsWith('55')) return d
-  return d.length >= 10 ? '55' + d : null
+  const d = (phone ?? '').replace(/\D/g, '')
+  if (d.length === 11) return '55' + d                      // DDD + 9 + 8 digitos
+  if (d.length === 13 && d.startsWith('55')) return d       // o mesmo, ja com o pais
+  // Dez digitos (sem o nono) parecem fixo, mas NAO sao descartados: no historico
+  // desta casa quatro envios para numeros de 12 digitos chegaram. Sao celulares
+  // antigos e WhatsApp Business em fixo. Quem decide e a API — e agora, quando ela
+  // responde que o numero nao existe, a tela diz isso em vez de anunciar "enviado".
+  if (d.length === 10) return '55' + d
+  if (d.length === 12 && d.startsWith('55')) return d
+  return null                                                // 9, 14, 15, 16, 18: impossivel
+}
+
+/** Motivo pelo qual uma mensagem nao foi entregue. */
+export type MotivoFalhaWA = 'numero_invalido' | 'sem_whatsapp' | 'api_falhou' | 'sem_api'
+
+export const textoDaFalhaWA: Record<MotivoFalhaWA, string> = {
+  numero_invalido: 'Número inválido para WhatsApp — confira o celular no cadastro (DDD + 9 dígitos).',
+  sem_whatsapp: 'Este número não tem WhatsApp. Confirme o celular com a pessoa.',
+  api_falhou: 'O WhatsApp da casa não respondeu. Abri a conversa para você enviar à mão.',
+  sem_api: 'Envio automático desligado. Abri a conversa para você enviar à mão.',
+}
+
+/**
+ * Traduz o resultado do envio para o aviso da tela.
+ *
+ * Existe porque as telas anunciavam "enviado" olhando so `viaApi`, e `viaApi`
+ * era falso tanto quando NAO HA API quanto quando a API RECUSOU. Mensagem que
+ * nunca saiu aparecia como enviada — 7 links de reserva em 30 dias nao chegaram
+ * e ninguem ficou sabendo.
+ */
+export function avisoDoEnvioWA(
+  r: { ok: boolean; viaApi: boolean; motivo?: MotivoFalhaWA },
+  sucesso = '✅ Enviado pela API',
+): { texto: string; tipo: 'success' | 'warn' | 'error' } {
+  if (r.ok && r.viaApi) return { texto: sucesso, tipo: 'success' }
+  if (r.motivo === 'numero_invalido') return { texto: textoDaFalhaWA.numero_invalido, tipo: 'error' }
+  if (r.motivo === 'sem_whatsapp') return { texto: textoDaFalhaWA.sem_whatsapp, tipo: 'error' }
+  if (r.motivo === 'api_falhou') return { texto: textoDaFalhaWA.api_falhou, tipo: 'warn' }
+  return { texto: '📲 Abrindo WhatsApp…', tipo: 'success' }
+}
+
+/** A Evolution responde 400 com `exists:false` quando o numero nao tem WhatsApp. */
+function naoTemWhatsApp(res: unknown): boolean {
+  try {
+    const msg = (res as { response?: { message?: Array<{ exists?: boolean }> } })?.response?.message
+    return Array.isArray(msg) && msg.some(m => m?.exists === false)
+  } catch { return false }
 }
 
 /**
@@ -38,9 +91,12 @@ export async function sendWADirect(
   phone: string,
   message: string,
   opts: { mediaUrl?: string; clientId?: string | null; eventId?: string | null; type?: string; silent?: boolean } = {}
-): Promise<{ ok: boolean; viaApi: boolean }> {
+): Promise<{ ok: boolean; viaApi: boolean; motivo?: MotivoFalhaWA }> {
   const { supabase } = await import('../lib/supabase')
   const fph = fmtWAPhone(phone)
+
+  // Numero que nunca vai funcionar: nao adianta tentar nem abrir conversa.
+  if (!fph) return { ok: false, viaApi: false, motivo: 'numero_invalido' }
 
   const { data: cfg } = await supabase
     .from('whatsapp_config')
@@ -49,7 +105,10 @@ export async function sendWADirect(
     .limit(1)
     .single()
 
-  const useApi = !!(cfg?.active && cfg?.api_url && cfg?.instance_name && cfg?.api_key && fph)
+  const useApi = !!(cfg?.active && cfg?.api_url && cfg?.instance_name && cfg?.api_key)
+  // Guarda por que a API nao entregou, para o chamador poder dizer na tela em vez
+  // de anunciar "enviado" sobre uma mensagem que nao saiu.
+  let motivoApi: MotivoFalhaWA | undefined
 
   if (useApi) {
     try {
@@ -77,16 +136,20 @@ export async function sendWADirect(
         })
       } catch (e) { console.error('whatsapp_logs:', e) }
       if (ok) return { ok: true, viaApi: true }
+      // Numero sem WhatsApp: abrir a conversa so mostraria "numero invalido" para
+      // o operador. Melhor dizer o que houve — o cadastro e que precisa de ajuste.
+      if (naoTemWhatsApp(res)) return { ok: false, viaApi: true, motivo: 'sem_whatsapp' }
+      motivoApi = 'api_falhou'
     } catch {
-      // falha na API → cai no fallback abaixo
+      motivoApi = 'api_falhou'
     }
   }
 
   // Notificação em segundo plano (silent): não abre aba wa.me se a API falhar/estiver inativa
-  if (opts.silent) return { ok: false, viaApi: false }
+  if (opts.silent) return { ok: false, viaApi: false, motivo: motivoApi ?? 'sem_api' }
   // Fallback: abre conversa no WhatsApp Web/App
-  window.open(`https://wa.me/${fph ?? ''}?text=${encodeURIComponent(message)}`, '_blank')
-  return { ok: true, viaApi: false }
+  window.open(`https://wa.me/${fph}?text=${encodeURIComponent(message)}`, '_blank')
+  return { ok: true, viaApi: false, motivo: motivoApi ?? 'sem_api' }
 }
 
 /**

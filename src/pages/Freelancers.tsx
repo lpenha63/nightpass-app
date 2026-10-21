@@ -6,7 +6,7 @@ import { Card, Toast, Btn, Modal, Pill } from '../components/ui'
 import { fmtCurrency, cn } from '../utils/format'
 import { preencher, paraHtmlImpressao, type DocTemplate, type DocAssinado } from '../utils/documentos'
 import { sT, type ToastState } from '../utils/toast'
-import { sendWADirect } from '../utils/whatsapp'
+import { sendWADirect, avisoDoEnvioWA } from '../utils/whatsapp'
 import { useIsMobile } from '../hooks/useIsMobile'
 import type { House, Freelancer } from '../types'
 import { DEFAULT_AREAS, AREA_ICON_OPTIONS, AREA_COLOR_OPTIONS, slugifyArea, areaMeta, type WorkArea } from '../constants/areas'
@@ -789,7 +789,8 @@ export function FreelancersPage({ house, onRatingsChanged }: Props) {
     // Envia pela API do WhatsApp (mesma integração do resto do app); cai no wa.me só se a API estiver off
     const r = await sendWADirect(house.id, fr.phone, msg, { type: 'agenda_colaborador' })
     setSendingAgenda(null)
-    st2(r.viaApi ? '✅ Agenda enviada pela API' : '📲 Abrindo WhatsApp…', 'success')
+    const aviso = avisoDoEnvioWA(r, '✅ Agenda enviada pela API')
+    st2(aviso.texto, aviso.tipo)
   }
 
   // ── Admin de áreas ──
