@@ -1637,6 +1637,28 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     if (status === 'cancelled' && eraPago &&
         !confirm(`Cancelar o pedido pago de ${o.buyer_name}?\n\nOs ${o.quantity} ingresso(s) voltam ao estoque do lote e os QR codes deixam de valer na portaria.`)) return
 
+    // Confirmar pagamento NAO e so mudar o status: e preciso emitir o ingresso,
+    // dar baixa no lote e entregar ao comprador. Isso exige service_role, que o
+    // navegador nao tem — por isso passa pela rota, que reusa o mesmo
+    // confirmarPedido dos webhooks. Antes a tela so marcava "pago" e o comprador
+    // do PIX manual nao recebia nada.
+    if (status === 'paid') {
+      const { data: s } = await supabase.auth.getSession()
+      const r = await fetch('/api/confirmar-pedido-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.session?.access_token ?? ''}` },
+        body: JSON.stringify({ order_id: o.id }),
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok) { sT(setToast, j?.error ?? 'Não foi possível confirmar o pagamento', 'error'); return }
+      if (ticketEv) openTickets(ticketEv)
+      if (allTk) loadAllTickets()
+      sT(setToast, j?.ja_estava
+        ? 'Este pedido já estava pago.'
+        : `Pagamento confirmado · ${j?.ingressos ?? o.quantity} ingresso(s) emitidos e enviados`, 'success')
+      return
+    }
+
     const { data, error } = await supabase.from('ticket_orders').update({ payment_status: status }).eq('id', o.id).select('id')
     if (error || !data?.length) { sT(setToast, error?.message ?? 'Sem permissão para alterar o pedido', 'error'); return }
 

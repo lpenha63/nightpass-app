@@ -27,6 +27,7 @@ const ROTAS = [
   ['webhook-payment', 200],
   ['webhook-asaas',   200],
   ['asaas-connect',   405],
+  ['confirmar-pedido-manual', 405],   // so aceita POST
   ['cron-operacao',   200],   // GET sem CRON_SECRET definido responde normal
 ]
 
