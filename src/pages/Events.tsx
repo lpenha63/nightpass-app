@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
+import { lerMeiosDePagamento, type MeiosDePagamento } from '../utils/meiosDePagamento'
 import { CampoData } from '../components/CampoData'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
@@ -8,7 +9,7 @@ import { fmtWAPhone, sendWADirect, notifyTaskAssigned } from '../utils/whatsapp'
 import { parseGuestsXlsx } from '../utils/importGuests'
 import { sT, _err, type ToastState } from '../utils/toast'
 import { esperadoDaReserva } from '../utils/reservas'
-import { linkTarefa } from '../utils/links'
+import { linkTarefa, linkIngresso } from '../utils/links'
 import type { House, Event, ArtistEntry, PromotionEntry, PromoterPriceMode, Freelancer, EventFreelancer, TicketBatch, TicketOrder } from '../types'
 import { DEFAULT_AREAS, areaMeta, type WorkArea } from '../constants/areas'
 import { canUseFeature } from '../constants/permissions'
@@ -377,7 +378,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   const [tkDate, setTkDate] = useState('')
   const [tkScope, setTkScope] = useState<'prox' | 'enc' | 'todos'>('prox')
   // Sem PIX nem Mercado Pago a casa até cria o lote, mas o comprador trava na hora de pagar
-  const [payCfg, setPayCfg] = useState<{ pix: boolean; mp: boolean } | null>(null)
+  const [payCfg, setPayCfg] = useState<MeiosDePagamento | null>(null)
   const [copied, setCopied] = useState(false)
 
   // Production panel
@@ -1392,13 +1393,10 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
     // Esta tela so precisa saber SE o pagamento esta configurado. Antes puxava o token
     // do Mercado Pago para dentro do navegador so para fazer um `!!` nele.
     supabase.rpc('house_payment_status', { p_house: house.id })
-      .then(r => {
-        const s = r.data?.[0] as { tem_pix?: boolean; provedores?: string[] } | undefined
-        // `provedores` e a lista dos gateways configurados nesta casa. Hoje so o
-        // Mercado Pago tem integracao; a lista existe para o proximo nao exigir
-        // mexer no formato do retorno.
-        setPayCfg({ pix: !!s?.tem_pix, mp: (s?.provedores ?? []).includes('mercadopago') })
-      })
+      // A leitura mora em lerMeiosDePagamento: esta tela lia um formato antigo
+      // (tem_pix/provedores) que a RPC nao devolve mais, e por isso avisava
+      // "sem meio de recebimento" mesmo com o Mercado Pago ativo.
+      .then(r => setPayCfg(lerMeiosDePagamento(r.data)))
     supabase.from('ticket_orders').select('*,ticket_batches(name,gender,price_cents)')
       .eq('event_id', ev.id).order('created_at', { ascending: false })
       .then(r => setOrders((r.data ?? []) as TicketOrder[]))
@@ -1658,7 +1656,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
   }
 
   function copyLink(ev: EventWithCounts) {
-    const url = `${window.location.origin}/e/${ev.id}`
+    const url = linkIngresso(ev.id)
     navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
 
@@ -4842,7 +4840,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
             {/* Share link */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 18 }}>
               <span style={{ color: C.mut, fontSize: 12, flex: 1, wordBreak: 'break-all' as const }}>
-                {window.location.origin}/e/{ticketEv.id}
+                {linkIngresso(ticketEv.id)}
               </span>
               <Btn onClick={() => copyLink(ticketEv)} small variant={copied ? 'secondary' : 'ghost'}>
                 {copied ? '✅ Copiado' : '📋 Copiar'}
@@ -4850,9 +4848,9 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
             </div>
 
             {/* Sem meio de pagamento o lote pago é criado mas o comprador não consegue concluir */}
-            {payCfg && !payCfg.pix && !payCfg.mp && (
+            {payCfg && !payCfg.recebe && (
               <div style={{ background: C.gold + '15', border: `1px solid ${C.gold}44`, borderRadius: 10, padding: '10px 14px', marginBottom: 14, color: C.gold, fontSize: 12, lineHeight: 1.5 }}>
-                ⚠️ Esta casa não tem <b>chave PIX</b> nem <b>Mercado Pago</b> configurado em Configurações.
+                ⚠️ Esta casa não tem <b>nenhum meio de recebimento</b> configurado em Configurações.
                 Lotes pagos vão aparecer no link, mas o comprador não conseguirá pagar. Lotes com preço 0 (grátis) funcionam normalmente.
               </div>
             )}
@@ -4917,7 +4915,7 @@ export function EventsPage({ house, role, allowedPages, onGoToReservas }: Props)
                   {/* Link direto do lote: abre a página pública já neste lote selecionado */}
                   <Btn small variant="ghost" title="Copiar link de venda deste lote"
                     onClick={() => {
-                      const url = `${window.location.origin}/e/${ticketEv?.id}?lote=${b.id}`
+                      const url = linkIngresso(ticketEv?.id, b.id)
                       navigator.clipboard.writeText(url)
                         .then(() => sT(setToast, `Link do lote "${b.name}" copiado`))
                         .catch(() => sT(setToast, 'Não foi possível copiar', 'error'))

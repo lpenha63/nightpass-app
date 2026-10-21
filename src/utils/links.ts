@@ -38,5 +38,12 @@ export const linkReserva = (token?: string | null) => token ? `${basePublica()}/
  */
 export const linkConvite = (token?: string | null) => token ? `${basePublica()}/c/${token}` : ''
 
+/**
+ * Página de venda de ingresso do evento. `lote` abre direto num lote.
+ * Vai para o comprador, entao segue a mesma regra de dominio dos outros.
+ */
+export const linkIngresso = (eventoId?: string | null, lote?: string | null) =>
+  eventoId ? `${basePublica()}/e/${eventoId}${lote ? `?lote=${lote}` : ''}` : ''
+
 /** Página de uma tarefa da equipe. Mesma regra do link de reserva. */
 export const linkTarefa = (token?: string | null) => token ? `${basePublica()}/t/${token}` : ''

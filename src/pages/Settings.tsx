@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { lerMeiosDePagamento } from '../utils/meiosDePagamento'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 import { Card, Toast, Btn } from '../components/ui'
@@ -332,15 +333,13 @@ export function SettingsPage({ house, session, sub, refreshSub }: Props) {
           mp_access_token: '',
         })
       }
-      const meios = (pagR.data ?? []) as Array<{ provider: string; prioridade: number }>
-      const ids = meios.map(m => m.provider)
-      setMeiosAtivos(ids)
-      setMpConfigurado(ids.includes('mercadopago'))
-      setAsaasConfigurado(ids.includes('asaas'))
-      // O principal e o de menor prioridade entre os gateways (o PIX manual e o
-      // ultimo recurso, nao concorre).
-      const gws = meios.filter(m => m.provider !== 'pix_manual').sort((a, b) => a.prioridade - b.prioridade)
-      setMeioPrincipal(gws[0]?.provider ?? null)
+      // Esta tela ja lia certo — passa a usar a leitura comum para que as tres
+      // nao voltem a divergir.
+      const meios = lerMeiosDePagamento(pagR.data)
+      setMeiosAtivos(meios.ids)
+      setMpConfigurado(meios.ids.includes('mercadopago'))
+      setAsaasConfigurado(meios.ids.includes('asaas'))
+      setMeioPrincipal(meios.principal)
       if (wr.data?.length) setWaConfig(wr.data[0])
       else setWaConfig({ ...WDEF, house_id: house.id })
       setLoading(false)

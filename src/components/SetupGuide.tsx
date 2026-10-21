@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { lerMeiosDePagamento } from '../utils/meiosDePagamento'
 import { supabase } from '../lib/supabase'
 import { C } from '../constants/theme'
 
@@ -40,9 +41,12 @@ export function SetupGuide({ houseId }: { houseId: string }) {
     ])
     const h = casaR.data
     const wa = waR.data
-    const pag = (pagR.data as Array<{ tem_pix?: boolean; provedores?: string[] }> | null)?.[0]
-    const mpOk = (pag?.provedores ?? []).includes('mercadopago')
-    const pixOk = !!pag?.tem_pix
+    // Mesmo erro que havia na aba Eventos: isto lia tem_pix/provedores, campos
+    // que a RPC nao devolve. O guia marcava pagamento como pendente numa casa
+    // que ja recebia.
+    const pag = lerMeiosDePagamento(pagR.data)
+    const mpOk = pag.gateway
+    const pixOk = pag.pix
 
     setPassos([
       {
