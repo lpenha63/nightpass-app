@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/api/manifest",
+      "destination": "/api/pwa?tipo=manifest"
+    },
+    {
+      "source": "/api/icone",
+      "destination": "/api/pwa?tipo=icone"
+    },
+    {
       "source": "/c/:token",
       "destination": "/convite.html"
     },
