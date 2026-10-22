@@ -2,13 +2,23 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmtCurrency } from '../utils/format'
 import QRCode from 'react-qr-code'
-import { NightPassBar } from './TicketPublic'
 import type { Event, TicketBatch, TicketOrder, Ticket } from '../types'
 
+/**
+ * Paleta CLARA, exclusiva desta pagina.
+ *
+ * O resto do NightPass e escuro — aqui nao. Quem abre esta pagina nao e a casa:
+ * e alguem que recebeu um link e vai digitar CPF e pagar, muitas vezes na rua,
+ * no sol, num aparelho qualquer. Fundo claro le melhor nessa cena e e o que a
+ * pessoa espera de uma pagina de pagamento.
+ *
+ * Os tons escuros foram recalculados para o fundo branco (o verde e o ambar do
+ * tema escuro dariam 2:1 aqui).
+ */
 const C = {
-  bg: '#0a0e1a', card: '#111827', brd: '#1e2736',
-  acc: '#3b82f6', grn: '#10b981', red: '#f87171',
-  gold: '#f59e0b', txt: '#f9fafb', mut: '#6b7280', sub: '#9ca3af',
+  bg: '#f4f5f7', card: '#ffffff', brd: '#e3e6ea',
+  acc: '#1d4ed8', grn: '#047857', red: '#be123c',
+  gold: '#a16207', txt: '#0d1420', mut: '#5b6878', sub: '#3d4857',
 }
 
 const STATUS_ORDER: Record<TicketOrder['payment_status'], { label: string; color: string }> = {
@@ -20,13 +30,38 @@ const STATUS_ORDER: Record<TicketOrder['payment_status'], { label: string; color
 const GENDER_LABEL: Record<string, string> = { male: '♂ Masculino', female: '♀ Feminino', both: 'Misto' }
 
 interface EventWithHouse extends Event {
-  // Só o nome. A chave PIX vem da resposta de /api/create-payment, nunca daqui —
-  // pedi-la no embed so a tornava publica para qualquer um com a chave anonima.
-  houses?: { name: string }
+  // Nome, logo e endereço: é o que o comprador precisa para saber ONDE é. A chave
+  // PIX nunca vem daqui — ela chega na resposta de /api/create-payment, e pedi-la
+  // no embed só a tornava pública para qualquer um com a chave anônima.
+  houses?: { name: string; logo_url?: string | null; address?: string | null; city?: string | null; state?: string | null }
+  /** Line-up sem os cachês — coluna gerada no banco, só leitura. */
+  artists_public?: Array<{ name?: string }> | null
 }
 interface BatchWithAvail extends TicketBatch { available: number }
 
 /** ***.456.789-** — o suficiente para a portaria conferir sem expor o documento inteiro */
+/**
+ * Ícones desenhados, um traço só (1.6), tamanho herdado do contexto.
+ * Antes a página usava 📅 🕙 🎵 — emoji muda de desenho a cada aparelho e some
+ * do alinhamento. Cinco ícones resolvem tudo que esta página precisa.
+ */
+function Icone({ d, size = 16 }: { d: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      style={{ flexShrink: 0 }}>
+      <path d={d} />
+    </svg>
+  )
+}
+const ICONE = {
+  calendario: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+  relogio: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+  local: 'M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  musica: 'M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
+  seta: 'M5 12h14M13 6l6 6-6 6',
+}
+
 function maskCpf(cpf: string) {
   const d = cpf.replace(/\D/g, '')
   if (d.length < 11) return cpf
@@ -67,7 +102,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
     // Colunas explicitas em vez de '*': a tabela guarda cache de artista, notas internas
     // de producao, termos de parceria e custos. Com select('*') a pagina de compra
     // baixava tudo isso para o navegador de qualquer visitante.
-    supabase.from('events').select('id,created_at,updated_at,house_id,name,event_date,start_time,end_time,genre,flyer_url,capacity,status,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,price_male_list_early_cents,price_female_list_early_cents,list_cutoff_time,promotions,promotions_list,attractions,artists_public,house_list_enabled,birthday_list_enabled,is_operation,houses(name)').eq('id', eventId).single()
+    supabase.from('events').select('id,created_at,updated_at,house_id,name,event_date,start_time,end_time,genre,flyer_url,capacity,status,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,price_male_list_early_cents,price_female_list_early_cents,list_cutoff_time,promotions,promotions_list,attractions,artists_public,house_list_enabled,birthday_list_enabled,is_operation,houses(name,logo_url,address,city,state)').eq('id', eventId).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
         // Via `unknown`: com colunas explicitas o supabase-js tipa o embed `houses`
@@ -181,7 +216,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
 
   const inp = {
     style: {
-      width: '100%', background: '#1f2937', border: `1px solid ${C.brd}`,
+      width: '100%', background: '#fbfbfc', border: `1px solid ${C.brd}`,
       borderRadius: 10, padding: '12px 14px', color: C.txt, fontSize: 15,
       fontFamily: 'inherit', boxSizing: 'border-box' as const, outline: 'none',
     },
@@ -204,28 +239,48 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
-      <NightPassBar />
-      {/* Hero */}
+      {/* Barra propria, clara. O NightPassBar e escuro e pertence a pagina do
+          ingresso emitido — importa-lo aqui deixaria uma faixa preta no topo. */}
       <div style={{
-        background: event.flyer_url
-          ? `linear-gradient(to bottom, rgba(10,14,26,0.3) 0%, rgba(10,14,26,1) 100%), url(${event.flyer_url}) center/cover`
-          : `linear-gradient(135deg, #1d4ed8, #0a0e1a)`,
-        padding: '48px 20px 32px',
-        textAlign: 'center',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        padding: '12px 16px', background: C.card, borderBottom: `1px solid ${C.brd}`,
       }}>
+        <span style={{ color: C.txt, fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em' }}>
+          NightPass <span style={{ color: C.acc }}>Tickets</span>
+        </span>
+        <span style={{ color: C.mut, fontSize: 11.5 }}>· compra segura</span>
+      </div>
+      {/* Hero */}
+      {/* O flyer é o argumento de venda: entra INTEIRO, sem corte e sem a cópia
+          desfocada por trás. O cartaz já foi desenhado por alguém — a página não
+          precisa competir com ele. */}
+      <div style={{ padding: '20px 20px 0' }}>
         <div style={{ maxWidth: 480, margin: '0 auto' }}>
           {event.flyer_url && (
-            <img loading="lazy" decoding="async" src={event.flyer_url} alt={event.name}
-              style={{ width: '100%', maxWidth: 300, borderRadius: 16, marginBottom: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }} />
+            <img loading="lazy" decoding="async" src={event.flyer_url} alt={`Cartaz de ${event.name}`}
+              style={{
+                width: '100%', display: 'block', borderRadius: 14,
+                border: `1px solid ${C.brd}`, boxShadow: '0 10px 28px rgba(13,20,32,0.10)',
+              }} />
           )}
-          <div style={{ color: C.acc, fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
-            {event.houses?.name ?? ''}
+          <h1 style={{
+            color: C.txt, fontSize: 27, fontWeight: 800, lineHeight: 1.18,
+            letterSpacing: '-0.025em', margin: '20px 0 10px', textWrap: 'balance' as const,
+          }}>
+            {event.name}
+          </h1>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', color: C.sub, fontSize: 14 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textTransform: 'capitalize' as const }}>
+              <Icone d={ICONE.calendario} />{fdate(event.event_date)}
+            </span>
+            {event.start_time && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Icone d={ICONE.relogio} />
+                Abertura {event.start_time.slice(0, 5)}
+                {event.end_time ? ` — ${event.end_time.slice(0, 5)}` : ''}
+              </span>
+            )}
           </div>
-          <h1 style={{ color: C.txt, fontSize: 32, fontWeight: 900, margin: '0 0 10px', letterSpacing: '-0.02em' }}>{event.name}</h1>
-          <div style={{ color: C.sub, fontSize: 14, marginBottom: 4 }}>📅 {fdate(event.event_date)}</div>
-          {event.start_time && <div style={{ color: C.sub, fontSize: 14, marginBottom: 4 }}>🕙 {event.start_time.slice(0, 5)}{event.end_time ? ` — ${event.end_time.slice(0, 5)}` : ''}</div>}
-          {event.genre && <div style={{ color: C.acc, fontSize: 13, fontWeight: 600, marginTop: 8 }}>🎵 {event.genre}</div>}
-          {event.attractions && <div style={{ color: C.sub, fontSize: 13, marginTop: 6 }}>🎤 {event.attractions}</div>}
         </div>
       </div>
 
@@ -239,7 +294,73 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
                 🎉 {event.promotions}
               </div>
             )}
-            <h2 style={{ color: C.txt, fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Escolha seu ingresso</h2>
+            {/* ONDE É. Era o que mais faltava: a página dizia a data e o preço e
+                deixava o comprador sem saber o endereço. */}
+            {(() => {
+              const casa = event.houses
+              if (!casa?.name) return null
+              const partes = [casa.address, [casa.city, casa.state].filter(Boolean).join(' - ')].filter(Boolean)
+              const endereco = partes.join(' · ')
+              const mapa = endereco
+                ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${casa.name} ${endereco}`)}`
+                : null
+              return (
+                <section style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '16px 18px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', gap: 13, alignItems: 'flex-start' }}>
+                    {casa.logo_url && (
+                      <img loading="lazy" decoding="async" src={casa.logo_url} alt=""
+                        style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'cover', border: `1px solid ${C.brd}`, flexShrink: 0 }} />
+                    )}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ color: C.txt, fontWeight: 700, fontSize: 15.5 }}>{casa.name}</div>
+                      {endereco && (
+                        <div style={{ color: C.mut, fontSize: 13, marginTop: 3, lineHeight: 1.5 }}>{endereco}</div>
+                      )}
+                      {mapa && (
+                        <a href={mapa} target="_blank" rel="noopener noreferrer"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 9, color: C.acc, fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+                          <Icone d={ICONE.local} size={15} />Ver no mapa
+                          <Icone d={ICONE.seta} size={14} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )
+            })()}
+
+            {/* Quem toca. Sai de `artists_public`, a versão do line-up sem os
+                cachês — a lista com valores nunca desce para o navegador. */}
+            {(() => {
+              const crus: unknown[] = Array.isArray(event.artists_public) ? event.artists_public : []
+              const nomes = crus
+                .map((a: unknown) => (typeof a === 'string' ? a : (a as { name?: string })?.name))
+                .filter((n: unknown): n is string => typeof n === 'string' && n.trim() !== '')
+              const avulsas = (event.attractions ?? '').trim()
+              if (nomes.length === 0 && !avulsas && !event.genre) return null
+              return (
+                <section style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '16px 18px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: C.mut, fontSize: 11.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' as const, marginBottom: 10 }}>
+                    <Icone d={ICONE.musica} size={14} />
+                    {event.genre ? event.genre : 'Atrações'}
+                  </div>
+                  {nomes.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                      {nomes.map((n, i) => (
+                        <span key={i} style={{ background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 999, padding: '5px 12px', color: C.sub, fontSize: 13, fontWeight: 600 }}>
+                          {n}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {avulsas && (
+                    <div style={{ color: C.sub, fontSize: 13.5, lineHeight: 1.55, marginTop: nomes.length > 0 ? 10 : 0 }}>{avulsas}</div>
+                  )}
+                </section>
+              )
+            })()}
+
+            <h2 style={{ color: C.txt, fontSize: 17, fontWeight: 800, margin: '22px 0 12px', letterSpacing: '-0.01em' }}>Ingressos</h2>
             {batches.length === 0
               ? <div style={{ background: C.card, borderRadius: 16, padding: 32, textAlign: 'center', border: `1px solid ${C.brd}` }}>
                   <div style={{ fontSize: 36, marginBottom: 12 }}>🎫</div>
