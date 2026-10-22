@@ -1,25 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
+import { NightPassBar } from './TicketPublic'
+import { CP as C } from '../constants/temaPublico'
 import { supabase } from '../lib/supabase'
 import { fmtCurrency } from '../utils/format'
 import QRCode from 'react-qr-code'
 import type { Event, TicketBatch, TicketOrder, Ticket } from '../types'
 
-/**
- * Paleta CLARA, exclusiva desta pagina.
- *
- * O resto do NightPass e escuro — aqui nao. Quem abre esta pagina nao e a casa:
- * e alguem que recebeu um link e vai digitar CPF e pagar, muitas vezes na rua,
- * no sol, num aparelho qualquer. Fundo claro le melhor nessa cena e e o que a
- * pessoa espera de uma pagina de pagamento.
- *
- * Os tons escuros foram recalculados para o fundo branco (o verde e o ambar do
- * tema escuro dariam 2:1 aqui).
- */
-const C = {
-  bg: '#f4f5f7', card: '#ffffff', brd: '#e3e6ea',
-  acc: '#1d4ed8', grn: '#047857', red: '#be123c',
-  gold: '#a16207', txt: '#0d1420', mut: '#5b6878', sub: '#3d4857',
-}
 
 const STATUS_ORDER: Record<TicketOrder['payment_status'], { label: string; color: string }> = {
   pending:   { label: '⏳ Aguardando pagamento', color: C.gold },
@@ -242,17 +228,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
-      {/* Barra propria, clara. O NightPassBar e escuro e pertence a pagina do
-          ingresso emitido — importa-lo aqui deixaria uma faixa preta no topo. */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-        padding: '12px 16px', background: C.card, borderBottom: `1px solid ${C.brd}`,
-      }}>
-        <span style={{ color: C.txt, fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em' }}>
-          NightPass <span style={{ color: C.acc }}>Tickets</span>
-        </span>
-        <span style={{ color: C.mut, fontSize: 11.5 }}>· compra segura</span>
-      </div>
+      <NightPassBar />
       {/* Hero */}
       {/* O flyer é o argumento de venda: entra INTEIRO, sem corte e sem a cópia
           desfocada por trás. O cartaz já foi desenhado por alguém — a página não
@@ -399,9 +375,16 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
                       {taxaUnit(b) > 0 && (
                         <div style={{ color: C.mut, fontSize: 11, marginTop: 1 }}>+ {fmtCurrency(taxaUnit(b))} taxa</div>
                       )}
-                      <div style={{ color: b.available > 5 ? C.grn : b.available > 0 ? C.gold : C.red, fontSize: 11, fontWeight: 600, marginTop: 2 }}>
-                        {b.available === 0 ? 'Esgotado' : b.available <= 10 ? `Últimas ${b.available}` : `${b.available} disponíveis`}
-                      </div>
+                      {/* Quantidade so aparece quando esta ACABANDO.
+                          "96 disponiveis" convida a deixar para depois; esconder o
+                          numero tira esse freio. Mas o aviso de fim de estoque
+                          empurra a compra — esse fica, sem numero: a pessoa nao
+                          precisa saber se sao 3 ou 9, precisa saber que acaba. */}
+                      {b.available === 0 ? (
+                        <div style={{ color: C.red, fontSize: 11, fontWeight: 700, marginTop: 2 }}>Esgotado</div>
+                      ) : b.available <= 10 ? (
+                        <div style={{ color: C.gold, fontSize: 11, fontWeight: 700, marginTop: 2 }}>Últimas unidades</div>
+                      ) : null}
                     </div>
                   </div>
                 </div>

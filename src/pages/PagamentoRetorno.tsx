@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { C } from '../constants/theme'
+import { CP as C } from '../constants/temaPublico'
 import { fmtCurrency } from '../utils/format'
 import { NightPassBar } from './TicketPublic'
 

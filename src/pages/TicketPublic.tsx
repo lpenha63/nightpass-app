@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'react-qr-code'
 import { supabase } from '../lib/supabase'
-import { C } from '../constants/theme'
+import { CP as C } from '../constants/temaPublico'
 
 // Recuperação do ingresso: /ingresso/[token]
 // Antes o QR só existia na tela de confirmação da compra ("salve essa tela!") — fechou o
