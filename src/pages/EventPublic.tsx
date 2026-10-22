@@ -211,7 +211,10 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
   }
 
   function fdate(d: string) {
-    return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+    const s = new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+    // Só a primeira letra. `text-transform: capitalize` escrevia "24 De Outubro
+    // De 2026" — em português as preposições ficam minúsculas.
+    return s.charAt(0).toUpperCase() + s.slice(1)
   }
 
   const inp = {
@@ -270,7 +273,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
             {event.name}
           </h1>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', color: C.sub, fontSize: 14 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textTransform: 'capitalize' as const }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <Icone d={ICONE.calendario} />{fdate(event.event_date)}
             </span>
             {event.start_time && (
@@ -278,6 +281,13 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
                 <Icone d={ICONE.relogio} />
                 Abertura {event.start_time.slice(0, 5)}
                 {event.end_time ? ` — ${event.end_time.slice(0, 5)}` : ''}
+              </span>
+            )}
+            {/* O gênero é uma etiqueta, não uma seção: sozinho num bloco próprio
+                ele parecia um "Atrações" vazio. */}
+            {event.genre && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: C.acc, fontWeight: 600 }}>
+                <Icone d={ICONE.musica} />{event.genre}
               </span>
             )}
           </div>
@@ -337,12 +347,13 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
                 .map((a: unknown) => (typeof a === 'string' ? a : (a as { name?: string })?.name))
                 .filter((n: unknown): n is string => typeof n === 'string' && n.trim() !== '')
               const avulsas = (event.attractions ?? '').trim()
-              if (nomes.length === 0 && !avulsas && !event.genre) return null
+              // Sem nomes e sem texto não há o que mostrar. Antes bastava ter
+              // gênero e a seção aparecia vazia, só com a etiqueta.
+              if (nomes.length === 0 && !avulsas) return null
               return (
                 <section style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 14, padding: '16px 18px', marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: C.mut, fontSize: 11.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' as const, marginBottom: 10 }}>
-                    <Icone d={ICONE.musica} size={14} />
-                    {event.genre ? event.genre : 'Atrações'}
+                    <Icone d={ICONE.musica} size={14} />Atrações
                   </div>
                   {nomes.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
