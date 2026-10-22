@@ -109,8 +109,11 @@ export function TicketPublicPage({ token }: { token: string }) {
         <div style={{ textAlign: 'center', marginBottom: 18 }}>
           <div style={{ color: C.mut, fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>{tk.house_name.toUpperCase()}</div>
           <div style={{ color: C.txt, fontSize: 22, fontWeight: 900, marginTop: 4 }}>{tk.event_name}</div>
-          <div style={{ color: C.sub, fontSize: 14, marginTop: 4, textTransform: 'capitalize' as const }}>
-            {dataFmt}{tk.start_time ? ` · ${tk.start_time.slice(0, 5)}` : ''}
+          {/* Sem capitalize: ele poe maiuscula em toda palavra e a data saia
+              "24 De Outubro ... As 00:00". So a primeira letra. */}
+          <div style={{ color: C.sub, fontSize: 14, marginTop: 4 }}>
+            {dataFmt.charAt(0).toUpperCase() + dataFmt.slice(1)}
+            {tk.start_time ? ` · ${tk.start_time.slice(0, 5)}` : ''}
             {tk.end_time ? ` às ${tk.end_time.slice(0, 5)}` : ''}
           </div>
         </div>
