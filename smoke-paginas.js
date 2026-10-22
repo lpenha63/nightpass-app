@@ -81,12 +81,18 @@ const CHECAGENS = [
   {
     pagina: '/e/…',
     o_que: 'página de compra de ingresso',
-    path: `/events?select=${COLS_COMPRA},houses(name,pix_key,pix_holder)&id=eq.${FALSO}`,
+    path: `/events?select=${COLS_COMPRA},houses(name)&id=eq.${FALSO}`,
   },
   {
     pagina: '/e/… (lotes)',
     o_que: 'lotes à venda',
     path: `/ticket_batches?select=*&event_id=eq.${FALSO}`,
+  },
+  {
+    pagina: 'convite.html',
+    o_que: 'convite do convidado (pede endereço da casa)',
+    path: `/reservations?select=*,houses(name,logo_url,address,city,state)&token=eq.${FALSO}`,
+    token: FALSO,
   },
   {
     pagina: 'lista.html',

@@ -20,7 +20,9 @@ const STATUS_ORDER: Record<TicketOrder['payment_status'], { label: string; color
 const GENDER_LABEL: Record<string, string> = { male: '♂ Masculino', female: '♀ Feminino', both: 'Misto' }
 
 interface EventWithHouse extends Event {
-  houses?: { name: string; pix_key?: string; pix_holder?: string }
+  // Só o nome. A chave PIX vem da resposta de /api/create-payment, nunca daqui —
+  // pedi-la no embed so a tornava publica para qualquer um com a chave anonima.
+  houses?: { name: string }
 }
 interface BatchWithAvail extends TicketBatch { available: number }
 
@@ -65,7 +67,7 @@ export function EventPublicPage({ eventId }: { eventId: string }) {
     // Colunas explicitas em vez de '*': a tabela guarda cache de artista, notas internas
     // de producao, termos de parceria e custos. Com select('*') a pagina de compra
     // baixava tudo isso para o navegador de qualquer visitante.
-    supabase.from('events').select('id,created_at,updated_at,house_id,name,event_date,start_time,end_time,genre,flyer_url,capacity,status,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,price_male_list_early_cents,price_female_list_early_cents,list_cutoff_time,promotions,promotions_list,attractions,artists_public,house_list_enabled,birthday_list_enabled,is_operation,houses(name,pix_key,pix_holder)').eq('id', eventId).single()
+    supabase.from('events').select('id,created_at,updated_at,house_id,name,event_date,start_time,end_time,genre,flyer_url,capacity,status,price_male_cents,price_female_cents,price_male_list_cents,price_female_list_cents,price_male_list_early_cents,price_female_list_early_cents,list_cutoff_time,promotions,promotions_list,attractions,artists_public,house_list_enabled,birthday_list_enabled,is_operation,houses(name)').eq('id', eventId).single()
       .then(r => {
         if (r.error || !r.data) { setNotFound(true); setLoading(false); return }
         // Via `unknown`: com colunas explicitas o supabase-js tipa o embed `houses`
